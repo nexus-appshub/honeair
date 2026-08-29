@@ -1,0 +1,3 @@
+# Treat Android Keystore files as strict binary files to prevent Git line-ending corruption (LF/CRLF conversion)
+*.jks binary
+*.keystore binary

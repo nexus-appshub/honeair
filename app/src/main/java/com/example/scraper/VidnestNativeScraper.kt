@@ -1,0 +1,358 @@
+package com.example.scraper
+
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+
+data class VidnestProviderInfo(
+    val key: String,
+    val displayName: String,
+    val pathSegment: String,
+    val defaultReferer: String = "https://vidnest.fun/"
+)
+
+object VidnestNativeScraper {
+    private const val TAG = "VidnestNativeScraper"
+    private const val ALPHABET = "RB0fpH8ZEyVLkv7c2i6MAJ5u3IKFDxlS1NTsnGaqmXYdUrtzjwObCgQP94hoeW+/="
+    private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+
+    val PROVIDERS = listOf(
+        VidnestProviderInfo("lamda", "Lamda (Ultra)", "allmovies", "https://vidnest.fun/"),
+        VidnestProviderInfo("filxer", "Filxer (Fast)", "rogflix", "https://rogflix.fun/"),
+        VidnestProviderInfo("zeta", "Zeta (NextGen)", "nextgencloudfabric", "https://nextgencloudfabric.com/"),
+        VidnestProviderInfo("ophim", "Ophim (HD)", "klikxxi", "https://vidnest.fun/"),
+        VidnestProviderInfo("prime", "Prime (VidRock)", "vidrock", "https://vidrock.net/"),
+        VidnestProviderInfo("beta", "Beta (VidXYZ)", "vidxyz", "https://moviesapi.to/"),
+        VidnestProviderInfo("sigma", "Sigma (Holly)", "hollymoviehd", "https://vidnest.fun/"),
+        VidnestProviderInfo("catflix", "Catflix (Buzz)", "buzz", "https://ployan.me/"),
+        VidnestProviderInfo("alfa", "Alfa (Videasy)", "videasy", "https://tiktoks.animanga.fun/"),
+        VidnestProviderInfo("gama", "Gama (VidZee)", "vidzee", "https://s1.streamflixapi.site/"),
+        VidnestProviderInfo("hexa", "Hexa (VidLink)", "vidlink", "https://vidlink.pro/"),
+        VidnestProviderInfo("delta", "Delta (Direct)", "allmovies", "https://vidnest.fun/")
+    )
+
+    private val BASE_URLS = listOf(
+        "https://new.vidnest.fun",
+        "https://vidnest.fun"
+    )
+
+    private val httpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(6, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
+    }
+
+    /**
+     * Decodes custom Base64 encrypted cipher returned by Vidnest servers.
+     */
+    fun decryptCipher(dataStr: String): String {
+        try {
+            val trimmed = dataStr.trim().trim('"', '\'')
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                return trimmed
+            }
+
+            val charMap = IntArray(256) { 64 }
+            for (i in ALPHABET.indices) {
+                charMap[ALPHABET[i].code] = i
+            }
+
+            val bytesOut = java.io.ByteArrayOutputStream()
+            val len = trimmed.length
+            var t = 0
+            while (t < len) {
+                val end = minOf(t + 4, len)
+                var chunk = trimmed.substring(t, end)
+                while (chunk.length < 4) {
+                    chunk += "="
+                }
+
+                val l0 = charMap[chunk[0].code]
+                val l1 = charMap[chunk[1].code]
+                val l2 = charMap[chunk[2].code]
+                val l3 = charMap[chunk[3].code]
+
+                val b0 = ((l0 shl 2) or (l1 shr 4)) and 0xFF
+                bytesOut.write(b0)
+
+                if (l2 != 64) {
+                    val b1 = (((l1 and 15) shl 4) or (l2 shr 2)) and 0xFF
+                    bytesOut.write(b1)
+                }
+
+                if (l3 != 64) {
+                    val b2 = (((l2 and 3) shl 6) or l3) and 0xFF
+                    bytesOut.write(b2)
+                }
+
+                t += 4
+            }
+
+            return String(bytesOut.toByteArray(), Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to decrypt Vidnest cipher: ${e.message}")
+            return ""
+        }
+    }
+
+    suspend fun extractStreamFromProvider(
+        providerKey: String,
+        tmdbId: String,
+        isTv: Boolean = false,
+        season: Int = 1,
+        episode: Int = 1
+    ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        val provider = PROVIDERS.find { it.key == providerKey } ?: PROVIDERS.first()
+        val typeSegment = if (isTv) "tv" else "movie"
+        val querySuffix = if (isTv) "$tmdbId/$season/$episode" else tmdbId
+
+        for (baseUrl in BASE_URLS) {
+            val endpointUrl = "$baseUrl/${provider.pathSegment}/$typeSegment/$querySuffix"
+            try {
+                val request = Request.Builder()
+                    .url(endpointUrl)
+                    .header("User-Agent", DEFAULT_UA)
+                    .header("Referer", "https://vidnest.fun/")
+                    .header("Origin", "https://vidnest.fun")
+                    .header("Accept", "application/json, text/plain, */*")
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                val bodyStr = response.body?.string() ?: ""
+
+                if (response.isSuccessful && bodyStr.isNotBlank()) {
+                    var decryptedPayload = bodyStr
+                    if (bodyStr.contains("\"data\"")) {
+                        try {
+                            val rootJson = JSONObject(bodyStr)
+                            val encData = rootJson.optString("data", "")
+                            if (encData.isNotBlank()) {
+                                val decrypted = decryptCipher(encData)
+                                if (decrypted.isNotBlank()) {
+                                    decryptedPayload = decrypted
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    } else if (!bodyStr.trim().startsWith("{") && !bodyStr.trim().startsWith("[")) {
+                        val decrypted = decryptCipher(bodyStr)
+                        if (decrypted.isNotBlank()) {
+                            decryptedPayload = decrypted
+                        }
+                    }
+
+                    if (decryptedPayload.isNotBlank()) {
+                        val streamResult = parseStreamPayload(decryptedPayload, provider)
+                        if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
+                            Log.d(TAG, "Successfully extracted Vidnest stream from [${provider.displayName}]: ${streamResult.streamUrl}")
+                            return@withContext streamResult
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Vidnest provider [${provider.displayName}] error on $endpointUrl: ${e.message}")
+            }
+        }
+        null
+    }
+
+    /**
+     * HIGH POWER CONCURRENT SCRAPER:
+     * Scrapes all VidNest sub-providers simultaneously in parallel.
+     * Evaluates and returns the best and fastest extracted stream link.
+     */
+    suspend fun extractStream(
+        tmdbId: String,
+        isTv: Boolean = false,
+        season: Int = 1,
+        episode: Int = 1
+    ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        coroutineScope {
+            Log.d(TAG, "Starting Concurrent High-Power Fast Scraping across ${PROVIDERS.size} VidNest sub-providers for TMDB: $tmdbId")
+            val channel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(PROVIDERS.size)
+            
+            // Launch all sub-server providers concurrently
+            val jobs = PROVIDERS.map { provider ->
+                launch(Dispatchers.IO) {
+                    try {
+                        val result = extractStreamFromProvider(provider.key, tmdbId, isTv, season, episode)
+                        if (result != null && result.streamUrl.isNotBlank()) {
+                            channel.trySend(result)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+
+            var best: ScrapedStreamResult? = null
+            try {
+                best = kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                    channel.receive()
+                }
+            } catch (_: Exception) {}
+
+            jobs.forEach { it.cancel() }
+            if (best != null) {
+                Log.d(TAG, "Winning VidNest provider resolved direct stream: ${best.streamUrl}")
+                return@coroutineScope best
+            }
+            null
+        }
+    }
+
+    /**
+     * Extract all working streams mapped by provider key for multi-server picker.
+     */
+    suspend fun extractAllWorkingStreams(
+        tmdbId: String,
+        isTv: Boolean = false,
+        season: Int = 1,
+        episode: Int = 1
+    ): Map<String, ScrapedStreamResult> = withContext(Dispatchers.IO) {
+        coroutineScope {
+            val resultMap = ConcurrentHashMap<String, ScrapedStreamResult>()
+            val deferredTasks = PROVIDERS.map { provider ->
+                async(Dispatchers.IO) {
+                    val res = extractStreamFromProvider(provider.key, tmdbId, isTv, season, episode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        resultMap[provider.key] = res
+                    }
+                }
+            }
+            deferredTasks.awaitAll()
+            resultMap
+        }
+    }
+
+    private fun parseStreamPayload(payload: String, provider: VidnestProviderInfo): ScrapedStreamResult? {
+        try {
+            val json = JSONObject(payload)
+            var extractedUrl = ""
+            val headersMap = mutableMapOf<String, String>()
+
+            // 1. Direct "url" field (e.g. alfa, catflix, filxer, zeta)
+            if (json.has("url") && json.optString("url").isNotBlank()) {
+                extractedUrl = json.optString("url")
+            }
+
+            // 2. Nested "data" -> "stream" -> "playlist" (e.g. hexa / vidlink)
+            if (extractedUrl.isBlank() && json.has("data")) {
+                val dataObj = json.optJSONObject("data")
+                val streamObj = dataObj?.optJSONObject("stream")
+                val playlist = streamObj?.optString("playlist", "") ?: ""
+                if (playlist.isNotBlank()) {
+                    extractedUrl = playlist
+                }
+            }
+
+            // 3. "sources" array (e.g. prime, ophim, catflix all_urls)
+            if (extractedUrl.isBlank() && json.has("sources")) {
+                val sourcesArr = json.optJSONArray("sources")
+                if (sourcesArr != null && sourcesArr.length() > 0) {
+                    for (i in 0 until sourcesArr.length()) {
+                        val srcObj = sourcesArr.optJSONObject(i) ?: continue
+                        val url = srcObj.optString("url", "")
+                        if (url.isNotBlank()) {
+                            extractedUrl = url
+                            val srcHeaders = srcObj.optJSONObject("headers")
+                            if (srcHeaders != null) {
+                                val keys = srcHeaders.keys()
+                                while (keys.hasNext()) {
+                                    val k = keys.next()
+                                    headersMap[k] = srcHeaders.optString(k)
+                                }
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+
+            // 4. "streams" array (e.g. gama, beta, sigma, lamda, delta)
+            if (extractedUrl.isBlank() && json.has("streams")) {
+                val streamsArr = json.optJSONArray("streams")
+                if (streamsArr != null && streamsArr.length() > 0) {
+                    for (i in 0 until streamsArr.length()) {
+                        val streamObj = streamsArr.optJSONObject(i) ?: continue
+                        val url = streamObj.optString("url", "")
+                        if (url.isNotBlank()) {
+                            extractedUrl = url
+                            val streamHeaders = streamObj.optJSONObject("headers")
+                            if (streamHeaders != null) {
+                                val keys = streamHeaders.keys()
+                                while (keys.hasNext()) {
+                                    val key = keys.next()
+                                    headersMap[key] = streamHeaders.optString(key)
+                                }
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+
+            // 5. "all_urls" array fallback
+            if (extractedUrl.isBlank() && json.has("all_urls")) {
+                val allUrlsArr = json.optJSONArray("all_urls")
+                if (allUrlsArr != null && allUrlsArr.length() > 0) {
+                    for (i in 0 until allUrlsArr.length()) {
+                        val u = allUrlsArr.optString(i, "")
+                        if (u.isNotBlank()) {
+                            extractedUrl = u
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (extractedUrl.isBlank()) return null
+
+            // Clean URL formatting
+            extractedUrl = extractedUrl.trim().replace("\\/", "/")
+
+            // Parse root headers if present
+            if (json.has("headers")) {
+                val rootHeaders = json.optJSONObject("headers")
+                if (rootHeaders != null) {
+                    val keys = rootHeaders.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        headersMap[key] = rootHeaders.optString(key)
+                    }
+                }
+            }
+
+            // Ensure essential headers exist for playback
+            if (!headersMap.containsKey("User-Agent")) {
+                headersMap["User-Agent"] = DEFAULT_UA
+            }
+            if (!headersMap.containsKey("Referer")) {
+                headersMap["Referer"] = provider.defaultReferer
+            }
+            if (!headersMap.containsKey("Origin")) {
+                headersMap["Origin"] = "https://vidnest.fun"
+            }
+
+            val referer = headersMap["Referer"] ?: provider.defaultReferer
+
+            return ScrapedStreamResult(
+                streamUrl = extractedUrl,
+                headers = headersMap,
+                referer = referer
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing stream payload: ${e.message}")
+            return null
+        }
+    }
+}

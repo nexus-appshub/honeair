@@ -1,0 +1,21 @@
+--- app/src/main/java/com/example/ui/components/ExoPlayerView.kt
++++ app/src/main/java/com/example/ui/components/ExoPlayerView.kt
+@@ -95,6 +95,14 @@
+             .setReadTimeoutMs(15000)
+ 
+         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpDataSourceFactory)
+         
++        // Lower buffer sizes for low RAM devices to increase smoothness and prevent OOM
++        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
++            .setBufferDurationsMs(
++                15000, // minBufferMs
++                30000, // maxBufferMs
++                1500,  // bufferForPlaybackMs
++                3000   // bufferForPlaybackAfterRebufferMs
++            ).build()
++
+         val player = ExoPlayer.Builder(context)
+             .setMediaSourceFactory(mediaSourceFactory)
++            .setLoadControl(loadControl)
+             .setSeekBackIncrementMs(10000)
+             .setSeekForwardIncrementMs(10000)

@@ -1,0 +1,8 @@
+{
+  "name": "Home Air ",
+  "description": "Futuristic IPTV player with neon visuals, HD streaming, and seamless global scalability for an immersive entertainment experience.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
