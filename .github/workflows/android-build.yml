@@ -5,6 +5,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,18 +46,39 @@ jobs:
         RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
-    - name: Generate Temporary Download Link
+    - name: Generate Direct Download Links
       run: |
         APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
-        echo "Uploading $APK_FILE to file.io..."
-        curl -F "file=@$APK_FILE" https://file.io > download_url.txt
-        echo "------------------------------------------------"
-        echo "DOWNLOAD LINK: $(cat download_url.txt | grep -o 'https://file.io/[a-zA-Z0-9]*')"
-        echo "------------------------------------------------"
+        echo "=== UPLOADING APK FOR DIRECT DOWNLOAD ==="
+        
+        # Upload to tmpfiles.org
+        TMP_URL=$(curl -s -F "file=@$APK_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
+        
+        # Upload to file.io
+        FILEIO_URL=$(curl -s -F "file=@$APK_FILE" https://file.io | grep -o 'https://file.io/[a-zA-Z0-9]*' || true)
+        
+        echo "================================================="
+        echo "DIRECT DOWNLOAD LINK 1 (tmpfiles): $TMP_URL"
+        echo "DIRECT DOWNLOAD LINK 2 (file.io): $FILEIO_URL"
+        echo "================================================="
+
+    - name: Publish to GitHub Releases (Unlimited Storage)
+      uses: softprops/action-gh-release@v2
+      if: success()
+      with:
+        tag_name: "v4.6.7-build-${{ github.run_number }}"
+        name: "Home Air TV Release v4.6.7 (Build #${{ github.run_number }})"
+        body: "Automated Signed Release APK with package `com.homeairtv.xubilas`."
+        files: app/build/outputs/apk/release/*.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
+      continue-on-error: true
       with:
         name: Fast-Release-APK
         path: app/build/outputs/apk/release/*.apk
         retention-days: 1
+
