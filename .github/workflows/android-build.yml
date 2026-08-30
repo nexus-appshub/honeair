@@ -4,7 +4,6 @@ on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
-  workflow_dispatch:
 
 jobs:
   build:
@@ -49,3 +48,4 @@ jobs:
       with:
         name: Fast-Release-APK
         path: app/build/outputs/apk/release/*.apk
+        retention-days: 1
