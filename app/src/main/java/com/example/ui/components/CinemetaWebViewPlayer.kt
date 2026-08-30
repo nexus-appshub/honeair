@@ -1095,20 +1095,6 @@ fun CinemetaWebViewPlayer(
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-
-                            // Search Icon Button (Moved from bottom search bar to header)
-                            IconButton(
-                                onClick = { isSearchExpanded = true },
-                                modifier = Modifier
-                                    .size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search Related",
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
                         }
                     }
                 }
