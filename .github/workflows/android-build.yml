@@ -46,10 +46,10 @@ jobs:
     - name: Generate Temporary Download Link
       run: |
         APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
-        echo "Uploading $APK_FILE to bashupload.com..."
-        curl https://bashupload.com/$(basename $APK_FILE) --data-binary @"$APK_FILE" > download_url.txt
+        echo "Uploading $APK_FILE to file.io..."
+        curl -F "file=@$APK_FILE" https://file.io > download_url.txt
         echo "------------------------------------------------"
-        echo "DOWNLOAD LINK: $(cat download_url.txt)"
+        echo "DOWNLOAD LINK: $(cat download_url.txt | grep -o 'https://file.io/[a-zA-Z0-9]*')"
         echo "------------------------------------------------"
 
     - name: Upload APK Artifact
