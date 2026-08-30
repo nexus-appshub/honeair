@@ -278,10 +278,10 @@ fun CinemetaWebViewPlayer(
             true
         } else if (isExplicitMovieInDetail) {
             false
-        } else if (t == "movie" || itemType == "movie") {
-            false
         } else if (t == "series" || t == "tv" || itemType == "series" || itemType == "tv") {
             true
+        } else if (t == "movie" || itemType == "movie") {
+            false
         } else {
             cat.contains("series", ignoreCase = true) || cat.contains("tv show", ignoreCase = true) ||
             cat.contains("natok", ignoreCase = true) || isEpisodic
@@ -293,20 +293,20 @@ fun CinemetaWebViewPlayer(
     val isAnime = remember(currentMediaItem, title, type) {
         val id = currentMediaItem?.id ?: ""
         val cat = currentMediaItem?.category?.lowercase() ?: ""
-        val t = (currentMediaItem?.title ?: title).lowercase()
-        id.contains("anikoto", ignoreCase = true) ||
+        val t = (currentMediaItem?.title ?: title).lowercase().trim()
+        id.startsWith("anikoto", ignoreCase = true) ||
         cat.contains("anime") || type.equals("anime", ignoreCase = true) ||
-        t.contains("naruto") || t.contains("boruto") || t.contains("one piece") || t.contains("demon slayer") || t.contains("attack on titan") ||
-        t.contains("duke's son") || t.contains("dukes son") || t.contains("claims he won't love me") ||
-        t.contains("jujutsu") || t.contains("kaisen") || t.contains("academia") || t.contains("bleach") ||
-        t.contains("kono suba") || t.contains("reincarnated") || t.contains("isekai") || t.contains("solo leveling") ||
-        t.contains("tensei") || t.contains("sword art") || t.contains("black clover") || t.contains("frieren") ||
-        t.contains("chainsaw") || t.contains("blue lock") || t.contains("spy x") || t.contains("oshi no") ||
-        t.contains("kaiju") || t.contains("haikyu") || t.contains("stone") || t.contains("baki") ||
-        t.contains("ghoul") || t.contains("fairy tail") || t.contains("death note") || t.contains("hunter x") ||
-        t.contains("manga") || t.contains("slime") || t.contains("classroom of the") || t.contains("konosuba") ||
-        t.contains("dragon ball") || t.contains("pokemon") || t.contains("excalibur") || t.contains("shippuden") ||
-        t.contains("apothecary") || t.contains("elusive") || t.contains("failure frame") || t.contains("gundam")
+        (cat.isEmpty() && (
+            t == "naruto" || t.startsWith("naruto:") || t.startsWith("naruto ") ||
+            t == "boruto" || t.startsWith("boruto:") || t.startsWith("boruto ") ||
+            t == "one piece" || t.startsWith("one piece:") ||
+            t.contains("demon slayer") || t.contains("attack on titan") ||
+            t.contains("jujutsu kaisen") || t.contains("my hero academia") ||
+            t.contains("dragon ball z") || t.contains("dragon ball super") ||
+            t.contains("death note") || t.contains("fullmetal alchemist") ||
+            t.contains("hunter x hunter") || t.contains("solo leveling") ||
+            t.contains("chainsaw man")
+        ))
     }
 
     // Automatic In-App Scraping to enable ExoPlayer playback immediately

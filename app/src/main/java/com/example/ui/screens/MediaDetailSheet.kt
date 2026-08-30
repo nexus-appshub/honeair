@@ -65,16 +65,6 @@ fun MediaDetailSheet(
     val sheetChipText = if (isDark) Color(0xFFD1D5DB) else Color(0xFF1F2937)
     val sheetDividerColor = if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.10f)
 
-    val isSeries = item.type == "series" || item.category in listOf(
-        "Series & TV Shows", "Anime", "Anime Series", "Anime Movies", "K-Dramas", "Hindi Series"
-    )
-
-    var selectedSeason by remember { mutableIntStateOf(1) }
-    var selectedEpisode by remember { mutableIntStateOf(1) }
-    var showDownloaderModal by remember { mutableStateOf(false) }
-    var isPlayingTrailer by remember { mutableStateOf(startWithTrailer) }
-    var showTrailerModal by remember { mutableStateOf(startWithTrailer) }
-
     val youtubeTrailerId by viewModel.youtubeTrailerId.collectAsState()
     val castMembers by viewModel.castState.collectAsState()
     val isFetchingCast by viewModel.isFetchingCast.collectAsState()
@@ -85,9 +75,36 @@ fun MediaDetailSheet(
     val selectedServer by viewModel.selectedServer.collectAsState()
     val isFetchingServers by viewModel.isFetchingServers.collectAsState()
 
+    val isSeries = remember(item, mediaDetails) {
+        val hasSeasonsInDetail = (mediaDetails?.number_of_seasons != null && (mediaDetails?.number_of_seasons ?: 0) > 0)
+        val isExplicitMovieInDetail = (mediaDetails?.runtime != null && (mediaDetails?.number_of_seasons ?: 0) == 0)
+        val cat = item.category?.lowercase() ?: ""
+        val itemType = item.type.lowercase()
+
+        if (hasSeasonsInDetail) {
+            true
+        } else if (isExplicitMovieInDetail) {
+            false
+        } else if (itemType == "series" || itemType == "tv") {
+            true
+        } else if (itemType == "movie") {
+            false
+        } else {
+            cat.contains("series") || cat.contains("tv show") || cat.contains("natok") ||
+            cat.contains("anime series") || cat.contains("k-drama") || cat.contains("hindi series") ||
+            (item.episodes?.isNotBlank() == true && item.episodes.contains("Season", ignoreCase = true))
+        }
+    }
+
+    var selectedSeason by remember { mutableIntStateOf(1) }
+    var selectedEpisode by remember { mutableIntStateOf(1) }
+    var showDownloaderModal by remember { mutableStateOf(false) }
+    var isPlayingTrailer by remember { mutableStateOf(startWithTrailer) }
+    var showTrailerModal by remember { mutableStateOf(startWithTrailer) }
+
     val isAnime = remember(item) {
         item.id.startsWith("anikoto_") || item.category?.contains("Anime", ignoreCase = true) == true ||
-        item.type.equals("anime", ignoreCase = true) || item.title.lowercase().contains("naruto") || item.title.lowercase().contains("boruto")
+        item.type.equals("anime", ignoreCase = true) || item.title.equals("naruto", ignoreCase = true) || item.title.equals("boruto", ignoreCase = true)
     }
 
     val anikotoDetails by viewModel.anikotoDetailsState.collectAsState()
@@ -125,7 +142,7 @@ fun MediaDetailSheet(
             anikotoSeasons.size
         } else {
             val num = mediaDetails?.number_of_seasons
-            if (num != null && num > 0) num else 10
+            if (num != null && num > 0) num else 1
         }
     }
 
@@ -134,7 +151,7 @@ fun MediaDetailSheet(
             anikotoEpisodes.size
         } else {
             val num = mediaDetails?.number_of_episodes
-            if (num != null && num > 0) num else 30
+            if (num != null && num > 0) num else 12
         }
     }
 

@@ -116,18 +116,19 @@ class MediaRepository {
     }
 
     private fun mapToMediaItem(result: TmdbMediaResult, category: String, type: String = "auto"): MediaItem {
-        val displayTitle = if (result.name != null && result.title == null) result.name else (result.title ?: result.name ?: "Unknown")
+        val isTvByName = result.name != null && result.title == null
+        val isMovieByTitle = result.title != null && result.name == null
+        val isTvByAirDate = result.first_air_date != null && result.release_date == null
+        val displayTitle = if (isTvByName) result.name!! else (result.title ?: result.name ?: "Unknown")
         
         // Authoritative TMDB Media Type resolution:
         val resolvedType = when {
-            result.media_type.equals("movie", ignoreCase = true) -> "movie"
             result.media_type.equals("tv", ignoreCase = true) -> "series"
-            type == "movie" -> "movie"
+            result.media_type.equals("movie", ignoreCase = true) -> "movie"
+            isTvByName || isTvByAirDate -> "series"
+            isMovieByTitle -> "movie"
             type == "series" || type == "tv" -> "series"
-            result.name != null && result.title == null -> "series"
-            result.title != null && result.name == null -> "movie"
-            result.first_air_date != null && result.release_date == null -> "series"
-            result.release_date != null && result.first_air_date == null -> "movie"
+            type == "movie" -> "movie"
             category.contains("Series", ignoreCase = true) || category.contains("TV Shows", ignoreCase = true) || category.contains("Natok", ignoreCase = true) -> "series"
             category.contains("Movie", ignoreCase = true) || category.contains("Cinema", ignoreCase = true) -> "movie"
             else -> "movie"

@@ -35,6 +35,7 @@ object MovieBoxNativeScraper {
      */
     suspend fun searchSubjectId(title: String): String? = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext null
+        val cleanSearchTitle = title.lowercase().replace(Regex("[^a-z0-9 ]"), " ").trim()
 
         // 1. Try Apuseencom Search API: GET https://api.apuseencom.com/webed-hdapp/v1/everyone-search?keyword={query}
         try {
@@ -57,10 +58,19 @@ object MovieBoxNativeScraper {
                 if (list != null && list.length() > 0) {
                     for (i in 0 until list.length()) {
                         val item = list.getJSONObject(i)
-                        val id = item.optString("subject_id").ifBlank { item.optString("id") }
-                        if (id.isNotBlank()) {
-                            Log.d(TAG, "Found Apuseencom subjectId for $title: $id")
-                            return@withContext id
+                        val itemTitle = (item.optString("title").ifBlank { item.optString("name") }).lowercase()
+                        val cleanItemTitle = itemTitle.replace(Regex("[^a-z0-9 ]"), " ").trim()
+                        val isMatch = cleanItemTitle == cleanSearchTitle ||
+                                cleanItemTitle.startsWith(cleanSearchTitle) ||
+                                cleanSearchTitle.startsWith(cleanItemTitle) ||
+                                (cleanSearchTitle.length > 4 && cleanItemTitle.contains(cleanSearchTitle))
+                        
+                        if (isMatch) {
+                            val id = item.optString("subject_id").ifBlank { item.optString("id") }
+                            if (id.isNotBlank()) {
+                                Log.d(TAG, "Found validated Apuseencom subjectId for $title: $id (title: $itemTitle)")
+                                return@withContext id
+                            }
                         }
                     }
                 }
@@ -88,10 +98,22 @@ object MovieBoxNativeScraper {
                 val json = JSONObject(body)
                 val items = json.optJSONObject("data")?.optJSONArray("items")
                 if (items != null && items.length() > 0) {
-                    val id = items.getJSONObject(0).optString("subjectId")
-                    if (id.isNotBlank()) {
-                        Log.d(TAG, "Found Aoneroom subjectId for $title: $id")
-                        return@withContext id
+                    for (i in 0 until items.length()) {
+                        val item = items.getJSONObject(i)
+                        val itemTitle = (item.optString("title").ifBlank { item.optString("name") }).lowercase()
+                        val cleanItemTitle = itemTitle.replace(Regex("[^a-z0-9 ]"), " ").trim()
+                        val isMatch = cleanItemTitle == cleanSearchTitle ||
+                                cleanItemTitle.startsWith(cleanSearchTitle) ||
+                                cleanSearchTitle.startsWith(cleanItemTitle) ||
+                                (cleanSearchTitle.length > 4 && cleanItemTitle.contains(cleanSearchTitle))
+
+                        if (isMatch) {
+                            val id = item.optString("subjectId").ifBlank { item.optString("id") }
+                            if (id.isNotBlank()) {
+                                Log.d(TAG, "Found validated Aoneroom subjectId for $title: $id (title: $itemTitle)")
+                                return@withContext id
+                            }
+                        }
                     }
                 }
             }
