@@ -26,23 +26,25 @@ object VidnestNativeScraper {
     private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
     val PROVIDERS = listOf(
-        VidnestProviderInfo("lamda", "Lamda (Ultra)", "allmovies", "https://vidnest.fun/"),
         VidnestProviderInfo("filxer", "Filxer (Fast)", "rogflix", "https://rogflix.fun/"),
-        VidnestProviderInfo("zeta", "Zeta (NextGen)", "nextgencloudfabric", "https://nextgencloudfabric.com/"),
-        VidnestProviderInfo("ophim", "Ophim (HD)", "klikxxi", "https://vidnest.fun/"),
+        VidnestProviderInfo("lamda", "Lamda (Ultra)", "allmovies", "https://vidnest.fun/"),
         VidnestProviderInfo("prime", "Prime (VidRock)", "vidrock", "https://vidrock.net/"),
-        VidnestProviderInfo("beta", "Beta (VidXYZ)", "vidxyz", "https://moviesapi.to/"),
-        VidnestProviderInfo("sigma", "Sigma (Holly)", "hollymoviehd", "https://vidnest.fun/"),
-        VidnestProviderInfo("catflix", "Catflix (Buzz)", "buzz", "https://ployan.me/"),
+        VidnestProviderInfo("hexa", "Hexa (VidLink)", "vidlink", "https://vidlink.pro/"),
+        VidnestProviderInfo("zeta", "Zeta (NextGen)", "nextgencloudfabric", "https://nextgencloudfabric.com/"),
         VidnestProviderInfo("alfa", "Alfa (Videasy)", "videasy", "https://tiktoks.animanga.fun/"),
         VidnestProviderInfo("gama", "Gama (VidZee)", "vidzee", "https://s1.streamflixapi.site/"),
-        VidnestProviderInfo("hexa", "Hexa (VidLink)", "vidlink", "https://vidlink.pro/"),
+        VidnestProviderInfo("ophim", "Ophim (HD)", "klikxxi", "https://vidnest.fun/"),
+        VidnestProviderInfo("catflix", "Catflix (Buzz)", "buzz", "https://ployan.me/"),
+        VidnestProviderInfo("beta", "Beta (VidXYZ)", "vidxyz", "https://moviesapi.to/"),
+        VidnestProviderInfo("sigma", "Sigma (Holly)", "hollymoviehd", "https://vidnest.fun/"),
         VidnestProviderInfo("delta", "Delta (Direct)", "allmovies", "https://vidnest.fun/")
     )
 
     private val BASE_URLS = listOf(
         "https://new.vidnest.fun",
-        "https://vidnest.fun"
+        "https://vidnest.fun",
+        "https://vidnest.xyz",
+        "https://api.vidnest.fun"
     )
 
     private val httpClient by lazy {
@@ -107,6 +109,39 @@ object VidnestNativeScraper {
         }
     }
 
+    private fun sanitizeTmdbId(rawId: String): String {
+        return rawId.trim()
+            .removePrefix("movie_")
+            .removePrefix("series_")
+            .removePrefix("anikoto_")
+            .trim()
+    }
+
+    suspend fun resolveToNumericTmdbId(rawId: String, isTv: Boolean): String = withContext(Dispatchers.IO) {
+        val clean = sanitizeTmdbId(rawId)
+        if (clean.all { it.isDigit() }) {
+            return@withContext clean
+        }
+        if (clean.startsWith("tt")) {
+            try {
+                val findRes = com.example.data.network.RetrofitClient.tmdbApi.getByExternalId(clean)
+                val resolved = if (isTv) {
+                    findRes.tv_results?.firstOrNull()?.id?.toString()
+                        ?: findRes.movie_results?.firstOrNull()?.id?.toString()
+                } else {
+                    findRes.movie_results?.firstOrNull()?.id?.toString()
+                        ?: findRes.tv_results?.firstOrNull()?.id?.toString()
+                }
+                if (!resolved.isNullOrBlank()) {
+                    return@withContext resolved
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed resolving IMDB $clean to TMDB: ${e.message}")
+            }
+        }
+        clean
+    }
+
     suspend fun extractStreamFromProvider(
         providerKey: String,
         tmdbId: String,
@@ -115,8 +150,37 @@ object VidnestNativeScraper {
         episode: Int = 1
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         val provider = PROVIDERS.find { it.key == providerKey } ?: PROVIDERS.first()
+        val numericId = resolveToNumericTmdbId(tmdbId, isTv)
         val typeSegment = if (isTv) "tv" else "movie"
-        val querySuffix = if (isTv) "$tmdbId/$season/$episode" else tmdbId
+        val querySuffix = if (isTv) "$numericId/$season/$episode" else numericId
+
+        // Direct special endpoints for key providers like Filxer/Rogflix
+        if (provider.key == "filxer") {
+            val directRogflixUrls = listOf(
+                "https://rogflix.fun/api/stream/$typeSegment/$querySuffix",
+                "https://rogflix.fun/$typeSegment/$querySuffix"
+            )
+            for (directUrl in directRogflixUrls) {
+                try {
+                    val req = Request.Builder()
+                        .url(directUrl)
+                        .header("User-Agent", DEFAULT_UA)
+                        .header("Referer", "https://rogflix.fun/")
+                        .header("Origin", "https://rogflix.fun")
+                        .header("Accept", "application/json, text/plain, */*")
+                        .build()
+                    val resp = httpClient.newCall(req).execute()
+                    val bStr = resp.body?.string() ?: ""
+                    if (resp.isSuccessful && bStr.isNotBlank()) {
+                        val parsed = parseStreamPayload(bStr, provider)
+                        if (parsed != null && parsed.streamUrl.isNotBlank()) {
+                            Log.d(TAG, "Direct Filxer/Rogflix stream extracted: ${parsed.streamUrl}")
+                            return@withContext parsed
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
 
         for (baseUrl in BASE_URLS) {
             val endpointUrl = "$baseUrl/${provider.pathSegment}/$typeSegment/$querySuffix"
@@ -170,7 +234,7 @@ object VidnestNativeScraper {
     /**
      * HIGH POWER CONCURRENT SCRAPER:
      * Scrapes all VidNest sub-providers simultaneously in parallel.
-     * Evaluates and returns the best and fastest extracted stream link.
+     * Evaluates and returns the best and fastest extracted stream link, prioritizing Filxer.
      */
     suspend fun extractStream(
         tmdbId: String,
@@ -178,15 +242,26 @@ object VidnestNativeScraper {
         season: Int = 1,
         episode: Int = 1
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        val numericId = resolveToNumericTmdbId(tmdbId, isTv)
+        
+        // Fast-path: Check Filxer (Fast) first as it is the most reliable
+        try {
+            val filxerStream = extractStreamFromProvider("filxer", numericId, isTv, season, episode)
+            if (filxerStream != null && filxerStream.streamUrl.isNotBlank()) {
+                Log.d(TAG, "Filxer (Fast) priority hit: ${filxerStream.streamUrl}")
+                return@withContext filxerStream
+            }
+        } catch (_: Exception) {}
+
         coroutineScope {
-            Log.d(TAG, "Starting Concurrent High-Power Fast Scraping across ${PROVIDERS.size} VidNest sub-providers for TMDB: $tmdbId")
+            Log.d(TAG, "Starting Concurrent High-Power Fast Scraping across ${PROVIDERS.size} VidNest sub-providers for TMDB: $numericId")
             val channel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(PROVIDERS.size)
             
             // Launch all sub-server providers concurrently
             val jobs = PROVIDERS.map { provider ->
                 launch(Dispatchers.IO) {
                     try {
-                        val result = extractStreamFromProvider(provider.key, tmdbId, isTv, season, episode)
+                        val result = extractStreamFromProvider(provider.key, numericId, isTv, season, episode)
                         if (result != null && result.streamUrl.isNotBlank()) {
                             channel.trySend(result)
                         }
@@ -196,7 +271,7 @@ object VidnestNativeScraper {
 
             var best: ScrapedStreamResult? = null
             try {
-                best = kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                best = kotlinx.coroutines.withTimeoutOrNull(5000L) {
                     channel.receive()
                 }
             } catch (_: Exception) {}
@@ -208,6 +283,37 @@ object VidnestNativeScraper {
             }
             null
         }
+    }
+
+    /**
+     * Deep Scraping Mode: Thoroughly tries all providers sequentially and concurrently with retry
+     */
+    suspend fun extractStreamDeep(
+        tmdbId: String,
+        isTv: Boolean = false,
+        season: Int = 1,
+        episode: Int = 1
+    ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        val numericId = resolveToNumericTmdbId(tmdbId, isTv)
+        Log.d(TAG, "Deep Scraping Mode initiated for TMDB: $numericId (isTv: $isTv, S:$season E:$episode)")
+
+        // 1. Fast parallel check with Filxer priority
+        val fastResult = extractStream(numericId, isTv, season, episode)
+        if (fastResult != null && fastResult.streamUrl.isNotBlank()) {
+            return@withContext fastResult
+        }
+
+        // 2. Deep Sequential Exhaustive Scan across all providers
+        for (provider in PROVIDERS) {
+            try {
+                val res = extractStreamFromProvider(provider.key, numericId, isTv, season, episode)
+                if (res != null && res.streamUrl.isNotBlank()) {
+                    Log.d(TAG, "Deep Scraping resolved stream via [${provider.displayName}]: ${res.streamUrl}")
+                    return@withContext res
+                }
+            } catch (_: Exception) {}
+        }
+        null
     }
 
     /**

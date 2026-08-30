@@ -93,13 +93,21 @@ object UnifiedStreamManager {
         var finalTmdbId = tmdbId.trim()
         var effectiveIsTv = isTv
 
+        if (finalTmdbId.startsWith("movie_")) {
+            finalTmdbId = finalTmdbId.removePrefix("movie_")
+            effectiveIsTv = false
+        } else if (finalTmdbId.startsWith("series_")) {
+            finalTmdbId = finalTmdbId.removePrefix("series_")
+            effectiveIsTv = true
+        }
+
         if (finalTmdbId.startsWith("tt")) {
             try {
                 Log.d(TAG, "Resolving IMDb ID $finalTmdbId to TMDB numeric ID...")
                 val findRes = com.example.data.network.RetrofitClient.tmdbApi.getByExternalId(finalTmdbId, "imdb_id")
                 val tv = findRes.tv_results?.firstOrNull()
                 val movie = findRes.movie_results?.firstOrNull()
-                if (tv != null) {
+                if (tv != null && !effectiveIsTv && movie == null) {
                     finalTmdbId = tv.id.toString()
                     effectiveIsTv = true
                     Log.d(TAG, "Resolved IMDb ID to TV show TMDB ID: $finalTmdbId")
@@ -107,6 +115,10 @@ object UnifiedStreamManager {
                     finalTmdbId = movie.id.toString()
                     effectiveIsTv = false
                     Log.d(TAG, "Resolved IMDb ID to Movie TMDB ID: $finalTmdbId")
+                } else if (tv != null) {
+                    finalTmdbId = tv.id.toString()
+                    effectiveIsTv = true
+                    Log.d(TAG, "Resolved IMDb ID to TV show TMDB ID: $finalTmdbId")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to resolve IMDb ID $finalTmdbId: ${e.message}")

@@ -24,11 +24,50 @@ object VidrockNativeScraper {
     }
 
     private val BASE_HOSTS = listOf(
+        "https://vidrock.net",
         "https://vidrock.ru",
         "https://vidsrc.xyz",
         "https://vidsrc.cc",
-        "https://vidsrc.me"
+        "https://vidsrc.me",
+        "https://vidsrc.in",
+        "https://vidsrc.pm",
+        "https://vidsrc.to",
+        "https://vidsrc2.ru",
+        "https://vidsrc.sbs"
     )
+
+    private fun sanitizeTmdbId(rawId: String): String {
+        return rawId.trim()
+            .removePrefix("movie_")
+            .removePrefix("series_")
+            .removePrefix("anikoto_")
+            .trim()
+    }
+
+    suspend fun resolveToNumericTmdbId(rawId: String, isTv: Boolean): String = withContext(Dispatchers.IO) {
+        val clean = sanitizeTmdbId(rawId)
+        if (clean.all { it.isDigit() }) {
+            return@withContext clean
+        }
+        if (clean.startsWith("tt")) {
+            try {
+                val findRes = com.example.data.network.RetrofitClient.tmdbApi.getByExternalId(clean)
+                val resolved = if (isTv) {
+                    findRes.tv_results?.firstOrNull()?.id?.toString()
+                        ?: findRes.movie_results?.firstOrNull()?.id?.toString()
+                } else {
+                    findRes.movie_results?.firstOrNull()?.id?.toString()
+                        ?: findRes.tv_results?.firstOrNull()?.id?.toString()
+                }
+                if (!resolved.isNullOrBlank()) {
+                    return@withContext resolved
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed resolving IMDB $clean to TMDB: ${e.message}")
+            }
+        }
+        clean
+    }
 
     /**
      * Extracts direct HLS Master / Index .m3u8 stream link based on VidRock & VidSrc architecture.
@@ -39,9 +78,10 @@ object VidrockNativeScraper {
         season: Int = 1,
         episode: Int = 1
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
-        if (tmdbId.isBlank()) return@withContext null
+        val cleanId = resolveToNumericTmdbId(tmdbId, isTv)
+        if (cleanId.isBlank()) return@withContext null
 
-        val typePath = if (isTv) "tv/$tmdbId/$season/$episode" else "movie/$tmdbId"
+        val typePath = if (isTv) "tv/$cleanId/$season/$episode" else "movie/$cleanId"
 
         // 1. Try Direct VidRock embed & v-endpoint
         for (host in BASE_HOSTS) {
@@ -61,7 +101,7 @@ object VidrockNativeScraper {
                 val html = response.body?.string() ?: ""
 
                 if (response.isSuccessful && html.isNotBlank()) {
-                    val stream = extractM3u8FromHtml(html, host, tmdbId)
+                    val stream = extractM3u8FromHtml(html, host, cleanId)
                     if (stream != null && stream.streamUrl.isNotBlank()) {
                         Log.d(TAG, "Successfully extracted VidRock stream from $host: ${stream.streamUrl}")
                         return@withContext stream
@@ -72,47 +112,48 @@ object VidrockNativeScraper {
             }
         }
 
-        // 2. Try Direct Content Endpoint: GET https://vidrock.ru/v/{tmdb_id}
-        try {
-            val vEndpoint = "https://vidrock.ru/v/$tmdbId"
-            val vReq = Request.Builder()
-                .url(vEndpoint)
-                .header("User-Agent", DEFAULT_UA)
-                .header("Referer", "https://vidrock.ru/")
-                .header("Origin", "https://vidrock.ru")
-                .header("Accept", "text/html,application/json,*/*")
-                .build()
+        // 2. Try Direct Content Endpoint: GET https://vidrock.ru/v/{tmdb_id} or https://vidrock.net/v/{tmdb_id}
+        for (vHost in listOf("https://vidrock.net", "https://vidrock.ru")) {
+            try {
+                val vEndpoint = "$vHost/v/$cleanId"
+                val vReq = Request.Builder()
+                    .url(vEndpoint)
+                    .header("User-Agent", DEFAULT_UA)
+                    .header("Referer", "$vHost/")
+                    .header("Origin", vHost)
+                    .header("Accept", "text/html,application/json,*/*")
+                    .build()
 
-            val vResp = httpClient.newCall(vReq).execute()
-            val vBody = vResp.body?.string() ?: ""
-            if (vResp.isSuccessful && vBody.isNotBlank()) {
-                val stream = extractM3u8FromHtml(vBody, "https://vidrock.ru", tmdbId)
-                if (stream != null && stream.streamUrl.isNotBlank()) {
-                    Log.d(TAG, "Successfully extracted VidRock stream from /v/ endpoint: ${stream.streamUrl}")
-                    return@withContext stream
+                val vResp = httpClient.newCall(vReq).execute()
+                val vBody = vResp.body?.string() ?: ""
+                if (vResp.isSuccessful && vBody.isNotBlank()) {
+                    val stream = extractM3u8FromHtml(vBody, vHost, cleanId)
+                    if (stream != null && stream.streamUrl.isNotBlank()) {
+                        Log.d(TAG, "Successfully extracted VidRock stream from /v/ endpoint: ${stream.streamUrl}")
+                        return@withContext stream
+                    }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "VidRock $vHost /v/ endpoint failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "VidRock /v/ endpoint failed: ${e.message}")
         }
 
         // 3. Try Dynamic TMDB-named intermediate proxy & HLS CDN endpoints
-        // Architecture: https://{tmdbId}.xyz / https://www.dolphin-cf.{tmdbId}.xyz / https://ch.tsload7.com
         val dynamicProxyHosts = listOf(
-            "https://www.dolphin-cf.$tmdbId.xyz",
-            "https://$tmdbId.xyz",
+            "https://www.dolphin-cf.$cleanId.xyz",
+            "https://$cleanId.xyz",
             "https://ch.tsload7.com",
             "https://gtg.og-114.tsload7.com"
         )
 
         for (proxyHost in dynamicProxyHosts) {
             try {
-                val masterUrl = "$proxyHost/hls/$tmdbId/master.m3u8"
+                val masterUrl = "$proxyHost/hls/$cleanId/master.m3u8"
                 val checkReq = Request.Builder()
                     .url(masterUrl)
                     .header("User-Agent", DEFAULT_UA)
-                    .header("Referer", "https://vidrock.ru/")
-                    .header("Origin", "https://vidrock.ru")
+                    .header("Referer", "https://vidrock.net/")
+                    .header("Origin", "https://vidrock.net")
                     .build()
 
                 val checkResp = httpClient.newCall(checkReq).execute()
@@ -120,12 +161,30 @@ object VidrockNativeScraper {
                     val body = checkResp.body?.string() ?: ""
                     if (body.contains("#EXTM3U") || body.contains("#EXT-X-STREAM-INF") || body.contains(".m3u8") || body.contains(".ts")) {
                         Log.d(TAG, "Found working VidRock CDN Master M3U8 at $masterUrl")
-                        return@withContext buildVidrockResult(masterUrl, tmdbId)
+                        return@withContext buildVidrockResult(masterUrl, cleanId)
                     }
                 }
             } catch (_: Exception) {}
         }
 
+        null
+    }
+
+    /**
+     * Deep Scraping Mode for VidRock Architecture
+     */
+    suspend fun extractStreamDeep(
+        tmdbId: String,
+        isTv: Boolean = false,
+        season: Int = 1,
+        episode: Int = 1
+    ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        val cleanId = resolveToNumericTmdbId(tmdbId, isTv)
+        Log.d(TAG, "Deep Scraping Mode VidRock starting for $cleanId...")
+        val fast = extractStream(cleanId, isTv, season, episode)
+        if (fast != null && fast.streamUrl.isNotBlank()) {
+            return@withContext fast
+        }
         null
     }
 

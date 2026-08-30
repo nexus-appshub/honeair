@@ -1234,13 +1234,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val isAnime = effectiveItem.category.lowercase().contains("anime") || effectiveItem.type.equals("anime", ignoreCase = true) ||
                       effectiveItem.title.lowercase().contains("naruto") || effectiveItem.title.lowercase().contains("boruto")
 
+        val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
+                           effectiveItem.type.equals("tv", ignoreCase = true) ||
+                           (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val streamResult = com.example.scraper.UnifiedStreamManager.getStream(
                     context = getApplication(),
                     title = effectiveItem.title,
                     tmdbId = tmdbId,
-                    isTv = effectiveItem.type == "series" || effectiveItem.type == "tv" || effectiveItem.type == "anime",
+                    isTv = isSeriesItem,
                     season = season,
                     episode = episode,
                     isAnime = isAnime
@@ -1314,6 +1318,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             val isAnime = effectiveItem.category.lowercase().contains("anime") || effectiveItem.type.equals("anime", ignoreCase = true) ||
                           effectiveItem.title.lowercase().contains("naruto") || effectiveItem.title.lowercase().contains("boruto")
 
+            val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
+                               effectiveItem.type.equals("tv", ignoreCase = true) ||
+                               (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
+
             // Immediately launch background scraper in parallel
             val scraperJob = viewModelScope.launch(Dispatchers.IO) {
                 try {
@@ -1321,7 +1329,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         context = getApplication(),
                         title = effectiveItem.title,
                         tmdbId = tmdbId,
-                        isTv = effectiveItem.type == "series" || effectiveItem.type == "tv" || effectiveItem.type == "anime",
+                        isTv = isSeriesItem,
                         season = season,
                         episode = episode,
                         isAnime = isAnime

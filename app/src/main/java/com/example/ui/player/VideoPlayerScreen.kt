@@ -139,11 +139,12 @@ fun VideoPlayerScreen(
             errorMessage = null
             coroutineScope.launch {
                 val isAnime = mediaType.equals("anime", ignoreCase = true) || title.lowercase().contains("naruto") || title.lowercase().contains("boruto") || title.lowercase().contains("one piece")
+                val isTv = mediaType.equals("series", ignoreCase = true) || mediaType.equals("tv", ignoreCase = true) || (mediaType.equals("anime", ignoreCase = true) && !title.lowercase().contains("movie"))
                 val res = UnifiedStreamManager.getStream(
                     context = context,
                     title = title,
                     tmdbId = tmdbId,
-                    isTv = !mediaType.equals("movie", ignoreCase = true),
+                    isTv = isTv,
                     season = season,
                     episode = episode,
                     isAnime = isAnime

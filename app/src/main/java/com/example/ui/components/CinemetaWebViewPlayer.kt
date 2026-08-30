@@ -211,6 +211,7 @@ fun CinemetaWebViewPlayer(
     val dubServers by viewModel.availableDubServers.collectAsState()
     val selectedServer by viewModel.selectedServer.collectAsState()
     val isFetchingServers by viewModel.isFetchingServers.collectAsState()
+    val mediaDetailState by viewModel.mediaDetailState.collectAsState()
 
     // Keep Screen On while CinemetaWebViewPlayer is active
     DisposableEffect(activity) {
@@ -265,15 +266,26 @@ fun CinemetaWebViewPlayer(
             ?: allMediaItems.find { it.title == title }
     }
 
-    val isSeries = remember(type, currentMediaItem) {
+    val isSeries = remember(type, currentMediaItem, mediaDetailState) {
         val t = type.lowercase()
         val cat = currentMediaItem?.category?.lowercase() ?: ""
         val itemType = currentMediaItem?.type?.lowercase() ?: ""
-        val isEpisodic = (currentMediaItem?.episodes?.isNotBlank() == true)
-        t == "series" || t == "tv" || t == "anime" ||
-                itemType == "series" || itemType == "tv" || itemType == "anime" ||
-                cat.contains("series") || cat.contains("tv") || cat.contains("drama") ||
-                cat.contains("natok") || isEpisodic
+        val hasSeasonsInDetail = (mediaDetailState?.number_of_seasons != null && (mediaDetailState?.number_of_seasons ?: 0) > 0)
+        val isExplicitMovieInDetail = (mediaDetailState?.runtime != null && (mediaDetailState?.number_of_seasons ?: 0) == 0)
+        val isEpisodic = (currentMediaItem?.episodes?.isNotBlank() == true && currentMediaItem?.episodes?.contains("Season", ignoreCase = true) == true)
+
+        if (hasSeasonsInDetail) {
+            true
+        } else if (isExplicitMovieInDetail) {
+            false
+        } else if (t == "movie" || itemType == "movie") {
+            false
+        } else if (t == "series" || t == "tv" || itemType == "series" || itemType == "tv") {
+            true
+        } else {
+            cat.contains("series", ignoreCase = true) || cat.contains("tv show", ignoreCase = true) ||
+            cat.contains("natok", ignoreCase = true) || isEpisodic
+        }
     }
     val isNativeMatching = (!isSeries && currentSeason == season && currentEpisode == episode)
     val effectiveNativeUrl = if (isNativeMatching) nativeStreamUrl else null
@@ -331,7 +343,7 @@ fun CinemetaWebViewPlayer(
                         context = context,
                         title = title,
                         tmdbId = imdbId,
-                        isTv = type.equals("series", ignoreCase = true) || type.equals("tv", ignoreCase = true) || type.equals("anime", ignoreCase = true),
+                        isTv = isSeries,
                         season = currentSeason,
                         episode = currentEpisode,
                         isAnime = isAnime
@@ -378,7 +390,6 @@ fun CinemetaWebViewPlayer(
 
     val isMediaPlaying by viewModel.isMediaPlaying.collectAsState()
     val youtubeVideoId by viewModel.youtubeVideoId.collectAsState()
-    val mediaDetailState by viewModel.mediaDetailState.collectAsState()
     val youtubeTrailerId by viewModel.youtubeTrailerId.collectAsState()
     var showTrailerDialog by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<com.example.data.model.MediaItem?>(null) }

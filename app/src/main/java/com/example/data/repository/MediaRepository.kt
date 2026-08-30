@@ -117,23 +117,20 @@ class MediaRepository {
 
     private fun mapToMediaItem(result: TmdbMediaResult, category: String, type: String = "auto"): MediaItem {
         val displayTitle = if (result.name != null && result.title == null) result.name else (result.title ?: result.name ?: "Unknown")
-        val isExplicitTv = result.media_type == "tv" ||
-                (result.name != null && result.title == null) ||
-                (result.first_air_date != null && result.release_date == null) ||
-                category.contains("Series", ignoreCase = true) ||
-                category.contains("TV", ignoreCase = true) ||
-                category.contains("K-Drama", ignoreCase = true) ||
-                category.contains("Kdrama", ignoreCase = true)
-        val isExplicitMovie = result.media_type == "movie" ||
-                (result.title != null && result.name == null) ||
-                (result.release_date != null && result.first_air_date == null) ||
-                category.contains("Movie", ignoreCase = true) ||
-                category.contains("Cinema", ignoreCase = true)
-
-        val resolvedType = when (type) {
-            "series", "tv" -> "series"
-            "movie" -> "movie"
-            else -> if (isExplicitTv) "series" else if (isExplicitMovie) "movie" else if (result.name != null) "series" else "movie"
+        
+        // Authoritative TMDB Media Type resolution:
+        val resolvedType = when {
+            result.media_type.equals("movie", ignoreCase = true) -> "movie"
+            result.media_type.equals("tv", ignoreCase = true) -> "series"
+            type == "movie" -> "movie"
+            type == "series" || type == "tv" -> "series"
+            result.name != null && result.title == null -> "series"
+            result.title != null && result.name == null -> "movie"
+            result.first_air_date != null && result.release_date == null -> "series"
+            result.release_date != null && result.first_air_date == null -> "movie"
+            category.contains("Series", ignoreCase = true) || category.contains("TV Shows", ignoreCase = true) || category.contains("Natok", ignoreCase = true) -> "series"
+            category.contains("Movie", ignoreCase = true) || category.contains("Cinema", ignoreCase = true) -> "movie"
+            else -> "movie"
         }
 
         val year = (result.release_date ?: result.first_air_date ?: "").take(4)
@@ -158,9 +155,36 @@ class MediaRepository {
             streamUrl = streamUrl,
             episodes = if (resolvedType == "series") "Season 1" else "",
             isStreamable = true,
-            imdbId = tmdbId, // Using TMDB ID as imdbId since vidsrc supports tmdb id too
+            imdbId = tmdbId, // Using TMDB ID as imdbId since vidsrc/vidnest supports tmdb id directly
             type = resolvedType
         )
+    }
+
+    suspend fun detectOrVerifyMediaTypeWithAI(title: String, year: String = ""): String = withContext(Dispatchers.IO) {
+        try {
+            val prompt = "Is the title '$title' ${if (year.isNotBlank()) "($year)" else ""} a 'movie' or a 'series'? Reply ONLY with one word: 'movie' or 'series'."
+            val request = com.example.data.network.GeminiRequest(
+                contents = listOf(
+                    com.example.data.network.GeminiContent(
+                        parts = listOf(com.example.data.network.GeminiPart(text = prompt))
+                    )
+                )
+            )
+            val apiKey = com.example.BuildConfig.GEMINI_API_KEY
+            if (apiKey.isBlank()) return@withContext "movie"
+            val response = com.example.data.network.GeminiClient.apiService.generateContent(
+                model = "gemini-2.5-flash",
+                apiKey = apiKey,
+                request = request
+            )
+            val candidateText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()?.lowercase() ?: ""
+            if (candidateText.contains("series") || candidateText.contains("tv")) {
+                return@withContext "series"
+            } else if (candidateText.contains("movie")) {
+                return@withContext "movie"
+            }
+        } catch (_: Exception) {}
+        "movie"
     }
 
     fun getCuratedLatestItems(): List<MediaItem> {
@@ -487,9 +511,9 @@ class MediaRepository {
     }
 
     suspend fun fetchMediaDetails(id: String, type: String): com.example.data.network.TmdbMediaDetail = withContext(Dispatchers.IO) {
-        val tmdbType = if (type == "series" || type == "tv") "tv" else "movie"
+        var tmdbType = if (type == "series" || type == "tv") "tv" else "movie"
         var finalId = id
-        if (finalId.startsWith("movie_") || finalId.startsWith("series_")) {
+        if (finalId.startsWith("movie_") || finalId.startsWith("series_") || finalId.startsWith("anikoto_")) {
             finalId = finalId.substringAfter("_")
         }
         detailCache[finalId]?.let { return@withContext it }
@@ -497,13 +521,19 @@ class MediaRepository {
         if (finalId.startsWith("tt")) {
             try {
                 val findResponse = tmdbApi.getByExternalId(finalId)
-                val resolvedId = if (tmdbType == "movie") {
-                    findResponse.movie_results?.firstOrNull()?.id?.toString()
-                } else {
-                    findResponse.tv_results?.firstOrNull()?.id?.toString()
-                }
-                if (resolvedId != null) {
-                    finalId = resolvedId
+                val movieMatch = findResponse.movie_results?.firstOrNull()
+                val tvMatch = findResponse.tv_results?.firstOrNull()
+
+                if (tmdbType == "movie" && movieMatch != null) {
+                    finalId = movieMatch.id.toString()
+                } else if (tmdbType == "tv" && tvMatch != null) {
+                    finalId = tvMatch.id.toString()
+                } else if (movieMatch != null) {
+                    finalId = movieMatch.id.toString()
+                    tmdbType = "movie"
+                } else if (tvMatch != null) {
+                    finalId = tvMatch.id.toString()
+                    tmdbType = "tv"
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -512,9 +542,20 @@ class MediaRepository {
         
         detailCache[finalId]?.let { return@withContext it }
 
-        val details = tmdbApi.getMediaDetails(type = tmdbType, id = finalId)
-        detailCache[finalId] = details
-        details
+        try {
+            val details = tmdbApi.getMediaDetails(type = tmdbType, id = finalId)
+            detailCache[finalId] = details
+            return@withContext details
+        } catch (e: Exception) {
+            // If primary type failed, attempt opposite type fallback (e.g. movie was actually a TV series or vice-versa)
+            val alternateType = if (tmdbType == "tv") "movie" else "tv"
+            try {
+                val altDetails = tmdbApi.getMediaDetails(type = alternateType, id = finalId)
+                detailCache[finalId] = altDetails
+                return@withContext altDetails
+            } catch (_: Exception) {}
+            throw e
+        }
     }
 
     suspend fun fetchCategoryItems(category: String, page: Int): List<MediaItem> = coroutineScope {
