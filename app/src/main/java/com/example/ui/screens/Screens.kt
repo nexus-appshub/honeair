@@ -8213,59 +8213,6 @@ fun MediaHubScreen(
                         .fillMaxWidth()
                         .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp)
                 ) {
-                    if (searchQuery.isNotBlank() && filteredItems.isNotEmpty()) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 54.dp),
-                            colors = CardDefaults.cardColors(containerColor = DeepSlate),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text(
-                                    text = "\ud83d\udca1 Suggestions (${filteredItems.size} matches):",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = NeonCyan,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                                filteredItems.take(5).forEach { item ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                viewModel.preScrapeMediaItem(item)
-                                                selectedItemForDetail = item
-                                                viewModel.setMediaSearchQuery("")
-                                                isSearchExpanded = false
-                                            }
-                                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Movie,
-                                            contentDescription = null,
-                                            tint = NeonCyan,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = item.title,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = TextPrimary,
-                                            maxLines = 1,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(
-                                            text = item.year,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = TextSecondary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
                     AnimatedContent(
                         targetState = isSearchExpanded || searchQuery.isNotEmpty(),
                         transitionSpec = {

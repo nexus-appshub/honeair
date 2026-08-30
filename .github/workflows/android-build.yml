@@ -46,39 +46,57 @@ jobs:
         RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+    - name: Package Release ZIP
+      run: |
+        mkdir -p build_output
+        APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+        cp "$APK_FILE" build_output/HomeAirTV-v4.6.7-release.apk
+        cd build_output
+        zip HomeAirTV-v4.6.7-release.zip HomeAirTV-v4.6.7-release.apk
+        cd ..
+        ls -lh build_output/
+
     - name: Generate Direct Download Links
       run: |
-        APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
-        echo "=== UPLOADING APK FOR DIRECT DOWNLOAD ==="
+        APK_FILE="build_output/HomeAirTV-v4.6.7-release.apk"
+        ZIP_FILE="build_output/HomeAirTV-v4.6.7-release.zip"
+        echo "=== UPLOADING APK & ZIP FOR DIRECT DOWNLOAD ==="
         
-        # Upload to tmpfiles.org
-        TMP_URL=$(curl -s -F "file=@$APK_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
+        # Upload APK and ZIP to tmpfiles.org
+        TMP_APK_URL=$(curl -s -F "file=@$APK_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
+        TMP_ZIP_URL=$(curl -s -F "file=@$ZIP_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
         
         # Upload to file.io
-        FILEIO_URL=$(curl -s -F "file=@$APK_FILE" https://file.io | grep -o 'https://file.io/[a-zA-Z0-9]*' || true)
+        FILEIO_URL=$(curl -s -F "file=@$ZIP_FILE" https://file.io | grep -o 'https://file.io/[a-zA-Z0-9]*' || true)
         
         echo "================================================="
-        echo "DIRECT DOWNLOAD LINK 1 (tmpfiles): $TMP_URL"
-        echo "DIRECT DOWNLOAD LINK 2 (file.io): $FILEIO_URL"
+        echo "DIRECT APK DOWNLOAD (tmpfiles): $TMP_APK_URL"
+        echo "DIRECT ZIP DOWNLOAD (tmpfiles): $TMP_ZIP_URL"
+        echo "DIRECT ZIP DOWNLOAD (file.io):  $FILEIO_URL"
         echo "================================================="
 
-    - name: Publish to GitHub Releases (Unlimited Storage)
+    - name: Publish to GitHub Releases (Unlimited Permanent Storage)
       uses: softprops/action-gh-release@v2
       if: success()
       with:
         tag_name: "v4.6.7-build-${{ github.run_number }}"
         name: "Home Air TV Release v4.6.7 (Build #${{ github.run_number }})"
-        body: "Automated Signed Release APK with package `com.homeairtv.xubilas`."
-        files: app/build/outputs/apk/release/*.apk
+        body: |
+          ### 🚀 Home Air TV v4.6.7 Release (Build #${{ github.run_number }})
+          - **Package:** `com.homeairtv.xubilas`
+          - **Artifacts:** Signed `.apk` and `.zip` release package.
+        files: |
+          build_output/HomeAirTV-v4.6.7-release.apk
+          build_output/HomeAirTV-v4.6.7-release.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       continue-on-error: true
 
-    - name: Upload APK Artifact
+    - name: Upload APK & ZIP Artifact (Actions Storage)
       uses: actions/upload-artifact@v4
       continue-on-error: true
       with:
-        name: Fast-Release-APK
-        path: app/build/outputs/apk/release/*.apk
+        name: HomeAirTV-Release-Package
+        path: build_output/*
         retention-days: 1
 

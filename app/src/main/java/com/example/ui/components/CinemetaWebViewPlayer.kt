@@ -686,9 +686,32 @@ fun CinemetaWebViewPlayer(
     // Search query & expanded search bar state for related items
     var localSearchQuery by remember { mutableStateOf("") }
     var isSearchExpanded by remember { mutableStateOf(false) }
+    var onlineSearchResults by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var isSearchingOnline by remember { mutableStateOf(false) }
     var selectedBottomTab by remember { mutableStateOf("recommend") } // "recommend" or "comments"
     var castList by remember { mutableStateOf<List<CastMember>>(emptyList()) }
     var isFetchingCast by remember { mutableStateOf(false) }
+
+    val globalMediaState by viewModel.mediaState.collectAsState()
+
+    LaunchedEffect(localSearchQuery) {
+        val q = localSearchQuery.trim()
+        if (q.isBlank()) {
+            onlineSearchResults = emptyList()
+            isSearchingOnline = false
+            return@LaunchedEffect
+        }
+        isSearchingOnline = true
+        kotlinx.coroutines.delay(200)
+        try {
+            val results = viewModel.searchMediaDirect(q)
+            onlineSearchResults = results
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            isSearchingOnline = false
+        }
+    }
 
     LaunchedEffect(imdbId, type) {
         if (imdbId.startsWith("tt")) {
@@ -754,21 +777,31 @@ fun CinemetaWebViewPlayer(
         }
     }
     
-    val currentMediaItemForRelated = remember(allMediaItems, imdbId, title) {
-        allMediaItems.find { it.imdbId == imdbId && it.title == title }
-            ?: allMediaItems.find { it.imdbId == imdbId }
-            ?: allMediaItems.find { it.title == title }
+    val globalMediaPool = remember(allMediaItems, globalMediaState) {
+        val stateItems = (globalMediaState as? com.example.ui.viewmodel.UiState.Success)?.data ?: emptyList()
+        (allMediaItems + stateItems).distinctBy { it.id }
+    }
+
+    val searchResultsList = remember(localSearchQuery, globalMediaPool, onlineSearchResults) {
+        val q = localSearchQuery.trim()
+        if (q.isBlank()) {
+            emptyList()
+        } else {
+            val localMatches = viewModel.fuzzySearchMedia(q, globalMediaPool)
+            (localMatches + onlineSearchResults).distinctBy { it.id }
+        }
+    }
+
+    val currentMediaItemForRelated = remember(globalMediaPool, imdbId, title) {
+        globalMediaPool.find { it.imdbId == imdbId && it.title == title }
+            ?: globalMediaPool.find { it.imdbId == imdbId }
+            ?: globalMediaPool.find { it.title == title }
     }
     
-    val filteredRelated = remember(allMediaItems, localSearchQuery, imdbId, type, currentMediaItemForRelated) {
+    val filteredRelated = remember(globalMediaPool, imdbId, type, currentMediaItemForRelated) {
         val playingItem = currentMediaItemForRelated
         if (playingItem == null) {
-            allMediaItems.filter { item ->
-                val matchesSearch = localSearchQuery.isBlank() ||
-                        item.title.contains(localSearchQuery, ignoreCase = true) ||
-                        item.category.contains(localSearchQuery, ignoreCase = true)
-                matchesSearch && item.imdbId != imdbId
-            }
+            globalMediaPool.filter { item -> item.imdbId != imdbId }
         } else {
             val genreKeywords = listOf(
                 "horror", "comedy", "action", "romance", "thriller", "drama", "fantasy", 
@@ -780,13 +813,10 @@ fun CinemetaWebViewPlayer(
             val playingKeywords = genreKeywords.filter { playingDescLower.contains(it) }
             val playingYearInt = playingItem.year.toIntOrNull()
 
-            allMediaItems
+            globalMediaPool
                 .filter { item ->
                     val isDifferentItem = item.id != playingItem.id && item.imdbId != playingItem.imdbId
-                    val matchesSearch = localSearchQuery.isBlank() ||
-                            item.title.contains(localSearchQuery, ignoreCase = true) ||
-                            item.category.contains(localSearchQuery, ignoreCase = true)
-                    isDifferentItem && matchesSearch
+                    isDifferentItem
                 }
                 .map { item ->
                     var score = 0.0
@@ -3056,14 +3086,17 @@ fun CinemetaWebViewPlayer(
                     )
                 }
             } else {
-                // Category Header
+                val isSearching = localSearchQuery.isNotBlank()
+                val displayList = if (isSearching) searchResultsList else filteredRelated
+
+                // Category Header / Search Results Header
                 item {
                     val isAnimePlaying = type.equals("anime", ignoreCase = true) || currentMediaItemForRelated?.category?.contains("anime", ignoreCase = true) == true
                     val isBanglaPlaying = currentMediaItemForRelated?.category?.equals("Bangla Cinema & Natok", ignoreCase = true) == true
                     val isMoviePlaying = (!isSeries && !isAnimePlaying) || currentMediaItemForRelated?.type?.equals("movie", ignoreCase = true) == true
                     
-                    val headerTitle = if (localSearchQuery.isNotBlank()) {
-                        "Search Results"
+                    val headerTitle = if (isSearching) {
+                        "🔍 Search Results for \"$localSearchQuery\" (${displayList.size})"
                     } else if (isBanglaPlaying) {
                         "🎬 Related Bangla Content"
                     } else if (isAnimePlaying) {
@@ -3074,31 +3107,76 @@ fun CinemetaWebViewPlayer(
                         "🎬 Related TV Shows"
                     }
 
-                    Text(
-                        text = headerTitle,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-                    )
-                }
-
-                // Grid of Related Media Items
-                items(filteredRelated.chunked(3)) { rowItems ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        rowItems.forEach { item ->
-                            RelatedMediaCard(
-                                item = item,
-                                onClick = { selectedDetailItem = item },
-                                modifier = Modifier.weight(1f)
+                        Text(
+                            text = headerTitle,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (isSearching) NeonCyan else TextPrimary
+                        )
+                        if (isSearchingOnline) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = NeonCyan,
+                                strokeWidth = 2.dp
                             )
                         }
-                        repeat(3 - rowItems.size) {
-                            Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+
+                if (isSearching && displayList.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSearchingOnline) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(28.dp))
+                                    Text(
+                                        text = "Searching across Movies, TV Series & Anime...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = "No results found for \"$localSearchQuery\"",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Grid of Media Items
+                    items(displayList.chunked(3)) { rowItems ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            rowItems.forEach { item ->
+                                RelatedMediaCard(
+                                    item = item,
+                                    onClick = { selectedDetailItem = item },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            repeat(3 - rowItems.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
                     }
                 }

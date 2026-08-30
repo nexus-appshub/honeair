@@ -1064,6 +1064,25 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     private var searchJob: kotlinx.coroutines.Job? = null
 
+    suspend fun searchMediaDirect(query: String): List<MediaItem> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return@withContext emptyList()
+        try {
+            val movies = mediaRepository.searchMedia(trimmed, "movie")
+            val series = mediaRepository.searchMedia(trimmed, "series")
+            val results = (movies + series).distinctBy { it.id }
+            if (results.isNotEmpty()) {
+                val currentData = (_mediaState.value as? UiState.Success)?.data ?: emptyList()
+                val merged = (results + currentData).distinctBy { it.id }
+                _mediaState.value = UiState.Success(merged)
+            }
+            results
+        } catch (e: Exception) {
+            Log.e("StreamViewModel", "Error in searchMediaDirect", e)
+            emptyList()
+        }
+    }
+
     fun setMediaSearchQuery(query: String) {
         _mediaSearchQuery.value = query
         searchJob?.cancel()
