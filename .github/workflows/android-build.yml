@@ -43,6 +43,15 @@ jobs:
         RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+    - name: Generate Temporary Download Link
+      run: |
+        APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+        echo "Uploading $APK_FILE to transfer.sh..."
+        curl --upload-file "$APK_FILE" https://transfer.sh/$(basename $APK_FILE) > download_url.txt
+        echo "------------------------------------------------"
+        echo "DOWNLOAD LINK: $(cat download_url.txt)"
+        echo "------------------------------------------------"
+
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
