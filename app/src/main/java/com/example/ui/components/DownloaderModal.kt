@@ -165,6 +165,9 @@ fun DownloaderModal(
     var isCheckingQualities by remember { mutableStateOf(false) }
     var showQualitySelectionDialog by remember { mutableStateOf(false) }
     var isFetchingQualities by remember { mutableStateOf(false) }
+    var isResolvingOption1 by remember { mutableStateOf(false) }
+    var activeResolvedStreamUrl by remember { mutableStateOf<String?>(null) }
+    var activeResolvedReferer by remember { mutableStateOf<String?>(null) }
     var detectedHlsQualities by remember { mutableStateOf<List<MediaDownloader.HlsQuality>>(emptyList()) }
 
     val fallbackDirectUrl = if (isSeries) "https://02moviedownloader.site/api/download/tv/$cleanImdb/$season/$episode" else "https://02moviedownloader.site/api/download/movie/$cleanImdb"
@@ -306,9 +309,11 @@ fun DownloaderModal(
                                     else -> null
                                 }
 
-                                val downloadUrl = matchedHls?.url ?: effectiveCapturedUrl
-                                val uAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                                val ref = if (downloadUrl.contains("vidsrc")) "https://vidsrc.me/" else if (downloadUrl.contains("02movie")) "https://02moviedownloader.site/" else null
+                                val streamToDownload = activeResolvedStreamUrl ?: effectiveCapturedUrl
+                                val downloadUrl = matchedHls?.url ?: streamToDownload
+                                val uAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                                val defaultRef = if (downloadUrl.contains("vidsrc")) "https://vidsrc.me/" else if (downloadUrl.contains("02movie")) "https://02moviedownloader.site/" else null
+                                val ref = activeResolvedReferer ?: defaultRef
 
                                 MediaDownloader.downloadFile(
                                     context = context,
@@ -317,7 +322,7 @@ fun DownloaderModal(
                                     coroutineScope = coroutineScope,
                                     userAgent = uAgent,
                                     referer = ref,
-                                    fallbackUrl = effectiveCapturedUrl
+                                    fallbackUrl = streamToDownload
                                 )
 
                                 Toast.makeText(
@@ -696,18 +701,58 @@ fun DownloaderModal(
                     // Option 1: Direct-Now (Deep Orange)
                     CircularOptionButton(
                         title = "Option 1",
-                        badgeText = "Direct-Now",
+                        badgeText = if (isResolvingOption1) "Loading..." else "Direct-Now",
                         icon = Icons.Default.PlayForWork,
                         isDeepOrange = true,
                         onClick = {
                             checkAndRequestPermissions {
-                                showQualitySelectionDialog = true
-                                if (effectiveCapturedUrl.lowercase().contains("m3u8")) {
-                                    isFetchingQualities = true
-                                    coroutineScope.launch {
-                                        val fetched = MediaDownloader.getHlsQualities(effectiveCapturedUrl)
-                                        detectedHlsQualities = fetched
-                                        isFetchingQualities = false
+                                coroutineScope.launch {
+                                    isResolvingOption1 = true
+                                    var directStreamUrl = capturedVideoUrl
+                                    var streamReferer: String? = null
+
+                                    val isCapturedDirectStream = !directStreamUrl.isNullOrBlank() &&
+                                        !directStreamUrl.contains("02moviedownloader.site") &&
+                                        !directStreamUrl.contains("videodownloader.site") &&
+                                        !directStreamUrl.startsWith("native://")
+
+                                    if (!isCapturedDirectStream) {
+                                        try {
+                                            val isAnime = title.contains("anime", ignoreCase = true) || imdbId.startsWith("anikoto_")
+                                            val streamResult = com.example.scraper.UnifiedStreamManager.getStream(
+                                                context = context,
+                                                title = title,
+                                                tmdbId = cleanImdb,
+                                                isTv = isSeries,
+                                                season = season,
+                                                episode = episode,
+                                                isAnime = isAnime
+                                            )
+                                            if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
+                                                directStreamUrl = streamResult.streamUrl
+                                                streamReferer = streamResult.referer ?: streamResult.headers["Referer"] ?: streamResult.headers["referer"]
+                                            }
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+                                    }
+
+                                    isResolvingOption1 = false
+
+                                    if (!directStreamUrl.isNullOrBlank() && !directStreamUrl.contains("02moviedownloader.site") && !directStreamUrl.contains("videodownloader.site")) {
+                                        activeResolvedStreamUrl = directStreamUrl
+                                        activeResolvedReferer = streamReferer
+                                        showQualitySelectionDialog = true
+                                        if (directStreamUrl.lowercase().contains("m3u8")) {
+                                            isFetchingQualities = true
+                                            val fetched = MediaDownloader.getHlsQualities(directStreamUrl, referer = streamReferer)
+                                            detectedHlsQualities = fetched
+                                            isFetchingQualities = false
+                                        }
+                                    } else {
+                                        // Seamlessly open in-app web downloader with direct download
+                                        selectedWebTitle = "Option 1 - Direct Downloader"
+                                        selectedWebUrl = movieDownloader02Url
                                     }
                                 }
                             }

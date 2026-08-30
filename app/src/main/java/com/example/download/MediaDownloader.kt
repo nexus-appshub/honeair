@@ -119,6 +119,93 @@ object MediaDownloader {
         }
     }
 
+    fun fetchStreamContent(
+        url: String,
+        userAgent: String? = null,
+        cookies: String? = null,
+        referer: String? = null
+    ): String {
+        val host = try { Uri.parse(url).host } catch (e: Exception) { null } ?: ""
+        val candidateRequests = mutableListOf<Request>()
+
+        // 1. Direct provided headers
+        candidateRequests.add(getRequest(url, userAgent, cookies, referer))
+
+        // 2. Host-derived Referer & Origin with Chrome UA
+        if (host.isNotEmpty()) {
+            val cookieVal = cookies ?: try {
+                android.webkit.CookieManager.getInstance().getCookie(url)
+            } catch (e: Exception) { null }
+
+            val reqBuilder = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                .header("Accept", "*/*")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Referer", "https://$host/")
+                .header("Origin", "https://$host")
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "cross-site")
+            if (!cookieVal.isNullOrBlank()) {
+                reqBuilder.header("Cookie", cookieVal)
+            }
+            candidateRequests.add(reqBuilder.build())
+        }
+
+        // 3. Known Stream Host Referers
+        val commonReferers = listOf(
+            "https://vidsrc.me/",
+            "https://vidsrc.to/",
+            "https://vidrock.net/",
+            "https://anikoto.cz/",
+            "https://autoembed.cc/",
+            "https://filxer.com/",
+            "https://2embed.cc/",
+            "https://02moviedownloader.site/"
+        )
+        for (ref in commonReferers) {
+            candidateRequests.add(
+                Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .header("Accept", "*/*")
+                    .header("Referer", ref)
+                    .build()
+            )
+        }
+
+        // 4. Android ExoPlayer User-Agent without Referer
+        candidateRequests.add(
+            Request.Builder()
+                .url(url)
+                .header("User-Agent", "ExoPlayerLib/2.19.1 (Linux; Android 14)")
+                .header("Accept", "*/*")
+                .build()
+        )
+
+        var lastCode = 0
+        var lastErr: Exception? = null
+        for (req in candidateRequests) {
+            try {
+                val resp = okHttpClient.newCall(req).execute()
+                lastCode = resp.code
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    resp.close()
+                    if (!body.isNullOrBlank()) {
+                        return body
+                    }
+                }
+                resp.close()
+            } catch (e: Exception) {
+                lastErr = e
+            }
+        }
+
+        throw Exception("Failed to fetch stream details (HTTP $lastCode)")
+    }
+
     fun getHlsQualities(
         url: String,
         userAgent: String? = null,
@@ -128,10 +215,10 @@ object MediaDownloader {
         if (!url.lowercase().contains("m3u8")) return emptyList()
 
         return try {
-            val request = getRequest(url, userAgent, cookies, referer)
-            val m3u8Content = okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                response.body?.string() ?: return emptyList()
+            val m3u8Content = try {
+                fetchStreamContent(url, userAgent, cookies, referer)
+            } catch (e: Exception) {
+                return emptyList()
             }
 
             val lines = m3u8Content.lines().map { it.trim() }.filter { it.isNotEmpty() }
@@ -465,13 +552,25 @@ object MediaDownloader {
         referer: String? = null
     ): Request {
         val reqBuilder = Request.Builder().url(url)
-        val ua = userAgent ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        val ua = userAgent ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         reqBuilder.header("User-Agent", ua)
+        reqBuilder.header("Accept", "*/*")
+        reqBuilder.header("Accept-Language", "en-US,en;q=0.9")
         if (!referer.isNullOrBlank()) {
             reqBuilder.header("Referer", referer)
+            try {
+                val refHost = Uri.parse(referer).host
+                if (!refHost.isNullOrBlank()) {
+                    reqBuilder.header("Origin", "https://$refHost")
+                }
+            } catch (e: Exception) {}
         }
-        if (!cookies.isNullOrBlank()) {
-            reqBuilder.header("Cookie", cookies)
+        val finalCookies = cookies ?: try {
+            android.webkit.CookieManager.getInstance().getCookie(url)
+        } catch (e: Exception) { null }
+
+        if (!finalCookies.isNullOrBlank()) {
+            reqBuilder.header("Cookie", finalCookies)
         }
         return reqBuilder.build()
     }
@@ -501,11 +600,7 @@ object MediaDownloader {
             index++
         }
 
-        val request = getRequest(m3u8Url, userAgent, cookies, referer)
-        val m3u8Content = okHttpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Failed to fetch stream details (HTTP ${response.code})")
-            response.body?.string() ?: throw Exception("Stream details empty")
-        }
+        val m3u8Content = fetchStreamContent(m3u8Url, userAgent, cookies, referer)
 
         val lines = m3u8Content.lines().map { it.trim() }.filter { it.isNotEmpty() }
         var mediaPlaylistUrl = m3u8Url
@@ -553,9 +648,10 @@ object MediaDownloader {
 
             if (matchedVariant != null) {
                 mediaPlaylistUrl = matchedVariant.url
-                val childRequest = getRequest(mediaPlaylistUrl, userAgent, cookies, referer)
-                val childContent = okHttpClient.newCall(childRequest).execute().use { response ->
-                    if (response.isSuccessful) response.body?.string() else null
+                val childContent = try {
+                    fetchStreamContent(mediaPlaylistUrl, userAgent, cookies, referer)
+                } catch (e: Exception) {
+                    null
                 }
                 if (childContent != null) {
                     return downloadMediaPlaylist(context, mediaPlaylistUrl, childContent, targetFile, notificationId, builder, notificationManager, downloadId, userAgent, cookies, referer)
@@ -565,9 +661,10 @@ object MediaDownloader {
             val childPlaylist = lines.firstOrNull { !it.startsWith("#") && (it.contains(".m3u8") || it.contains("index")) }
             if (childPlaylist != null) {
                 mediaPlaylistUrl = resolveAbsoluteUrl(m3u8Url, childPlaylist)
-                val childRequest = getRequest(mediaPlaylistUrl, userAgent, cookies, referer)
-                val childContent = okHttpClient.newCall(childRequest).execute().use { response ->
-                    if (response.isSuccessful) response.body?.string() else null
+                val childContent = try {
+                    fetchStreamContent(mediaPlaylistUrl, userAgent, cookies, referer)
+                } catch (e: Exception) {
+                    null
                 }
                 if (childContent != null) {
                     return downloadMediaPlaylist(context, mediaPlaylistUrl, childContent, targetFile, notificationId, builder, notificationManager, downloadId, userAgent, cookies, referer)
@@ -622,27 +719,64 @@ object MediaDownloader {
                 while (!success && retries > 0) {
                     checkCancellationAndPause(downloadId)
                     try {
-                        val segmentRequest = getRequest(segmentUrl, userAgent, cookies, referer)
-                        okHttpClient.newCall(segmentRequest).execute().use { response ->
-                            if (response.isSuccessful) {
-                                val byteStream = response.body?.byteStream() ?: throw Exception("Empty segment")
-                                var bytesRead: Int
-                                while (byteStream.read(buffer).also { bytesRead = it } != -1) {
-                                    checkCancellationAndPause(downloadId)
-                                    outputStream.write(buffer, 0, bytesRead)
+                        val host = try { Uri.parse(segmentUrl).host } catch (e: Exception) { null } ?: ""
+                        val segRequests = mutableListOf<Request>()
+                        segRequests.add(getRequest(segmentUrl, userAgent, cookies, referer))
+                        if (host.isNotEmpty()) {
+                            segRequests.add(
+                                Request.Builder()
+                                    .url(segmentUrl)
+                                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                                    .header("Accept", "*/*")
+                                    .header("Referer", "https://$host/")
+                                    .header("Origin", "https://$host")
+                                    .build()
+                            )
+                        }
+                        segRequests.add(
+                            Request.Builder()
+                                .url(segmentUrl)
+                                .header("User-Agent", "ExoPlayerLib/2.19.1 (Linux; Android 14)")
+                                .header("Accept", "*/*")
+                                .build()
+                        )
+
+                        var segResp: Response? = null
+                        for (req in segRequests) {
+                            try {
+                                val r = okHttpClient.newCall(req).execute()
+                                if (r.isSuccessful) {
+                                    segResp = r
+                                    break
                                 }
-                                byteStream.close()
-                                success = true
-                                if (segmentDelayMs > 120L) {
-                                    segmentDelayMs -= 10L
-                                }
-                            } else {
-                                retries--
-                                if (response.code == 429) {
+                                if (r.code == 429) {
+                                    r.close()
                                     segmentDelayMs = (segmentDelayMs * 2).coerceAtMost(2000L)
                                     Thread.sleep(segmentDelayMs)
+                                    break
                                 }
+                                r.close()
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
                             }
+                        }
+
+                        if (segResp != null && segResp.isSuccessful) {
+                            val byteStream = segResp.body?.byteStream() ?: throw Exception("Empty segment")
+                            var bytesRead: Int
+                            while (byteStream.read(buffer).also { bytesRead = it } != -1) {
+                                checkCancellationAndPause(downloadId)
+                                outputStream.write(buffer, 0, bytesRead)
+                            }
+                            byteStream.close()
+                            segResp.close()
+                            success = true
+                            if (segmentDelayMs > 120L) {
+                                segmentDelayMs -= 10L
+                            }
+                        } else {
+                            retries--
+                            Thread.sleep(300)
                         }
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
@@ -660,14 +794,16 @@ object MediaDownloader {
                 updateNotificationProgress(context, downloadId, percent, downloadedSegments.toLong(), totalSegments.toLong(), builder, notificationManager, notificationId)
             }
         } finally {
-            outputStream.flush()
-            outputStream.close()
+            try {
+                outputStream.flush()
+                outputStream.close()
+            } catch (e: Exception) {}
         }
 
-        if (targetFile.exists() && targetFile.length() < 5_000_000) {
+        if (targetFile.exists() && targetFile.length() < 10_000) {
             val length = targetFile.length()
             targetFile.delete()
-            throw Exception("Downloaded HLS file is too small (${length / 1024} KB). Stream may be expired or blocked.")
+            throw Exception("Downloaded HLS file is invalid (${length} bytes). Stream may be expired or blocked.")
         }
 
         return targetFile
