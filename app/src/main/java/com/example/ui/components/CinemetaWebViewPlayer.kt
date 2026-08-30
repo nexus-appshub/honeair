@@ -449,7 +449,7 @@ fun CinemetaWebViewPlayer(
             if (anikotoSeasons.isNotEmpty()) {
                 anikotoSeasons.forEach { s ->
                     if (!newMap.containsKey(s.number)) {
-                        newMap[s.number] = epNumbers
+                        newMap[s.number] = listOf(1)
                     }
                 }
             }

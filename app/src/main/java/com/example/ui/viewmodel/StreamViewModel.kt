@@ -1228,7 +1228,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     val details = com.example.scraper.AnikotoScraper.fetchAnimeDetails(watchUrl)
                     _anikotoDetailsState.value = details
 
-                    val seasons = com.example.scraper.AnikotoScraper.fetchSeasons(watchUrl)
+                    val seasons = com.example.scraper.AnikotoScraper.fetchSeasons(watchUrl, item.title)
                     _anikotoSeasons.value = seasons
 
                     val matchedSeasonUrl = seasons.find { it.number == selectedSeasonNum }?.watchUrl ?: watchUrl

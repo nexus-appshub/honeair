@@ -299,9 +299,14 @@ object AnikotoScraper {
     }
 
     /**
-     * Season Extraction API
+     * Enhanced Season Extraction API
+     * 1. Extracts seasons directly from DOM elements (.os-list, .seasons-block, #ani-seasons, etc.)
+     * 2. Checks Ajax watch-order endpoints (/api/watch-order/{id}, /ajax/watch-order/{id}, etc.)
+     * 3. Maps the current anime page to its correct season number
+     * 4. Discovers all seasons/parts/arcs belonging to the same anime franchise via search & suggestions
+     * 5. Returns a cleanly ordered, distinct list of AnikotoSeason objects with real watch URLs
      */
-    suspend fun fetchSeasons(watchUrlOrSlug: String): List<AnikotoSeason> = withContext(Dispatchers.IO) {
+    suspend fun fetchSeasons(watchUrlOrSlug: String, animeTitle: String? = null): List<AnikotoSeason> = withContext(Dispatchers.IO) {
         val seasons = mutableListOf<AnikotoSeason>()
         try {
             var fullUrl = watchUrlOrSlug
@@ -309,91 +314,185 @@ object AnikotoScraper {
                 fullUrl = "$BASE_URL/watch/$watchUrlOrSlug"
             }
             val html = fetchHtml(fullUrl, referer = "$BASE_URL/")
-            if (html.isBlank()) return@withContext emptyList()
+            val doc = if (html.isNotBlank()) Jsoup.parse(html, fullUrl) else null
 
-            val doc = Jsoup.parse(html, fullUrl)
-            
+            val pageTitle = doc?.selectFirst(".name.d-title, .film-name, h2.title, h1, .film-name a")?.text()?.trim()
+                ?: animeTitle ?: ""
+
+            // Helper to parse season number from title text
+            fun extractSeasonNumber(text: String, fallback: Int = 1): Int {
+                val sMatch = Regex("""(?i)\b(?:Season|S|Part|Cour)\s*(\d+)\b""").find(text)
+                if (sMatch != null) return sMatch.groupValues[1].toIntOrNull() ?: fallback
+                val ordMatch = Regex("""(?i)\b(\d+)(?:st|nd|rd|th)\s*Season\b""").find(text)
+                if (ordMatch != null) return ordMatch.groupValues[1].toIntOrNull() ?: fallback
+                val romanMatch = Regex("""(?i)\b(?:Season|S)\s*(I|II|III|IV|V|VI|VII|VIII)\b""").find(text)
+                if (romanMatch != null) {
+                    return when (romanMatch.groupValues[1].uppercase()) {
+                        "I" -> 1; "II" -> 2; "III" -> 3; "IV" -> 4; "V" -> 5; "VI" -> 6; "VII" -> 7; "VIII" -> 8; else -> fallback
+                    }
+                }
+                if (Regex("""(?i)\bFinal\s*Season\b""").containsMatchIn(text)) return 4
+                return fallback
+            }
+
+            val currentNum = extractSeasonNumber(pageTitle, 1)
+
+            // Add current page as a known season
+            seasons.add(
+                AnikotoSeason(
+                    number = currentNum,
+                    title = if (pageTitle.isNotBlank()) pageTitle else "Season $currentNum",
+                    watchUrl = fullUrl
+                )
+            )
+
             // 1. Direct on-page season elements
-            val seasonElements = doc.select(".os-list .os-item, .os-list a, .seasons-block a, #seasons a, .dropdown-menu a[href*='/watch/'], #ani-seasons a, #w-related a[href*='/watch/']")
-            var count = 1
-            for (el in seasonElements) {
-                val href = el.attr("href") ?: ""
-                if (href.contains("/watch/") && !href.contains("/episode/")) {
-                    val title = el.text().trim().ifEmpty { "Season $count" }
-                    val fullSeasonUrl = if (href.startsWith("http")) href else "$BASE_URL$href"
-                    if (seasons.none { it.watchUrl == fullSeasonUrl }) {
-                        val numMatch = Regex("""\b(?:Season|S|s|Part|Cour)\s*(\d+)\b""", RegexOption.IGNORE_CASE).find(title)
-                        val num = numMatch?.groupValues?.get(1)?.toIntOrNull() ?: count
-                        seasons.add(
-                            AnikotoSeason(
-                                number = num,
-                                title = title,
-                                watchUrl = fullSeasonUrl
+            if (doc != null) {
+                val seasonElements = doc.select(".os-list .os-item, .os-list a, .seasons-block a, .seasons-block .item, #seasons a, .dropdown-menu a[href*='/watch/'], #ani-seasons a, #ani-seasons .item, #w-related a[href*='/watch/'], .block_area-seasons a, .ss-list a[href*='/watch/']")
+                var counter = 1
+                for (el in seasonElements) {
+                    val href = el.attr("href") ?: ""
+                    if (href.contains("/watch/") && !href.contains("/episode/")) {
+                        val title = el.text().trim().ifEmpty { el.attr("title").trim() }.ifEmpty { "Season $counter" }
+                        val fullSeasonUrl = if (href.startsWith("http")) href else "$BASE_URL$href"
+                        val num = extractSeasonNumber(title, counter)
+                        if (seasons.none { it.watchUrl == fullSeasonUrl }) {
+                            seasons.add(
+                                AnikotoSeason(
+                                    number = num,
+                                    title = title,
+                                    watchUrl = fullSeasonUrl
+                                )
                             )
-                        )
-                        count++
+                            counter++
+                        }
+                    }
+                }
+
+                // 2. Fetch watch-order / relations via Ajax if animeDataId is present
+                var animeDataId = doc.selectFirst(".anis-watch-wrap[data-id], #wrapper[data-id], .film_detail[data-id], #detail-infor[data-id], [data-id]")?.attr("data-id") ?: ""
+                if (animeDataId.isBlank()) {
+                    val match = Regex("""(?:data-id|anime_id|animeId|movie_id|film_id)\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?""").find(html)
+                    if (match != null) {
+                        animeDataId = match.groupValues.getOrNull(1) ?: ""
+                    }
+                }
+                if (animeDataId.isBlank()) {
+                    val cleanPath = fullUrl.substringBefore("/ep-").substringBefore("?").trimEnd('/')
+                    val lastDash = cleanPath.substringAfterLast("-")
+                    if (lastDash.isNotBlank() && lastDash.length in 2..8) {
+                        animeDataId = lastDash
+                    }
+                }
+
+                if (animeDataId.isNotBlank()) {
+                    val woUrls = listOf(
+                        "$BASE_URL/api/watch-order/$animeDataId",
+                        "$AJAX_URL/watch-order/$animeDataId",
+                        "$AJAX_URL/season/list/$animeDataId"
+                    )
+                    for (woUrl in woUrls) {
+                        try {
+                            val request = Request.Builder()
+                                .url(woUrl)
+                                .header("User-Agent", DEFAULT_UA)
+                                .header("X-Requested-With", "XMLHttpRequest")
+                                .header("Referer", fullUrl)
+                                .build()
+                            val res = httpClient.newCall(request).execute()
+                            val body = res.body?.string() ?: ""
+                            var resultHtml = body
+                            if (body.startsWith("{")) {
+                                val jsObj = JSONObject(body)
+                                resultHtml = jsObj.optString("result", jsObj.optString("html", body))
+                            }
+                            if (resultHtml.isNotBlank()) {
+                                val woDoc = Jsoup.parse(resultHtml)
+                                val items = woDoc.select(".item a[href*='/watch/'], a[href*='/watch/']")
+                                for (el in items) {
+                                    val href = el.attr("href") ?: ""
+                                    if (href.contains("/watch/")) {
+                                        val fullSeasonUrl = if (href.startsWith("http")) href else "$BASE_URL$href"
+                                        val nameEl = el.selectFirst(".name, .d-title, .title") ?: el
+                                        val itemTitle = nameEl.text().trim().ifEmpty { el.attr("title").trim() }
+                                        if (itemTitle.isNotEmpty() && seasons.none { it.watchUrl == fullSeasonUrl }) {
+                                            val num = extractSeasonNumber(itemTitle, seasons.size + 1)
+                                            seasons.add(
+                                                AnikotoSeason(
+                                                    number = num,
+                                                    title = itemTitle,
+                                                    watchUrl = fullSeasonUrl
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "watch-order parsing error: ${e.message}")
+                        }
                     }
                 }
             }
 
-            // 2. Fetch watch-order via ajax if animeDataId is present
-            var animeDataId = doc.selectFirst(".anis-watch-wrap[data-id], #wrapper[data-id], .film_detail[data-id], [data-id]")?.attr("data-id") ?: ""
-            if (animeDataId.isBlank()) {
-                val match = Regex("""(?:data-id|anime_id|animeId|movie_id|film_id)\s*[:=]\s*["']?(\d+)["']?""").find(html)
-                if (match != null) {
-                    animeDataId = match.groupValues.getOrNull(1) ?: ""
-                }
-            }
-            if (animeDataId.isNotBlank()) {
+            // 3. Franchise search for all seasons
+            val baseTitleCandidate = if (pageTitle.isNotBlank()) pageTitle else (animeTitle ?: "")
+            val baseTitle = baseTitleCandidate
+                .replace(Regex("""(?i)\s*(?:[-–—:]\s*)?(?:Season\s*\d+|[0-9]+(?:st|nd|rd|th)\s*Season|Part\s*\d+|Cour\s*\d+|Final\s*Season|Final\s*Chapter|II|III|IV|V|VI).*$"""), "")
+                .replace(Regex("""(?i)\s*\((?:TV|Dub|Sub|Official)\)"""), "")
+                .trim()
+
+            if (baseTitle.length >= 3) {
                 try {
-                    val woUrl = "$BASE_URL/api/watch-order/$animeDataId"
-                    val request = Request.Builder()
-                        .url(woUrl)
-                        .header("User-Agent", DEFAULT_UA)
-                        .header("X-Requested-With", "XMLHttpRequest")
-                        .header("Referer", fullUrl)
-                        .build()
-                    val res = httpClient.newCall(request).execute()
-                    val body = res.body?.string() ?: ""
-                    var resultHtml = body
-                    if (body.startsWith("{")) {
-                        val jsObj = JSONObject(body)
-                        resultHtml = jsObj.optString("result", jsObj.optString("html", body))
-                    }
-                    if (resultHtml.isNotBlank()) {
-                        val woDoc = Jsoup.parse(resultHtml)
-                        val items = woDoc.select(".item a[href*='/watch/']")
-                        for (el in items) {
-                            val href = el.attr("href") ?: ""
-                            if (href.contains("/watch/")) {
-                                val fullSeasonUrl = if (href.startsWith("http")) href else "$BASE_URL$href"
-                                val nameEl = el.selectFirst(".name, .d-title") ?: el
-                                val itemTitle = nameEl.text().trim().ifEmpty { el.attr("title").trim() }
-                                if (itemTitle.isNotEmpty() && seasons.none { it.watchUrl == fullSeasonUrl }) {
-                                    val numMatch = Regex("""\b(?:Season|S|s|Part|Cour)\s*(\d+)\b""", RegexOption.IGNORE_CASE).find(itemTitle)
-                                    val num = numMatch?.groupValues?.get(1)?.toIntOrNull() ?: (seasons.size + 1)
-                                    seasons.add(
-                                        AnikotoSeason(
-                                            number = num,
-                                            title = itemTitle,
-                                            watchUrl = fullSeasonUrl
-                                        )
+                    val searchItems = searchOrFilterAnime(keyword = baseTitle, sortBy = "latest-updated")
+                    val normalizedBase = baseTitle.lowercase().replace(Regex("[^a-z0-9]"), "")
+
+                    for (sItem in searchItems) {
+                        val itemNorm = sItem.title.lowercase().replace(Regex("[^a-z0-9]"), "")
+                        val isRelatedFranchise = itemNorm.contains(normalizedBase) || normalizedBase.contains(itemNorm)
+                        val isExcluded = sItem.type.equals("Movie", ignoreCase = true) && !sItem.title.contains("Mugen Train", ignoreCase = true)
+
+                        if (isRelatedFranchise && !isExcluded) {
+                            val num = extractSeasonNumber(sItem.title, if (itemNorm == normalizedBase) 1 else seasons.size + 1)
+                            if (seasons.none { it.watchUrl == sItem.watchUrl }) {
+                                seasons.add(
+                                    AnikotoSeason(
+                                        number = num,
+                                        title = sItem.title,
+                                        watchUrl = sItem.watchUrl
                                     )
-                                }
+                                )
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "watch-order parsing error: ${e.message}")
+                    Log.w(TAG, "Franchise season search failed: ${e.message}")
                 }
             }
+
         } catch (e: Exception) {
             Log.e(TAG, "fetchSeasons error: ${e.message}", e)
         }
+
         if (seasons.isEmpty()) {
             seasons.add(AnikotoSeason(number = 1, title = "Season 1", watchUrl = watchUrlOrSlug))
         }
-        seasons.distinctBy { it.number }.sortedBy { it.number }
+
+        val distinctSeasons = seasons.distinctBy { it.watchUrl }
+        val sorted = distinctSeasons.sortedWith(
+            compareBy<AnikotoSeason> { it.number }
+                .thenBy { it.title }
+        )
+
+        val finalSeasons = mutableListOf<AnikotoSeason>()
+        var nextNum = 1
+        for (s in sorted) {
+            val assignedNum = if (finalSeasons.none { it.number == s.number }) s.number else nextNum
+            finalSeasons.add(s.copy(number = assignedNum))
+            nextNum = maxOf(nextNum, assignedNum) + 1
+        }
+
+        finalSeasons.sortedBy { it.number }
     }
 
     /**
@@ -430,7 +529,7 @@ object AnikotoScraper {
             val rating = doc.selectFirst(".rating, .imdb-rating, .tick-item.tick-imdb")?.text()?.trim() ?: ""
             val releaseYear = doc.selectFirst(".year, .release-year")?.text()?.trim() ?: ""
 
-            val seasons = fetchSeasons(fullUrl)
+            val seasons = fetchSeasons(fullUrl, title)
             val episodes = fetchEpisodes(fullUrl)
 
             return@withContext AnikotoDetails(
@@ -451,8 +550,9 @@ object AnikotoScraper {
     /**
      * 2. Episode Extraction API
      * Pipeline:
-     * - Checks internal anime ID from DOM or slug (e.g. 'clxsl', 'lh0li', 'gqc')
+     * - Checks internal anime ID from DOM, script tags, and URL slug
      * - Hits GET https://anikoto.cz/ajax/episode/list/{anime_internal_id}
+     * - Hits fallback endpoints for full coverage
      * - Parses each episode with episode_id (data-id) and data-ids token
      */
     suspend fun fetchEpisodes(watchUrlOrSlug: String): List<AnikotoEpisode> = withContext(Dispatchers.IO) {
@@ -465,32 +565,46 @@ object AnikotoScraper {
 
             Log.d(TAG, "Fetching episode list for: $fullUrl (Referer: $fullUrl)")
             val html = fetchHtml(fullUrl, referer = "$BASE_URL/")
-            if (html.isBlank()) return@withContext emptyList()
+            val doc = if (html.isNotBlank()) Jsoup.parse(html, fullUrl) else null
 
-            val doc = Jsoup.parse(html, fullUrl)
+            // 1. Get internal anime ID from DOM, script tags, or URL slug
+            val animeDataIds = mutableListOf<String>()
 
-            // 1. Get internal anime ID from DOM or URL slug
-            var animeDataId = doc.selectFirst(".anis-watch-wrap[data-id], #wrapper[data-id], .film_detail[data-id], [data-id]")?.attr("data-id") ?: ""
-            if (animeDataId.isBlank() || animeDataId.length > 10) {
-                // Try extracting id from slug e.g. solo-leveling-lh0li/ep-1 -> lh0li, or naruto-674 -> 674
-                val cleanPath = fullUrl.substringBefore("/ep-").substringBefore("?").trimEnd('/')
-                val lastDash = cleanPath.substringAfterLast("-")
-                if (lastDash.isNotBlank() && lastDash.length in 2..8) {
-                    animeDataId = lastDash
+            if (doc != null) {
+                val dataIdAttr = doc.selectFirst(".anis-watch-wrap[data-id], #wrapper[data-id], .film_detail[data-id], #detail-infor[data-id], .watch-player[data-id], [data-id]")?.attr("data-id") ?: ""
+                if (dataIdAttr.isNotBlank() && dataIdAttr.length <= 15) {
+                    animeDataIds.add(dataIdAttr)
+                }
+
+                val inputId = doc.selectFirst("input#movie_id, input#anime_id, input[name='movie_id'], input[name='anime_id']")?.attr("value") ?: ""
+                if (inputId.isNotBlank() && !animeDataIds.contains(inputId)) {
+                    animeDataIds.add(inputId)
+                }
+
+                val scriptText = doc.html()
+                val match = Regex("""(?:data-id|anime_id|animeId|movie_id|film_id|syncId)\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?""").find(scriptText)
+                if (match != null) {
+                    val idFromScript = match.groupValues.getOrNull(1) ?: ""
+                    if (idFromScript.isNotBlank() && !animeDataIds.contains(idFromScript)) {
+                        animeDataIds.add(idFromScript)
+                    }
                 }
             }
-            if (animeDataId.isBlank()) {
-                val scriptText = doc.html()
-                val match = Regex("""(?:data-id|anime_id|animeId|movie_id|film_id)\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?""").find(scriptText)
-                if (match != null) {
-                    animeDataId = match.groupValues.getOrNull(1) ?: ""
-                }
+
+            // Slug id e.g. solo-leveling-lh0li/ep-1 -> lh0li, or naruto-674 -> 674
+            val cleanPath = fullUrl.substringBefore("/ep-").substringBefore("?").trimEnd('/')
+            val lastDash = cleanPath.substringAfterLast("-").substringAfterLast("/")
+            if (lastDash.isNotBlank() && lastDash.length in 2..12 && !animeDataIds.contains(lastDash)) {
+                animeDataIds.add(lastDash)
             }
 
             val ajaxUrls = mutableListOf<String>()
-            if (animeDataId.isNotBlank()) {
-                ajaxUrls.add("$AJAX_URL/episode/list/$animeDataId")
-                ajaxUrls.add("$AJAX_URL/panel?id=$animeDataId")
+            for (id in animeDataIds) {
+                ajaxUrls.add("$AJAX_URL/episode/list/$id")
+                ajaxUrls.add("$BASE_URL/ajax/v2/episode/list/$id")
+                ajaxUrls.add("$BASE_URL/ajax/episode/list/$id")
+                ajaxUrls.add("$AJAX_URL/season/episodes/$id")
+                ajaxUrls.add("$AJAX_URL/panel?id=$id")
             }
 
             for (ajaxUrl in ajaxUrls) {
@@ -500,6 +614,7 @@ object AnikotoScraper {
                         .header("User-Agent", DEFAULT_UA)
                         .header("X-Requested-With", "XMLHttpRequest")
                         .header("Referer", fullUrl)
+                        .header("Accept", "application/json, text/javascript, */*; q=0.01")
                         .build()
 
                     val res = httpClient.newCall(request).execute()
@@ -507,22 +622,34 @@ object AnikotoScraper {
                     var resultHtml = body
                     if (body.startsWith("{")) {
                         val jsObj = JSONObject(body)
-                        resultHtml = jsObj.optString("result", jsObj.optString("html", body))
+                        resultHtml = jsObj.optString("result", jsObj.optString("html", jsObj.optString("data", body)))
                     }
 
                     if (resultHtml.isNotBlank()) {
                         val epDoc = Jsoup.parse(resultHtml)
-                        val epElements = epDoc.select(".episodes.name a, .ep-range a, a[data-id], a[data-ids], a.ep-item, li[title] a, .episodes a")
+                        val epElements = epDoc.select(".episodes.name a, .ep-range a, a[data-id], a[data-ids], a.ep-item, li[title] a, .episodes a, .ssl-item, .ep-item, a[href*='?ep='], a[href*='/ep-']")
                         for (epEl in epElements) {
-                            val dataId = epEl.attr("data-id").ifEmpty { epEl.attr("data-number") }
-                            val dataNum = epEl.attr("data-num").ifEmpty { epEl.attr("data-slug") }
-                            val num = dataNum.toIntOrNull() ?: (episodes.size + 1)
-                            val title = epEl.attr("title").ifEmpty { 
-                                epEl.parent()?.attr("title") ?: epEl.selectFirst(".d-title")?.text() ?: epEl.text().trim().ifEmpty { "Episode $num" }
-                            }
-                            val dataIds = epEl.attr("data-ids").ifEmpty { dataId }
+                            val dataId = epEl.attr("data-id").ifEmpty { epEl.attr("data-ids") }.ifEmpty { epEl.attr("data-number") }.ifEmpty { epEl.attr("id") }
+                            val dataIds = epEl.attr("data-ids").ifEmpty { epEl.attr("data-id") }.ifEmpty { dataId }
 
-                            if (episodes.none { it.number == num }) {
+                            val num = epEl.attr("data-number").toIntOrNull()
+                                ?: epEl.attr("data-num").toIntOrNull()
+                                ?: epEl.attr("data-slug").toIntOrNull()
+                                ?: epEl.selectFirst(".ssli-order, .order, .ep-order, .num, .number, .ep-no")?.text()?.trim()?.toIntOrNull()
+                                ?: Regex("""[?&]ep=(\d+)""").find(epEl.attr("href"))?.groupValues?.get(1)?.toIntOrNull()
+                                ?: Regex("""/ep-(\d+)""").find(epEl.attr("href"))?.groupValues?.get(1)?.toIntOrNull()
+                                ?: Regex("""(?i)\b(?:Episode|Ep\.?|#)\s*(\d+)\b""").find(epEl.attr("title").ifEmpty { epEl.text() })?.groupValues?.get(1)?.toIntOrNull()
+                                ?: (episodes.size + 1)
+
+                            val rawTitle = epEl.attr("title").ifEmpty { epEl.parent()?.attr("title") ?: "" }
+                            val innerName = epEl.selectFirst(".ep-name, .ssli-detail .name, .d-title, .ep-title, .name")?.text()?.trim() ?: ""
+                            val title = when {
+                                innerName.isNotBlank() && !innerName.equals("Episode $num", ignoreCase = true) -> "Episode $num: $innerName"
+                                rawTitle.isNotBlank() -> rawTitle
+                                else -> epEl.text().trim().ifEmpty { "Episode $num" }
+                            }
+
+                            if (dataId.isNotBlank() && episodes.none { it.number == num }) {
                                 episodes.add(
                                     AnikotoEpisode(
                                         id = dataId,
@@ -541,18 +668,20 @@ object AnikotoScraper {
             }
 
             // Fallback: parse direct on-page episode links if ajax was empty
-            if (episodes.isEmpty()) {
-                val onPageEps = doc.select(".episodes.name a, .ep-range a, a[data-id], a[data-ids], .ss-list a, .ep-item a, a[href*='/watch/']")
+            if (episodes.isEmpty() && doc != null) {
+                val onPageEps = doc.select(".episodes.name a, .ep-range a, a[data-id], a[data-ids], .ss-list a, .ep-item, a[href*='/ep-'], a[href*='?ep='], #episodes a, .film-episodes a")
                 for (epEl in onPageEps) {
                     val href = epEl.attr("href")
-                    if (href.contains("/ep-") || epEl.hasAttr("data-id")) {
-                        val dataId = epEl.attr("data-id").ifEmpty { epEl.attr("data-number") }
-                        val numMatch = Regex("""/ep-(\d+)""").find(href)
-                        val num = numMatch?.groupValues?.get(1)?.toIntOrNull()
-                            ?: epEl.attr("data-num").toIntOrNull()
-                            ?: (episodes.size + 1)
-                        val title = epEl.attr("title").ifEmpty { epEl.text().trim().ifEmpty { "Episode $num" } }
+                    if (href.contains("/ep-") || href.contains("?ep=") || epEl.hasAttr("data-id") || epEl.hasAttr("data-number")) {
+                        val dataId = epEl.attr("data-id").ifEmpty { epEl.attr("data-ids") }.ifEmpty { epEl.attr("data-number") }
                         val dataIds = epEl.attr("data-ids").ifEmpty { dataId }
+                        val num = epEl.attr("data-number").toIntOrNull()
+                            ?: epEl.attr("data-num").toIntOrNull()
+                            ?: Regex("""/ep-(\d+)""").find(href)?.groupValues?.get(1)?.toIntOrNull()
+                            ?: Regex("""[?&]ep=(\d+)""").find(href)?.groupValues?.get(1)?.toIntOrNull()
+                            ?: (episodes.size + 1)
+                        val rawTitle = epEl.attr("title").ifEmpty { epEl.text().trim() }
+                        val title = if (rawTitle.isNotBlank()) rawTitle else "Episode $num"
                         if (episodes.none { it.number == num }) {
                             episodes.add(
                                 AnikotoEpisode(
@@ -906,7 +1035,7 @@ object AnikotoScraper {
                 matchedAnime.watchUrl
             }
 
-            val seasons = fetchSeasons(matchedWatchUrl)
+            val seasons = fetchSeasons(matchedWatchUrl, title)
             val seasonWatchUrl = seasons.find { it.number == season }?.watchUrl ?: matchedWatchUrl
 
             val episodes = fetchEpisodes(seasonWatchUrl)
