@@ -702,8 +702,10 @@ object MediaDownloader {
         val outputStream = FileOutputStream(targetFile)
         val totalSegments = segmentUrls.size
         var downloadedSegments = 0
+        var totalBytesDownloadedSoFar = 0L
         val buffer = ByteArray(65536)
         var segmentDelayMs = 120L
+        var lastUpdateMs = 0L
 
         try {
             for (i in 0 until totalSegments) {
@@ -767,6 +769,16 @@ object MediaDownloader {
                             while (byteStream.read(buffer).also { bytesRead = it } != -1) {
                                 checkCancellationAndPause(downloadId)
                                 outputStream.write(buffer, 0, bytesRead)
+                                totalBytesDownloadedSoFar += bytesRead
+                                val currentMs = System.currentTimeMillis()
+                                if (currentMs - lastUpdateMs > 300) {
+                                    val percent = ((downloadedSegments * 100) / totalSegments).coerceIn(0, 100)
+                                    val approxTotalBytes = if (downloadedSegments > 0) {
+                                        (totalBytesDownloadedSoFar * totalSegments) / downloadedSegments
+                                    } else -1L
+                                    updateNotificationProgress(context, downloadId, percent, totalBytesDownloadedSoFar, approxTotalBytes, builder, notificationManager, notificationId)
+                                    lastUpdateMs = currentMs
+                                }
                             }
                             byteStream.close()
                             segResp.close()
@@ -791,7 +803,10 @@ object MediaDownloader {
 
                 downloadedSegments++
                 val percent = ((downloadedSegments * 100) / totalSegments).coerceIn(0, 100)
-                updateNotificationProgress(context, downloadId, percent, downloadedSegments.toLong(), totalSegments.toLong(), builder, notificationManager, notificationId)
+                val estimatedTotalBytes = if (downloadedSegments > 0) {
+                    (totalBytesDownloadedSoFar * totalSegments) / downloadedSegments
+                } else -1L
+                updateNotificationProgress(context, downloadId, percent, totalBytesDownloadedSoFar, estimatedTotalBytes, builder, notificationManager, notificationId)
             }
         } finally {
             try {
@@ -994,9 +1009,10 @@ object MediaDownloader {
                 byteStream.close()
             }
 
-            if (bytesCopied < 5_000_000) {
+            if (bytesCopied < 10_000) {
+                val len = targetFile.length()
                 targetFile.delete()
-                throw Exception("Downloaded file is too small (${bytesCopied / 1024} KB). Stream link may have expired or is invalid.")
+                throw Exception("Downloaded file is invalid ($len bytes). Stream link may have expired or is invalid.")
             }
         }
 
