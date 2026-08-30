@@ -199,26 +199,18 @@ fun MovieExoPlayerView(
             }
 
         player.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlayingChanged: Boolean) {
-                isPlaying = isPlayingChanged
-            }
-
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                isPlaying = playWhenReady && (playbackState == Player.STATE_READY || playbackState == Player.STATE_BUFFERING)
+                isPlaying = playWhenReady
             }
 
             override fun onPlaybackStateChanged(state: Int) {
                 playbackState = state
                 if (state == Player.STATE_READY) {
                     errorMessage = null
-                    isPlaying = player.isPlaying
-                } else if (state == Player.STATE_ENDED) {
-                    isPlaying = false
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                errorMessage = error.message ?: "Playback error encountered."
                 onPlaybackError(error.message ?: "Playback error encountered.")
             }
         })
@@ -431,7 +423,6 @@ fun MovieExoPlayerView(
                 PlayerView(ctx).apply {
                     keepScreenOn = true
                     useController = false
-                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                     this.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,

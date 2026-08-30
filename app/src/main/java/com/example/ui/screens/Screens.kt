@@ -7093,6 +7093,7 @@ fun SettingsScreen(
 
     // 3. Help Centre Bottom Sheet
     if (showHelpCenterSheet) {
+        val langFontFamily = remember(selectedAudioIndex) { com.example.ui.theme.AppTranslation.getFontFamily(selectedAudioIndex) }
         ModalBottomSheet(
             onDismissRequest = { showHelpCenterSheet = false },
             containerColor = Color(0xFF1C1C1E)
@@ -7102,46 +7103,89 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .padding(24.dp)
             ) {
-                Text(
-                    text = "Help Centre & User Manual",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.HelpOutline,
+                        contentDescription = "Help",
+                        tint = Color(0xFFFF6B00),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        text = com.example.ui.theme.AppTranslation.getString("help_centre_title", selectedAudioIndex),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = langFontFamily,
+                        color = Color.White
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // User Manual Card
+                // User Manual Card with Step-by-Step Server Guidelines
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = Color(0xFF2C2C2E),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.Info, contentDescription = "Guide", tint = Color(0xFFFF6B00), modifier = Modifier.size(20.dp))
-                            Text("Streaming & Server Guide", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = "Guide", tint = Color(0xFFFF6B00), modifier = Modifier.size(20.dp))
+                                Text(
+                                    text = com.example.ui.theme.AppTranslation.getString("server_guide_title", selectedAudioIndex),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = langFontFamily,
+                                    fontSize = 15.sp
+                                )
+                            }
                         }
 
-                        Text(
-                            text = " Server Selection: If a movie, anime, or TV show fails to load or play on the 1st server, simply switch to Server 2 or Server 3 from the server list for uninterrupted streaming.",
-                            color = Color.LightGray,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
+                        val steps = listOf(
+                            "step_1_title" to "step_1_desc",
+                            "step_2_title" to "step_2_desc",
+                            "step_3_title" to "step_3_desc",
+                            "step_4_title" to "step_4_desc",
+                            "step_5_title" to "step_5_desc"
                         )
 
-                        Text(
-                            text = " Ad Interruption Tip: When playing media for the first time in the app, external ads or pop-ups may occasionally appear and interrupt playback. If this occurs, simply close the video player once and restart the same video. On your second attempt, it will play smoothly without any issues.",
-                            color = Color.LightGray,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
+                        items(steps.size) { index ->
+                            val (titleKey, descKey) = steps[index]
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF222224), RoundedCornerShape(10.dp))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = com.example.ui.theme.AppTranslation.getString(titleKey, selectedAudioIndex),
+                                    color = Color(0xFFFF9E40),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = langFontFamily,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = com.example.ui.theme.AppTranslation.getString(descKey, selectedAudioIndex),
+                                    color = Color.LightGray,
+                                    fontFamily = langFontFamily,
+                                    fontSize = 12.sp,
+                                    lineHeight = 17.sp
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -7169,7 +7213,12 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(Icons.Default.Email, contentDescription = "Email", tint = Color(0xFFFF6B00))
-                        Text("Email Support: xubilas.era@gmail.com", color = Color.White, fontSize = 14.sp)
+                        Text(
+                            text = com.example.ui.theme.AppTranslation.getString("email_support", selectedAudioIndex),
+                            color = Color.White,
+                            fontFamily = langFontFamily,
+                            fontSize = 13.sp
+                        )
                     }
                 }
 

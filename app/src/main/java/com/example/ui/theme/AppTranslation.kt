@@ -6,6 +6,16 @@ import java.util.Locale
 
 object AppTranslation {
 
+    fun getFontFamily(audioIndex: Int): androidx.compose.ui.text.font.FontFamily {
+        return when (audioIndex) {
+            2 -> androidx.compose.ui.text.font.FontFamily.SansSerif // Bengali
+            4 -> androidx.compose.ui.text.font.FontFamily.SansSerif // Hindi
+            5 -> androidx.compose.ui.text.font.FontFamily.Default   // Japanese
+            8 -> androidx.compose.ui.text.font.FontFamily.Default   // Arabic
+            else -> androidx.compose.ui.text.font.FontFamily.Default
+        }
+    }
+
     fun applyAppLocale(context: Context, audioIndex: Int) {
         val langTag = when (audioIndex) {
             1 -> "en"
@@ -73,6 +83,19 @@ object AppTranslation {
         "my_saved_channels" -> "My Saved Channels"
         "streaming_history" -> "Streaming History"
         "clear_all" -> "Clear All"
+        "help_centre_title" -> "Help Centre & Server Manual"
+        "server_guide_title" -> "Streaming & Server Guide (Step-by-Step)"
+        "step_1_title" -> "1. Primary Native Server (Servers)"
+        "step_1_desc" -> "Direct high-speed streaming via ExoPlayer CDN with instant start, subtitles, and PIP support. Ideal for daily streaming."
+        "step_2_title" -> "2. Optional Vid Servers (Sr-1, Sr-2 VidSrc.sbs, etc.)"
+        "step_2_desc" -> "If an episode fails on Native or when watching multi-season Anime, switch to Sr-1 (Vidnest) or Sr-2 (VidSrc.sbs). Auto-TMDB matching ensures instant connection."
+        "step_3_title" -> "3. Multi-Season Anime & Dub/Sub"
+        "step_3_desc" -> "Easily change Seasons and Episodes directly from the player drawer. Toggle Sub and Dub audio sources seamlessly."
+        "step_4_title" -> "4. Ad & Pop-up Handling"
+        "step_4_desc" -> "If an external web ad appears on third-party embed servers, close the player once and re-open to stream smoothly."
+        "step_5_title" -> "5. Fast Downloads"
+        "step_5_desc" -> "Tap the Download icon in the player bar to initiate direct background video download."
+        "email_support" -> "Email Support: xubilas.era@gmail.com"
         else -> key
     }
 
@@ -107,6 +130,19 @@ object AppTranslation {
         "downloads" -> "ডাউনলোড"
         "watch_history" -> "ওয়াচ হিস্ট্রি"
         "clear_all" -> "সব মুছুন"
+        "help_centre_title" -> "হেল্প সেন্টার ও সার্ভার নির্দেশিকা"
+        "server_guide_title" -> "স্ট্রিমিং ও সার্ভার ব্যবহার নির্দেশিকা (ধাপে ধাপে)"
+        "step_1_title" -> "১. প্রধান নেটিভ সার্ভার (Servers)"
+        "step_1_desc" -> "ExoPlayer সিডিএন দিয়ে অতি দ্রুত সরাসরি প্লেব্যাক, সাবটাইটেল এবং পিকচার-ইন-পিকচার (PIP) সাপোর্ট। প্রতিদিনের স্ট্রিমিংয়ের জন্য সেরা।"
+        "step_2_title" -> "২. বিকল্প ভিডিও সার্ভার (Sr-1, Sr-2 VidSrc.sbs ইত্যাদি)"
+        "step_2_desc" -> "কোনো এপিসোড নেটিভে না চললে বা মাল্টি-সিজন অ্যানিমে দেখতে Sr-1 (Vidnest) অথবা Sr-2 (VidSrc.sbs)-এ ক্লিক করুন। অটো TMDB সার্চের মাধ্যমে সহজে চলবে।"
+        "step_3_title" -> "৩. মাল্টি-সিজন অ্যানিমে ও সাব/ডাব"
+        "step_3_desc" -> "প্লেয়ারের বটম শিট থেকে সরাসরি সিজন ও পর্ব পরিবর্তন করতে পারেন। সাবটাইটেল (Sub) বা ডাবিং (Dub) অডিও বেছে নিয়ে উপভোগ করুন।"
+        "step_4_title" -> "৪. বিজ্ঞাপন ও পুনরায় চালু করার টিপস"
+        "step_4_desc" -> "বাহ্যিক ওয়েব সার্ভারে কোনো পপ-আপ বিজ্ঞাপন এলে প্লেয়ারটি একবার ক্লোজ করে পুনরায় ওপেন করলেই ভিডিও স্মুথলি চলবে।"
+        "step_5_title" -> "৫. দ্রুত ভিডিও ডাউনলোড"
+        "step_5_desc" -> "প্লেয়ারের ডাউনলোড আইকনে ট্যাপ করে যেকোনো সার্ভার থেকে সরাসরি ভিডিও ডাউনলোড করতে পারেন।"
+        "email_support" -> "ইমেইল সাপোর্ট: xubilas.era@gmail.com"
         else -> getEnglish(key)
     }
 

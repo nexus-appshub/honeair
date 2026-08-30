@@ -278,10 +278,10 @@ fun CinemetaWebViewPlayer(
             true
         } else if (isExplicitMovieInDetail) {
             false
-        } else if (t == "series" || t == "tv" || itemType == "series" || itemType == "tv") {
-            true
         } else if (t == "movie" || itemType == "movie") {
             false
+        } else if (t == "series" || t == "tv" || itemType == "series" || itemType == "tv") {
+            true
         } else {
             cat.contains("series", ignoreCase = true) || cat.contains("tv show", ignoreCase = true) ||
             cat.contains("natok", ignoreCase = true) || isEpisodic
@@ -293,20 +293,20 @@ fun CinemetaWebViewPlayer(
     val isAnime = remember(currentMediaItem, title, type) {
         val id = currentMediaItem?.id ?: ""
         val cat = currentMediaItem?.category?.lowercase() ?: ""
-        val t = (currentMediaItem?.title ?: title).lowercase().trim()
-        id.startsWith("anikoto", ignoreCase = true) ||
+        val t = (currentMediaItem?.title ?: title).lowercase()
+        id.contains("anikoto", ignoreCase = true) ||
         cat.contains("anime") || type.equals("anime", ignoreCase = true) ||
-        (cat.isEmpty() && (
-            t == "naruto" || t.startsWith("naruto:") || t.startsWith("naruto ") ||
-            t == "boruto" || t.startsWith("boruto:") || t.startsWith("boruto ") ||
-            t == "one piece" || t.startsWith("one piece:") ||
-            t.contains("demon slayer") || t.contains("attack on titan") ||
-            t.contains("jujutsu kaisen") || t.contains("my hero academia") ||
-            t.contains("dragon ball z") || t.contains("dragon ball super") ||
-            t.contains("death note") || t.contains("fullmetal alchemist") ||
-            t.contains("hunter x hunter") || t.contains("solo leveling") ||
-            t.contains("chainsaw man")
-        ))
+        t.contains("naruto") || t.contains("boruto") || t.contains("one piece") || t.contains("demon slayer") || t.contains("attack on titan") ||
+        t.contains("duke's son") || t.contains("dukes son") || t.contains("claims he won't love me") ||
+        t.contains("jujutsu") || t.contains("kaisen") || t.contains("academia") || t.contains("bleach") ||
+        t.contains("kono suba") || t.contains("reincarnated") || t.contains("isekai") || t.contains("solo leveling") ||
+        t.contains("tensei") || t.contains("sword art") || t.contains("black clover") || t.contains("frieren") ||
+        t.contains("chainsaw") || t.contains("blue lock") || t.contains("spy x") || t.contains("oshi no") ||
+        t.contains("kaiju") || t.contains("haikyu") || t.contains("stone") || t.contains("baki") ||
+        t.contains("ghoul") || t.contains("fairy tail") || t.contains("death note") || t.contains("hunter x") ||
+        t.contains("manga") || t.contains("slime") || t.contains("classroom of the") || t.contains("konosuba") ||
+        t.contains("dragon ball") || t.contains("pokemon") || t.contains("excalibur") || t.contains("shippuden") ||
+        t.contains("apothecary") || t.contains("elusive") || t.contains("failure frame") || t.contains("gundam")
     }
 
     // Automatic In-App Scraping to enable ExoPlayer playback immediately
@@ -617,36 +617,101 @@ fun CinemetaWebViewPlayer(
         }
     }
 
+    var resolvedTmdbId by remember(imdbId, title) {
+        mutableStateOf<String?>(if (imdbId.startsWith("tt") || (imdbId.isNotBlank() && imdbId.all { it.isDigit() })) imdbId else null)
+    }
+
+    LaunchedEffect(imdbId, title, isAnime) {
+        if (resolvedTmdbId == null || (!resolvedTmdbId!!.startsWith("tt") && !resolvedTmdbId!!.all { it.isDigit() })) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val client = OkHttpClient.Builder()
+                        .connectTimeout(6, TimeUnit.SECONDS)
+                        .readTimeout(6, TimeUnit.SECONDS)
+                        .build()
+
+                    val cleanTitle = title
+                        .replace(Regex("""(?i)\s*(?:[-–—:]\s*)?(?:Season\s*\d+|[0-9]+(?:st|nd|rd|th)\s*Season|Part\s*\d+|Cour\s*\d+|Final\s*Season|Final\s*Chapter|II|III|IV|V|VI).*$"""), "")
+                        .replace(Regex("""(?i)\s*\((?:TV|Dub|Sub|Official|Uncensored)\)"""), "")
+                        .trim()
+                    val enc = java.net.URLEncoder.encode(if (cleanTitle.isNotBlank()) cleanTitle else title, "UTF-8")
+
+                    var foundId: String? = null
+
+                    val searchTvUrl = "https://api.themoviedb.org/3/search/tv?query=$enc&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
+                    val req = Request.Builder().url(searchTvUrl).build()
+                    val resp = client.newCall(req).execute()
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrEmpty()) {
+                            val j = JSONObject(body)
+                            val res = j.optJSONArray("results")
+                            if (res != null && res.length() > 0) {
+                                val numId = res.getJSONObject(0).optInt("id", 0)
+                                if (numId > 0) foundId = numId.toString()
+                            }
+                        }
+                    }
+
+                    if (foundId == null) {
+                        val searchMultiUrl = "https://api.themoviedb.org/3/search/multi?query=$enc&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
+                        val reqMulti = Request.Builder().url(searchMultiUrl).build()
+                        val respMulti = client.newCall(reqMulti).execute()
+                        if (respMulti.isSuccessful) {
+                            val body = respMulti.body?.string()
+                            if (!body.isNullOrEmpty()) {
+                                val j = JSONObject(body)
+                                val res = j.optJSONArray("results")
+                                if (res != null && res.length() > 0) {
+                                    val numId = res.getJSONObject(0).optInt("id", 0)
+                                    if (numId > 0) foundId = numId.toString()
+                                }
+                            }
+                        }
+                    }
+
+                    if (foundId != null) {
+                        withContext(Dispatchers.Main) {
+                            resolvedTmdbId = foundId
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
     val encodedTitle = remember(title) {
         try { java.net.URLEncoder.encode(title, "UTF-8") } catch (e: Exception) { title }
     }
 
-    // Primary & Fallback URL calculation (Sr-0 Native, Sr-1 English, Sr-2..Sr-12 Embeds)
-    val embedServers = remember(imdbId, isSeries, currentSeason, currentEpisode, encodedTitle, allMediaItems, nativeStreamUrl, youtubeVideoId, capturedVideoUrl) {
+    // Primary & Fallback URL calculation (Sr-0 Native, Sr-1 English, Sr-2..Sr-10 Embeds)
+    val embedServers = remember(imdbId, resolvedTmdbId, isSeries, currentSeason, currentEpisode, encodedTitle, allMediaItems, nativeStreamUrl, youtubeVideoId, capturedVideoUrl) {
         val servers = mutableListOf<Pair<String, String>>()
         
         // Sr-0: Native Direct Player (ExoPlayer with direct CDN / Scraped stream)
         val directUrl = capturedVideoUrl ?: effectiveNativeUrl ?: "native://sr0"
         servers.add(Pair("Servers", directUrl))
 
-        val isImdb = imdbId.startsWith("tt")
+        val effectiveId = resolvedTmdbId ?: (if (imdbId.startsWith("tt") || (imdbId.isNotBlank() && imdbId.all { it.isDigit() })) imdbId else "")
+        val isImdb = effectiveId.startsWith("tt")
         val tmdbOrImdb = if (isImdb) "imdb" else "tmdb"
         
-        val vidsrcSbsUrl = if (!isSeries) "https://vidsrc.sbs/embed/movie/$imdbId" else "https://vidsrc.sbs/embed/tv/$imdbId/$currentSeason/$currentEpisode"
+        val vidsrcSbsUrl = if (!isSeries) "https://vidsrc.sbs/embed/movie/$effectiveId" else "https://vidsrc.sbs/embed/tv/$effectiveId/$currentSeason/$currentEpisode"
         
-        // Sr-1 (English) and Sr-2 to Sr-12 Web Embed Servers
-        servers.add(Pair("English", if (!isSeries) "https://vidsrc2.ru/embed/movie/$imdbId" else "https://vidsrc2.ru/embed/tv/$imdbId/$currentSeason/$currentEpisode"))
-        servers.add(Pair("Sr-1", if (!isSeries) "https://vidnest.fun/movie/$imdbId" else "https://vidnest.fun/tv/$imdbId/$currentSeason/$currentEpisode"))
+        // Sr-1 (English) and Sr-2 to Sr-10 Web Embed Servers
+        servers.add(Pair("English", if (!isSeries) "https://vidsrc2.ru/embed/movie/$effectiveId" else "https://vidsrc2.ru/embed/tv/$effectiveId/$currentSeason/$currentEpisode"))
+        servers.add(Pair("Sr-1", if (!isSeries) "https://vidnest.fun/movie/$effectiveId" else "https://vidnest.fun/tv/$effectiveId/$currentSeason/$currentEpisode"))
         servers.add(Pair("Sr-2", vidsrcSbsUrl))
-        servers.add(Pair("Sr-3", if (!isSeries) "https://vidsrc.to/embed/movie/$imdbId" else "https://vidsrc.to/embed/tv/$imdbId/$currentSeason/$currentEpisode"))
-        servers.add(Pair("Sr-4", if (!isSeries) "https://vidlink.pro/movie/$imdbId" else "https://vidlink.pro/tv/$imdbId/$currentSeason/$currentEpisode"))
-        servers.add(Pair("Sr-5", if (!isSeries) "https://vidsrc.me/embed/movie?${tmdbOrImdb}=$imdbId" else "https://vidsrc.me/embed/tv?${tmdbOrImdb}=$imdbId&season=$currentSeason&episode=$currentEpisode"))
-        servers.add(Pair("Sr-6", if (!isSeries) "https://autoembed.co/movie/tmdb/$imdbId" else "https://autoembed.co/tv/tmdb/$imdbId-$currentSeason-$currentEpisode"))
-        servers.add(Pair("Sr-7", if (!isSeries) "https://vidsrc.in/embed/movie/$imdbId" else "https://vidsrc.in/embed/tv/$imdbId/$currentSeason/$currentEpisode"))
-        servers.add(Pair("Sr-8", if (!isSeries) "https://player.smashy.stream/movie/$imdbId" else "https://player.smashy.stream/tv/$imdbId?s=$currentSeason&e=$currentEpisode"))
-        servers.add(Pair("Sr-9", if (!isSeries) "https://player.videasy.net/movie/$imdbId" else "https://player.videasy.net/tv/$imdbId/$currentSeason/$currentEpisode"))
-        servers.add(Pair("Sr-10", if (!isSeries) "https://02moviedownloader.site/api/download/movie/$imdbId" else "https://02moviedownloader.site/api/download/tv/$imdbId/$currentSeason/$currentEpisode"))
-        servers.add(Pair("Sr-11", if (!isSeries) "https://fmovies4u.com/embed/movie/$imdbId?autoPlay=false" else "https://fmovies4u.com/embed/tv/$imdbId/$currentSeason/$currentEpisode?autoPlay=false"))
+        servers.add(Pair("Sr-3", if (!isSeries) "https://vidsrc.to/embed/movie/$effectiveId" else "https://vidsrc.to/embed/tv/$effectiveId/$currentSeason/$currentEpisode"))
+        servers.add(Pair("Sr-4", if (!isSeries) "https://vidlink.pro/movie/$effectiveId" else "https://vidlink.pro/tv/$effectiveId/$currentSeason/$currentEpisode"))
+        servers.add(Pair("Sr-5", if (!isSeries) "https://vidsrc.me/embed/movie?${tmdbOrImdb}=$effectiveId" else "https://vidsrc.me/embed/tv?${tmdbOrImdb}=$effectiveId&season=$currentSeason&episode=$currentEpisode"))
+        servers.add(Pair("Sr-6", if (!isSeries) "https://autoembed.co/movie/tmdb/$effectiveId" else "https://autoembed.co/tv/tmdb/$effectiveId-$currentSeason-$currentEpisode"))
+        servers.add(Pair("Sr-7", if (!isSeries) "https://vidsrc.in/embed/movie/$effectiveId" else "https://vidsrc.in/embed/tv/$effectiveId/$currentSeason/$currentEpisode"))
+        servers.add(Pair("Sr-8", if (!isSeries) "https://player.smashy.stream/movie/$effectiveId" else "https://player.smashy.stream/tv/$effectiveId?s=$currentSeason&e=$currentEpisode"))
+        servers.add(Pair("Sr-9", if (!isSeries) "https://player.videasy.net/movie/$effectiveId" else "https://player.videasy.net/tv/$effectiveId/$currentSeason/$currentEpisode"))
+        servers.add(Pair("Sr-10", if (!isSeries) "https://02moviedownloader.site/api/download/movie/$effectiveId" else "https://02moviedownloader.site/api/download/tv/$effectiveId/$currentSeason/$currentEpisode"))
 
         servers
     }
