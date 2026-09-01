@@ -56,8 +56,17 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 import com.example.network.SmartNetworkBoosterEngine
 import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.NeonMagenta
+import com.example.ui.theme.DeepSlate
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.BorderColor
 import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.SpaceBlack
 import kotlinx.coroutines.delay
@@ -891,15 +900,7 @@ fun MovieExoPlayerView(
                         // Subtitles ON / OFF & Language Selector Button
                         IconButton(
                             onClick = {
-                                if (subtitles.isEmpty()) {
-                                    isSubtitlesEnabled = !isSubtitlesEnabled
-                                    subtitleHudMessage = if (isSubtitlesEnabled) "Subtitles: ON" else "Subtitles: OFF"
-                                } else if (subtitles.size == 1) {
-                                    isSubtitlesEnabled = !isSubtitlesEnabled
-                                    subtitleHudMessage = if (isSubtitlesEnabled) "Subtitles: ${subtitles.first().label}" else "Subtitles: OFF"
-                                } else {
-                                    showSubtitleMenu = true
-                                }
+                                showSubtitleMenu = true
                             },
                             modifier = Modifier
                                 .size(if (isFullScreen) 32.dp else 28.dp)
@@ -1086,55 +1087,186 @@ fun MovieExoPlayerView(
             }
         }
 
-        // Subtitles selection dialog popup
+        // Subtitles selection dialog popup (Small & Compact Popup Window)
         if (showSubtitleMenu) {
+            var subtitleFilterQuery by remember { mutableStateOf("") }
+            val distinctTracks = remember(subtitles) {
+                if (subtitles.isNotEmpty()) {
+                    subtitles.distinctBy { it.url }
+                } else emptyList()
+            }
+            val filteredTrackList = remember(distinctTracks, subtitleFilterQuery) {
+                if (subtitleFilterQuery.isBlank()) {
+                    distinctTracks
+                } else {
+                    distinctTracks.filter {
+                        it.label.contains(subtitleFilterQuery, ignoreCase = true) ||
+                        it.lang.contains(subtitleFilterQuery, ignoreCase = true)
+                    }
+                }
+            }
+
             Dialog(onDismissRequest = { showSubtitleMenu = false }) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                    modifier = Modifier.width(300.dp)
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141416)),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(NeonCyan.copy(alpha = 0.5f), NeonMagenta.copy(alpha = 0.3f)))),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
+                    modifier = Modifier
+                        .width(310.dp)
+                        .wrapContentHeight()
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = "Subtitles & Captions",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Select language or toggle subtitles",
-                            color = Color.Gray,
-                            fontSize = 12.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
+                        // Header with icon, title & close button
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonCyan.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Subtitles,
+                                        contentDescription = null,
+                                        tint = NeonCyan,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = if (distinctTracks.isNotEmpty()) "Subtitles (${distinctTracks.size})" else "Subtitles & CC",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 15.sp
+                                )
+                            }
 
-                        // Option 1: Off
+                            IconButton(
+                                onClick = { showSubtitleMenu = false },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color.Gray,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Search Filter Bar (if 5 or more subtitles available)
+                        if (distinctTracks.size >= 5) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF202024))
+                                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 10.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "Search",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    BasicTextField(
+                                        value = subtitleFilterQuery,
+                                        onValueChange = { subtitleFilterQuery = it },
+                                        singleLine = true,
+                                        textStyle = androidx.compose.ui.text.TextStyle(
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        cursorBrush = SolidColor(NeonCyan),
+                                        decorationBox = { innerTextField ->
+                                            if (subtitleFilterQuery.isEmpty()) {
+                                                Text(
+                                                    text = "Search language (Bangla, Eng...)",
+                                                    color = Color.Gray,
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                            innerTextField()
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (subtitleFilterQuery.isNotEmpty()) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear",
+                                            tint = Color.Gray,
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .clickable { subtitleFilterQuery = "" }
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                        }
+
+                        // Option 1: "Subtitles Off"
                         val isOff = !isSubtitlesEnabled
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     isSubtitlesEnabled = false
+                                    selectedSubtitleLang = null
                                     subtitleHudMessage = "Subtitles: OFF"
                                     showSubtitleMenu = false
                                 }
-                                .background(if (isOff) NeonMagenta.copy(alpha = 0.12f) else Color.Transparent)
-                                .padding(vertical = 12.dp, horizontal = 16.dp),
+                                .background(if (isOff) NeonMagenta.copy(alpha = 0.15f) else Color(0xFF1E1E22))
+                                .border(
+                                    1.dp,
+                                    if (isOff) NeonMagenta.copy(alpha = 0.5f) else Color.Transparent,
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(vertical = 9.dp, horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = "Off (Disabled)",
-                                color = if (isOff) NeonMagenta else Color.White,
-                                fontWeight = if (isOff) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = 14.sp
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SubtitlesOff,
+                                    contentDescription = null,
+                                    tint = if (isOff) NeonMagenta else Color.Gray,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Turn Off Subtitles",
+                                    color = if (isOff) NeonMagenta else Color.White.copy(alpha = 0.85f),
+                                    fontWeight = if (isOff) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 13.sp
+                                )
+                            }
                             if (isOff) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
@@ -1145,43 +1277,151 @@ fun MovieExoPlayerView(
                             }
                         }
 
-                        // Subtitle options
-                        val trackList = if (subtitles.isNotEmpty()) {
-                            subtitles.distinctBy { it.lang.lowercase() + it.label.lowercase() }
-                        } else {
-                            listOf(com.example.scraper.SubtitleTrack(url = "", lang = "en", label = "English (Auto)"))
-                        }
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                        trackList.forEach { track ->
-                            val isSelected = isSubtitlesEnabled && (selectedSubtitleLang == track.lang || (selectedSubtitleLang == null && track.default))
-                            Row(
+                        // Subtitle List (Compact Scrollable Container)
+                        if (distinctTracks.isEmpty()) {
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        isSubtitlesEnabled = true
-                                        selectedSubtitleLang = track.lang
-                                        subtitleHudMessage = "Subtitles: ${track.label}"
-                                        showSubtitleMenu = false
-                                    }
-                                    .background(if (isSelected) NeonCyan.copy(alpha = 0.08f) else Color.Transparent)
-                                    .padding(vertical = 12.dp, horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .height(90.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF1B1B1E))
+                                    .padding(12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "Searching available subtitles...",
+                                        color = Color.LightGray,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    CircularProgressIndicator(
+                                        color = NeonCyan,
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                }
+                            }
+                        } else if (filteredTrackList.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(70.dp),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = track.label,
-                                    color = if (isSelected) NeonCyan else Color.White,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 14.sp
+                                    text = "No matching language found",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp
                                 )
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(16.dp)
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(filteredTrackList) { track ->
+                                    val isSelected = isSubtitlesEnabled && (
+                                        selectedSubtitleLang == track.lang || 
+                                        (selectedSubtitleLang == null && track.default) ||
+                                        (selectedSubtitleLang == track.label)
                                     )
+                                    
+                                    val isBanglaTrack = track.lang.startsWith("bn", ignoreCase = true) || 
+                                        track.label.contains("Bengali", ignoreCase = true) || 
+                                        track.label.contains("বাংলা")
+                                    
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable {
+                                                isSubtitlesEnabled = true
+                                                selectedSubtitleLang = track.lang
+                                                subtitleHudMessage = "Subtitles: ${track.label}"
+                                                showSubtitleMenu = false
+                                            }
+                                            .background(
+                                                if (isSelected) NeonCyan.copy(alpha = 0.14f)
+                                                else if (isBanglaTrack) Color(0xFF10B981).copy(alpha = 0.08f)
+                                                else Color(0xFF1E1E22)
+                                            )
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) NeonCyan.copy(alpha = 0.6f)
+                                                else if (isBanglaTrack) Color(0xFF10B981).copy(alpha = 0.3f)
+                                                else Color.Transparent,
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(vertical = 9.dp, horizontal = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ClosedCaption,
+                                                contentDescription = null,
+                                                tint = if (isSelected) NeonCyan else if (isBanglaTrack) Color(0xFF10B981) else Color.LightGray,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            
+                                            Column {
+                                                Text(
+                                                    text = track.label,
+                                                    color = if (isSelected) NeonCyan else Color.White,
+                                                    fontWeight = if (isSelected || isBanglaTrack) FontWeight.Bold else FontWeight.Medium,
+                                                    fontSize = 13.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (track.lang.isNotBlank() && track.lang != "en" && !track.label.contains(track.lang, ignoreCase = true)) {
+                                                    Text(
+                                                        text = track.lang.uppercase(),
+                                                        color = Color.Gray,
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = NeonCyan,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        } else {
+                                            val formatTag = when {
+                                                track.url.contains(".vtt", ignoreCase = true) -> "VTT"
+                                                track.url.contains(".srt", ignoreCase = true) -> "SRT"
+                                                track.url.contains(".ass", ignoreCase = true) -> "ASS"
+                                                else -> "CC"
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(Color.White.copy(alpha = 0.08f))
+                                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = formatTag,
+                                                    color = Color.Gray,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
