@@ -119,6 +119,28 @@ object MediaDownloader {
         }
     }
 
+    fun resolveDefaultReferer(url: String): String {
+        val lower = url.lowercase()
+        return when {
+            lower.contains("megaplay") || lower.contains("kryntal") -> "https://megaplay.buzz/"
+            lower.contains("anikoto") -> "https://anikoto.cz/"
+            lower.contains("dokicloud") -> "https://dokicloud.one/"
+            lower.contains("rabbitstream") -> "https://rabbitstream.net/"
+            lower.contains("megacloud") -> "https://megacloud.tv/"
+            lower.contains("animanga") -> "https://tiktoks.animanga.fun/"
+            lower.contains("vidnest") -> "https://vidnest.fun/"
+            lower.contains("rogflix") -> "https://rogflix.fun/"
+            lower.contains("vidrock") -> "https://vidrock.net/"
+            lower.contains("vidlink") -> "https://vidlink.pro/"
+            lower.contains("02movie") -> "https://02moviedownloader.site/"
+            lower.contains("vidsrc") -> "https://vidsrc.me/"
+            else -> {
+                val host = try { Uri.parse(url).host } catch (e: Exception) { null }
+                if (!host.isNullOrBlank()) "https://$host/" else "https://anikoto.cz/"
+            }
+        }
+    }
+
     fun fetchStreamContent(
         url: String,
         userAgent: String? = null,
@@ -128,10 +150,31 @@ object MediaDownloader {
         val host = try { Uri.parse(url).host } catch (e: Exception) { null } ?: ""
         val candidateRequests = mutableListOf<Request>()
 
-        // 1. Direct provided headers
-        candidateRequests.add(getRequest(url, userAgent, cookies, referer))
+        // 1. Direct provided / auto-detected referer request
+        val effectiveReferer = if (!referer.isNullOrBlank()) referer else resolveDefaultReferer(url)
+        candidateRequests.add(getRequest(url, userAgent, cookies, effectiveReferer))
 
-        // 2. Host-derived Referer & Origin with Chrome UA
+        // 2. Anikoto / Megaplay specific referers if applicable
+        val isAnikotoOrMegaplay = url.contains("megaplay") || url.contains("kryntal") || url.contains("anikoto") ||
+                effectiveReferer.contains("anikoto") || effectiveReferer.contains("megaplay") || effectiveReferer.contains("kryntal")
+        if (isAnikotoOrMegaplay) {
+            for (ref in listOf("https://megaplay.buzz/", "https://anikoto.cz/", "https://kryntal.top/", "https://dokicloud.one/")) {
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .header("Accept", "*/*")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Referer", ref)
+                    .header("Origin", ref.removeSuffix("/"))
+                    .header("Sec-Fetch-Dest", "empty")
+                    .header("Sec-Fetch-Mode", "cors")
+                    .header("Sec-Fetch-Site", "cross-site")
+                    .build()
+                candidateRequests.add(req)
+            }
+        }
+
+        // 3. Host-derived Referer & Origin with Chrome UA
         if (host.isNotEmpty()) {
             val cookieVal = cookies ?: try {
                 android.webkit.CookieManager.getInstance().getCookie(url)
@@ -153,12 +196,14 @@ object MediaDownloader {
             candidateRequests.add(reqBuilder.build())
         }
 
-        // 3. Known Stream Host Referers
+        // 4. Known Stream Host Referers
         val commonReferers = listOf(
-            "https://vidsrc.me/",
-            "https://vidsrc.to/",
-            "https://vidrock.net/",
             "https://anikoto.cz/",
+            "https://megaplay.buzz/",
+            "https://kryntal.top/",
+            "https://vidnest.fun/",
+            "https://vidrock.net/",
+            "https://vidsrc.me/",
             "https://autoembed.cc/",
             "https://filxer.com/",
             "https://2embed.cc/",
@@ -171,11 +216,15 @@ object MediaDownloader {
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                     .header("Accept", "*/*")
                     .header("Referer", ref)
+                    .header("Origin", ref.removeSuffix("/"))
+                    .header("Sec-Fetch-Dest", "empty")
+                    .header("Sec-Fetch-Mode", "cors")
+                    .header("Sec-Fetch-Site", "cross-site")
                     .build()
             )
         }
 
-        // 4. Android ExoPlayer User-Agent without Referer
+        // 5. Android ExoPlayer User-Agent without Referer
         candidateRequests.add(
             Request.Builder()
                 .url(url)
@@ -556,15 +605,22 @@ object MediaDownloader {
         reqBuilder.header("User-Agent", ua)
         reqBuilder.header("Accept", "*/*")
         reqBuilder.header("Accept-Language", "en-US,en;q=0.9")
-        if (!referer.isNullOrBlank()) {
-            reqBuilder.header("Referer", referer)
-            try {
-                val refHost = Uri.parse(referer).host
-                if (!refHost.isNullOrBlank()) {
-                    reqBuilder.header("Origin", "https://$refHost")
-                }
-            } catch (e: Exception) {}
-        }
+        reqBuilder.header("sec-ch-ua", "\"Google Chrome\";v=\"124\", \"Chromium\";v=\"124\", \"Not-A.Brand\";v=\"99\"")
+        reqBuilder.header("sec-ch-ua-mobile", "?0")
+        reqBuilder.header("sec-ch-ua-platform", "\"Windows\"")
+        reqBuilder.header("Sec-Fetch-Dest", "empty")
+        reqBuilder.header("Sec-Fetch-Mode", "cors")
+        reqBuilder.header("Sec-Fetch-Site", "cross-site")
+
+        val effectiveReferer = if (!referer.isNullOrBlank()) referer else resolveDefaultReferer(url)
+        reqBuilder.header("Referer", effectiveReferer)
+        try {
+            val refHost = Uri.parse(effectiveReferer).host
+            if (!refHost.isNullOrBlank()) {
+                reqBuilder.header("Origin", "https://$refHost")
+            }
+        } catch (e: Exception) {}
+
         val finalCookies = cookies ?: try {
             android.webkit.CookieManager.getInstance().getCookie(url)
         } catch (e: Exception) { null }
@@ -723,15 +779,42 @@ object MediaDownloader {
                     try {
                         val host = try { Uri.parse(segmentUrl).host } catch (e: Exception) { null } ?: ""
                         val segRequests = mutableListOf<Request>()
-                        segRequests.add(getRequest(segmentUrl, userAgent, cookies, referer))
+                        val effectiveSegRef = if (!referer.isNullOrBlank()) referer else resolveDefaultReferer(segmentUrl)
+                        segRequests.add(getRequest(segmentUrl, userAgent, cookies, effectiveSegRef))
+
+                        val isAnikotoOrMegaplay = segmentUrl.contains("megaplay") || segmentUrl.contains("kryntal") || segmentUrl.contains("anikoto") ||
+                                effectiveSegRef.contains("anikoto") || effectiveSegRef.contains("megaplay") || effectiveSegRef.contains("kryntal")
+
+                        if (isAnikotoOrMegaplay) {
+                            for (ref in listOf("https://megaplay.buzz/", "https://anikoto.cz/", "https://kryntal.top/", "https://dokicloud.one/")) {
+                                segRequests.add(
+                                    Request.Builder()
+                                        .url(segmentUrl)
+                                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                                        .header("Accept", "*/*")
+                                        .header("Accept-Language", "en-US,en;q=0.9")
+                                        .header("Referer", ref)
+                                        .header("Origin", ref.removeSuffix("/"))
+                                        .header("Sec-Fetch-Dest", "empty")
+                                        .header("Sec-Fetch-Mode", "cors")
+                                        .header("Sec-Fetch-Site", "cross-site")
+                                        .build()
+                                )
+                            }
+                        }
+
                         if (host.isNotEmpty()) {
                             segRequests.add(
                                 Request.Builder()
                                     .url(segmentUrl)
                                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                                     .header("Accept", "*/*")
+                                    .header("Accept-Language", "en-US,en;q=0.9")
                                     .header("Referer", "https://$host/")
                                     .header("Origin", "https://$host")
+                                    .header("Sec-Fetch-Dest", "empty")
+                                    .header("Sec-Fetch-Mode", "cors")
+                                    .header("Sec-Fetch-Site", "cross-site")
                                     .build()
                             )
                         }
@@ -856,70 +939,76 @@ object MediaDownloader {
 
         while (retries > 0 && response == null) {
             checkCancellationAndPause(downloadId)
-            try {
-                val req = getRequest(fileUrl, userAgent, cookies, referer)
-                val resp = okHttpClient.newCall(req).execute()
-                lastStatusCode = resp.code
-                if (resp.isSuccessful) {
-                    response = resp
-                    break
+            val effectiveFileRef = if (!referer.isNullOrBlank()) referer else resolveDefaultReferer(fileUrl)
+            val candidateReqs = mutableListOf<Request>()
+            candidateReqs.add(getRequest(fileUrl, userAgent, cookies, effectiveFileRef))
+
+            val isAnikotoOrMegaplay = fileUrl.contains("megaplay") || fileUrl.contains("kryntal") || fileUrl.contains("anikoto") ||
+                    effectiveFileRef.contains("anikoto") || effectiveFileRef.contains("megaplay") || effectiveFileRef.contains("kryntal")
+
+            if (isAnikotoOrMegaplay) {
+                for (ref in listOf("https://megaplay.buzz/", "https://anikoto.cz/", "https://kryntal.top/", "https://dokicloud.one/")) {
+                    candidateReqs.add(
+                        Request.Builder()
+                            .url(fileUrl)
+                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                            .header("Accept", "video/webm,video/mp4,video/*;q=0.9,*/*;q=0.8")
+                            .header("Accept-Language", "en-US,en;q=0.9")
+                            .header("Referer", ref)
+                            .header("Origin", ref.removeSuffix("/"))
+                            .header("Sec-Fetch-Dest", "empty")
+                            .header("Sec-Fetch-Mode", "cors")
+                            .header("Sec-Fetch-Site", "cross-site")
+                            .build()
+                    )
                 }
-                if (resp.code == 429) {
-                    resp.close()
-                    retries--
-                    if (retries > 0) {
-                        Thread.sleep(delayMs)
-                        delayMs *= 2
-                        continue
-                    }
-                }
-                resp.close()
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                lastException = e
             }
 
-            try {
-                val uri = try { Uri.parse(fileUrl) } catch (ex: Exception) { null }
-                val host = uri?.host ?: ""
-                val altBuilder = Request.Builder()
-                    .url(fileUrl)
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                    .header("Accept", "video/webm,video/mp4,video/*;q=0.9,*/*;q=0.8")
-
-                if (!referer.isNullOrBlank()) {
-                    altBuilder.header("Referer", referer)
-                } else if (host.isNotEmpty()) {
-                    altBuilder.header("Referer", "https://$host/")
-                }
-
-                val finalCookies = cookies ?: try {
+            val uri = try { Uri.parse(fileUrl) } catch (ex: Exception) { null }
+            val host = uri?.host ?: ""
+            if (host.isNotEmpty()) {
+                val cookieVal = cookies ?: try {
                     android.webkit.CookieManager.getInstance().getCookie(fileUrl)
                 } catch (ex: Exception) { null }
 
-                if (!finalCookies.isNullOrBlank()) {
-                    altBuilder.header("Cookie", finalCookies)
+                val b = Request.Builder()
+                    .url(fileUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .header("Accept", "video/webm,video/mp4,video/*;q=0.9,*/*;q=0.8")
+                    .header("Accept-Language", "en-US,en;q=0.9")
+                    .header("Referer", "https://$host/")
+                    .header("Origin", "https://$host")
+                    .header("Sec-Fetch-Dest", "empty")
+                    .header("Sec-Fetch-Mode", "cors")
+                    .header("Sec-Fetch-Site", "cross-site")
+                if (!cookieVal.isNullOrBlank()) {
+                    b.header("Cookie", cookieVal)
                 }
+                candidateReqs.add(b.build())
+            }
 
-                val respAlt = okHttpClient.newCall(altBuilder.build()).execute()
-                lastStatusCode = respAlt.code
-                if (respAlt.isSuccessful) {
-                    response = respAlt
-                    break
-                }
-                if (respAlt.code == 429) {
-                    respAlt.close()
-                    retries--
-                    if (retries > 0) {
-                        Thread.sleep(delayMs)
-                        delayMs *= 2
-                        continue
+            for (req in candidateReqs) {
+                try {
+                    val resp = okHttpClient.newCall(req).execute()
+                    lastStatusCode = resp.code
+                    if (resp.isSuccessful) {
+                        response = resp
+                        break
                     }
+                    if (resp.code == 429) {
+                        resp.close()
+                        retries--
+                        if (retries > 0) {
+                            Thread.sleep(delayMs)
+                            delayMs *= 2
+                        }
+                        break
+                    }
+                    resp.close()
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    lastException = e
                 }
-                respAlt.close()
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                lastException = e
             }
 
             retries--

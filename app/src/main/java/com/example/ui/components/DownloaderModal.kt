@@ -312,7 +312,7 @@ fun DownloaderModal(
                                 val streamToDownload = activeResolvedStreamUrl ?: effectiveCapturedUrl
                                 val downloadUrl = matchedHls?.url ?: streamToDownload
                                 val uAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                                val defaultRef = if (downloadUrl.contains("vidsrc")) "https://vidsrc.me/" else if (downloadUrl.contains("02movie")) "https://02moviedownloader.site/" else null
+                                val defaultRef = MediaDownloader.resolveDefaultReferer(downloadUrl)
                                 val ref = activeResolvedReferer ?: defaultRef
 
                                 MediaDownloader.downloadFile(
