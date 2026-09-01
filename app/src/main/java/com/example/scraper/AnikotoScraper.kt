@@ -923,6 +923,29 @@ object AnikotoScraper {
             }
 
             // 3. Fallback Regex Parsing if not resolved
+            if (subtitles.isEmpty()) {
+                val subRegexes = listOf(
+                    """(?:tracks|subtitles|captions)\s*:\s*(\[[^\]]+\])""".toRegex(RegexOption.IGNORE_CASE),
+                    """["'](https?://[^"']+\.(?:vtt|srt)[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE)
+                )
+                for (regex in subRegexes) {
+                    val matches = regex.findAll(html)
+                    for (m in matches) {
+                        val subUrl = m.groupValues.getOrNull(1) ?: m.value
+                        if (subUrl.startsWith("http") && (subUrl.contains(".vtt") || subUrl.contains(".srt"))) {
+                            subtitles.add(
+                                AnikotoSubtitle(
+                                    url = subUrl,
+                                    lang = "en",
+                                    label = "English",
+                                    default = subtitles.isEmpty()
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
             if (m3u8Url.isNullOrBlank()) {
                 val m3u8Regexes = listOf(
                     """(?:file|source|src)\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)["']""".toRegex(),
@@ -940,7 +963,7 @@ object AnikotoScraper {
             }
 
             if (!m3u8Url.isNullOrBlank()) {
-                Log.d(TAG, "Successfully extracted master M3U8: $m3u8Url")
+                Log.d(TAG, "Successfully extracted master M3U8: $m3u8Url with ${subtitles.size} subtitles")
                 val streamHeaders = mapOf(
                     "User-Agent" to DEFAULT_UA,
                     "Referer" to "$embedOrigin/",
@@ -1086,7 +1109,15 @@ object AnikotoScraper {
                     return@withContext ScrapedStreamResult(
                         streamUrl = streamResult.streamUrl,
                         headers = streamResult.headers,
-                        referer = streamResult.referer
+                        referer = streamResult.referer,
+                        subtitles = streamResult.subtitles.map {
+                            SubtitleTrack(
+                                url = it.url,
+                                lang = it.lang,
+                                label = it.label,
+                                default = it.default
+                            )
+                        }
                     )
                 }
             }
@@ -1162,7 +1193,15 @@ object AnikotoScraper {
                             return@withContext ScrapedStreamResult(
                                 streamUrl = streamResult.streamUrl,
                                 headers = streamResult.headers,
-                                referer = streamResult.referer
+                                referer = streamResult.referer,
+                                subtitles = streamResult.subtitles.map {
+                                    SubtitleTrack(
+                                        url = it.url,
+                                        lang = it.lang,
+                                        label = it.label,
+                                        default = it.default
+                                    )
+                                }
                             )
                         }
                     }

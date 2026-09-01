@@ -451,10 +451,40 @@ object VidnestNativeScraper {
 
             val referer = headersMap["Referer"] ?: provider.defaultReferer
 
+            // Extract subtitle tracks from payload if available
+            val subtitlesList = mutableListOf<SubtitleTrack>()
+            val tracks = json.optJSONArray("tracks")
+                ?: json.optJSONArray("subtitles")
+                ?: json.optJSONArray("captions")
+                ?: json.optJSONObject("data")?.optJSONArray("tracks")
+                ?: json.optJSONObject("data")?.optJSONArray("subtitles")
+
+            if (tracks != null) {
+                for (i in 0 until tracks.length()) {
+                    val t = tracks.optJSONObject(i) ?: continue
+                    val file = t.optString("file", "").ifEmpty { t.optString("url", "") }
+                    val label = t.optString("label", "").ifEmpty { t.optString("lang", "English") }
+                    val lang = t.optString("lang", "").ifEmpty { t.optString("language", label.take(2).lowercase()) }
+                    val isDefault = t.optBoolean("default", false)
+                    val kind = t.optString("kind", "")
+                    if (file.isNotBlank() && (kind.isEmpty() || kind == "captions" || kind == "subtitles" || file.endsWith(".vtt", ignoreCase = true) || file.endsWith(".srt", ignoreCase = true))) {
+                        subtitlesList.add(
+                            SubtitleTrack(
+                                url = file,
+                                lang = lang.ifBlank { "en" },
+                                label = label.ifBlank { "English" },
+                                default = isDefault
+                            )
+                        )
+                    }
+                }
+            }
+
             return ScrapedStreamResult(
                 streamUrl = extractedUrl,
                 headers = headersMap,
-                referer = referer
+                referer = referer,
+                subtitles = subtitlesList
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing stream payload: ${e.message}")

@@ -73,6 +73,7 @@ fun MovieExoPlayerView(
     isFullScreen: Boolean = false,
     isInPipMode: Boolean = false,
     customHeaders: Map<String, String> = emptyMap(),
+    subtitles: List<com.example.scraper.SubtitleTrack> = emptyList(),
     onFullScreenToggle: () -> Unit = {},
     onPlaybackError: (String) -> Unit = {},
     onBack: () -> Unit = {},
@@ -91,6 +92,12 @@ fun MovieExoPlayerView(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showControls by remember { mutableStateOf(true) }
     var resizeMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+
+    // Subtitles State
+    var isSubtitlesEnabled by remember { mutableStateOf(true) }
+    var selectedSubtitleLang by remember { mutableStateOf<String?>("en") }
+    var showSubtitleMenu by remember { mutableStateOf(false) }
+    var subtitleHudMessage by remember { mutableStateOf<String?>(null) }
 
     // Position and Timeline State
     var currentPosition by remember { mutableLongStateOf(0L) }
@@ -144,11 +151,18 @@ fun MovieExoPlayerView(
         }
     }
 
+    LaunchedEffect(subtitleHudMessage) {
+        if (subtitleHudMessage != null) {
+            delay(2000)
+            subtitleHudMessage = null
+        }
+    }
+
     // Build Native Track Selector
     val trackSelector = remember { DefaultTrackSelector(context) }
 
-    // Apply native quality restriction
-    LaunchedEffect(selectedQuality) {
+    // Apply native quality and subtitle restrictions
+    LaunchedEffect(selectedQuality, isSubtitlesEnabled, selectedSubtitleLang) {
         val params = trackSelector.parameters.buildUpon()
         when (selectedQuality) {
             "1080p" -> params.setMaxVideoSize(1920, 1080)
@@ -156,13 +170,21 @@ fun MovieExoPlayerView(
             "480p" -> params.setMaxVideoSize(854, 480)
             else -> params.setMaxVideoSize(Integer.MAX_VALUE, Integer.MAX_VALUE)
         }
+        if (!isSubtitlesEnabled) {
+            params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        } else {
+            params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            if (!selectedSubtitleLang.isNullOrBlank()) {
+                params.setPreferredTextLanguage(selectedSubtitleLang)
+            }
+        }
         trackSelector.parameters = params.build()
     }
 
     // Initialize and maintain ExoPlayer
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
-    LaunchedEffect(currentUrl, customHeaders) {
+    LaunchedEffect(currentUrl, customHeaders, subtitles) {
         errorMessage = null
         exoPlayer?.release()
 
@@ -190,6 +212,28 @@ fun MovieExoPlayerView(
                 } else {
                     mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MP4)
                 }
+
+                if (subtitles.isNotEmpty()) {
+                    val subtitleConfigs = subtitles.map { sub ->
+                        val mimeType = if (sub.url.lowercase().contains(".vtt") || sub.url.lowercase().contains("vtt")) {
+                            androidx.media3.common.MimeTypes.TEXT_VTT
+                        } else if (sub.url.lowercase().contains(".srt") || sub.url.lowercase().contains("srt")) {
+                            androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
+                        } else if (sub.url.lowercase().contains(".ass") || sub.url.lowercase().contains(".ssa")) {
+                            androidx.media3.common.MimeTypes.TEXT_SSA
+                        } else {
+                            androidx.media3.common.MimeTypes.TEXT_VTT
+                        }
+                        MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
+                            .setMimeType(mimeType)
+                            .setLanguage(sub.lang.ifBlank { "en" })
+                            .setLabel(sub.label.ifBlank { "English" })
+                            .setSelectionFlags(if (sub.default) C.SELECTION_FLAG_DEFAULT else 0)
+                            .build()
+                    }
+                    mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
+                }
+
                 setMediaItem(mediaItemBuilder.build())
                 prepare()
                 if (initialStartPositionMs > 0L) {
@@ -428,11 +472,29 @@ fun MovieExoPlayerView(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    subtitleView?.apply {
+                        setUserDefaultStyle()
+                        setUserDefaultTextSize()
+                        setApplyEmbeddedStyles(true)
+                        setApplyEmbeddedFontSizes(true)
+                        setStyle(
+                            androidx.media3.ui.CaptionStyleCompat(
+                                android.graphics.Color.WHITE,
+                                android.graphics.Color.TRANSPARENT,
+                                android.graphics.Color.TRANSPARENT,
+                                androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                                android.graphics.Color.BLACK,
+                                null
+                            )
+                        )
+                        setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
+                    }
                 }
             },
             update = { view ->
                 view.player = exoPlayer
                 view.resizeMode = resizeMode
+                view.subtitleView?.visibility = if (isSubtitlesEnabled) android.view.View.VISIBLE else android.view.View.GONE
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -619,6 +681,41 @@ fun MovieExoPlayerView(
             }
         }
 
+        // Overlay 5: Subtitle HUD Status Indicator
+        AnimatedVisibility(
+            visible = subtitleHudMessage != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = if (isFullScreen) 40.dp else 24.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color.Black.copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, if (isSubtitlesEnabled) NeonCyan.copy(alpha = 0.7f) else NeonMagenta.copy(alpha = 0.7f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSubtitlesEnabled) Icons.Default.Subtitles else Icons.Default.SubtitlesOff,
+                        contentDescription = null,
+                        tint = if (isSubtitlesEnabled) NeonCyan else NeonMagenta,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = subtitleHudMessage ?: "",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
         // Overlay 5: Floating Next Episode Button (Series, Full Screen, Last 2 mins)
         val remainingTimeMs = duration - currentPosition
         val twoMinutesMs = 2 * 60 * 1000L
@@ -791,6 +888,31 @@ fun MovieExoPlayerView(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(if (isFullScreen) 16.dp else 8.dp)
                     ) {
+                        // Subtitles ON / OFF & Language Selector Button
+                        IconButton(
+                            onClick = {
+                                if (subtitles.isEmpty()) {
+                                    isSubtitlesEnabled = !isSubtitlesEnabled
+                                    subtitleHudMessage = if (isSubtitlesEnabled) "Subtitles: ON" else "Subtitles: OFF"
+                                } else if (subtitles.size == 1) {
+                                    isSubtitlesEnabled = !isSubtitlesEnabled
+                                    subtitleHudMessage = if (isSubtitlesEnabled) "Subtitles: ${subtitles.first().label}" else "Subtitles: OFF"
+                                } else {
+                                    showSubtitleMenu = true
+                                }
+                            },
+                            modifier = Modifier
+                                .size(if (isFullScreen) 32.dp else 28.dp)
+                                .testTag("subtitle_toggle_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isSubtitlesEnabled) Icons.Default.Subtitles else Icons.Default.SubtitlesOff,
+                                contentDescription = "Subtitle Toggle",
+                                tint = if (isSubtitlesEnabled) NeonCyan else Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier.size(if (isFullScreen) 20.dp else 18.dp)
+                            )
+                        }
+
                         // Settings Gear Button for Quality selection
                         IconButton(
                             onClick = { showQualityMenu = true },
@@ -945,6 +1067,110 @@ fun MovieExoPlayerView(
                             ) {
                                 Text(
                                     text = if (quality == "Auto") "Auto (Best)" else quality,
+                                    color = if (isSelected) NeonCyan else Color.White,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 14.sp
+                                )
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = NeonCyan,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Subtitles selection dialog popup
+        if (showSubtitleMenu) {
+            Dialog(onDismissRequest = { showSubtitleMenu = false }) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                    modifier = Modifier.width(300.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Subtitles & Captions",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Select language or toggle subtitles",
+                            color = Color.Gray,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Option 1: Off
+                        val isOff = !isSubtitlesEnabled
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    isSubtitlesEnabled = false
+                                    subtitleHudMessage = "Subtitles: OFF"
+                                    showSubtitleMenu = false
+                                }
+                                .background(if (isOff) NeonMagenta.copy(alpha = 0.12f) else Color.Transparent)
+                                .padding(vertical = 12.dp, horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Off (Disabled)",
+                                color = if (isOff) NeonMagenta else Color.White,
+                                fontWeight = if (isOff) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 14.sp
+                            )
+                            if (isOff) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = NeonMagenta,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        // Subtitle options
+                        val trackList = if (subtitles.isNotEmpty()) {
+                            subtitles.distinctBy { it.lang.lowercase() + it.label.lowercase() }
+                        } else {
+                            listOf(com.example.scraper.SubtitleTrack(url = "", lang = "en", label = "English (Auto)"))
+                        }
+
+                        trackList.forEach { track ->
+                            val isSelected = isSubtitlesEnabled && (selectedSubtitleLang == track.lang || (selectedSubtitleLang == null && track.default))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        isSubtitlesEnabled = true
+                                        selectedSubtitleLang = track.lang
+                                        subtitleHudMessage = "Subtitles: ${track.label}"
+                                        showSubtitleMenu = false
+                                    }
+                                    .background(if (isSelected) NeonCyan.copy(alpha = 0.08f) else Color.Transparent)
+                                    .padding(vertical = 12.dp, horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = track.label,
                                     color = if (isSelected) NeonCyan else Color.White,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     fontSize = 14.sp

@@ -247,6 +247,7 @@ fun CinemetaWebViewPlayer(
     var currentSeason by remember(imdbId, season) { mutableIntStateOf(season) }
     var currentEpisode by remember(imdbId, episode) { mutableIntStateOf(episode) }
     var capturedVideoUrl by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf<String?>(null) }
+    var activeSubtitles by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf<List<com.example.scraper.SubtitleTrack>>(emptyList()) }
     var selectedVidnestServerKey by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf<String?>(null) }
     var customScrapedHeaders by remember(nativeHeaders) { mutableStateOf(nativeHeaders) }
     var isMainSelected by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf(true) }
@@ -333,6 +334,7 @@ fun CinemetaWebViewPlayer(
             customScrapedHeaders = cached.headers
             mainScrapedVideoUrl = cached.streamUrl
             mainScrapedHeaders = cached.headers
+            activeSubtitles = cached.subtitles
             useExoPlayer = true
             isScrapingDirectStream = false
         } else if (effectiveNativeUrl == null) {
@@ -354,6 +356,7 @@ fun CinemetaWebViewPlayer(
                             customScrapedHeaders = result.headers
                             mainScrapedVideoUrl = result.streamUrl
                             mainScrapedHeaders = result.headers
+                            activeSubtitles = result.subtitles
                             useExoPlayer = true
                         }
                     }
@@ -365,6 +368,26 @@ fun CinemetaWebViewPlayer(
                     }
                 }
             }
+        }
+
+        // Universal automated subtitle fetching for stream enhancement
+        scope.launch(Dispatchers.IO) {
+            try {
+                val fetchedSubs = com.example.scraper.SubtitleFetcher.fetchSubtitles(
+                    tmdbId = imdbId,
+                    imdbId = currentMediaItem?.imdbId ?: imdbId,
+                    title = title,
+                    isTv = isSeries,
+                    season = currentSeason,
+                    episode = currentEpisode
+                )
+                if (fetchedSubs.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        val combined = (activeSubtitles + fetchedSubs).distinctBy { it.url }
+                        activeSubtitles = combined
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -1217,6 +1240,7 @@ fun CinemetaWebViewPlayer(
                         isFullScreen = isFullScreen,
                         isInPipMode = isInPipMode,
                         customHeaders = customScrapedHeaders,
+                        subtitles = activeSubtitles,
                         onFullScreenToggle = { onFullScreenChange(!isFullScreen) },
                         onPlaybackError = { _ ->
                             // Fallback to web player if ExoPlayer encounters fatal error on stream
@@ -2080,6 +2104,9 @@ fun CinemetaWebViewPlayer(
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                                             capturedVideoUrl = extracted.streamUrl
                                                             customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
                                                             useExoPlayer = true
                                                             isLoading = false
                                                             hasError = false
@@ -2172,6 +2199,9 @@ fun CinemetaWebViewPlayer(
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                                             capturedVideoUrl = extracted.streamUrl
                                                             customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
                                                             useExoPlayer = true
                                                             isLoading = false
                                                             hasError = false
@@ -2301,6 +2331,9 @@ fun CinemetaWebViewPlayer(
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                                             capturedVideoUrl = extracted.streamUrl
                                                             customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
                                                             useExoPlayer = true
                                                             isLoading = false
                                                             hasError = false
@@ -2356,6 +2389,9 @@ fun CinemetaWebViewPlayer(
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                                             capturedVideoUrl = extracted.streamUrl
                                                             customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
                                                             useExoPlayer = true
                                                             isLoading = false
                                                             hasError = false
