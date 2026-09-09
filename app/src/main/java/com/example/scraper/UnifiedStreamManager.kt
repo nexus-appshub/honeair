@@ -205,22 +205,9 @@ object UnifiedStreamManager {
 
             if (winningStream != null && winningStream.streamUrl.isNotBlank()) {
                 Log.d(TAG, "Exact TMDB Winning Stream selected: ${winningStream.streamUrl}")
-                val fullSubs = try {
-                    val fetched = SubtitleFetcher.fetchSubtitles(
-                        tmdbId = finalTmdbId,
-                        title = title,
-                        isTv = effectiveIsTv,
-                        season = season,
-                        episode = episode
-                    )
-                    (winningStream.subtitles + fetched).distinctBy { it.url }
-                } catch (e: Exception) {
-                    winningStream.subtitles
-                }
-                val enrichedStream = winningStream.copy(subtitles = fullSubs)
-                streamCache[cacheKey] = enrichedStream
-                saveToRoomCache(context, cacheKey, enrichedStream)
-                return@coroutineScope enrichedStream
+                streamCache[cacheKey] = winningStream
+                saveToRoomCache(context, cacheKey, winningStream)
+                return@coroutineScope winningStream
             }
 
             // Fallback 1: MovieBox Native Scraper if exact ID scrapers missed
@@ -234,17 +221,9 @@ object UnifiedStreamManager {
                         episode = if (effectiveIsTv) episode else 0
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        val fetchedSubs = SubtitleFetcher.fetchSubtitles(
-                            tmdbId = finalTmdbId,
-                            title = title,
-                            isTv = effectiveIsTv,
-                            season = season,
-                            episode = episode
-                        )
-                        val enrichedRes = res.copy(subtitles = (res.subtitles + fetchedSubs).distinctBy { it.url })
-                        streamCache[cacheKey] = enrichedRes
-                        saveToRoomCache(context, cacheKey, enrichedRes)
-                        return@coroutineScope enrichedRes
+                        streamCache[cacheKey] = res
+                        saveToRoomCache(context, cacheKey, res)
+                        return@coroutineScope res
                     }
                 }
             } catch (e: Exception) {
@@ -263,17 +242,9 @@ object UnifiedStreamManager {
                 )
                 if (webStream != null && webStream.streamUrl.isNotEmpty()) {
                     Log.d(TAG, "Tier 3: In-App Headless Scraper resolved stream successfully!")
-                    val fetchedSubs = SubtitleFetcher.fetchSubtitles(
-                        tmdbId = finalTmdbId,
-                        title = title,
-                        isTv = effectiveIsTv,
-                        season = season,
-                        episode = episode
-                    )
-                    val enrichedWeb = webStream.copy(subtitles = (webStream.subtitles + fetchedSubs).distinctBy { it.url })
-                    streamCache[cacheKey] = enrichedWeb
-                    saveToRoomCache(context, cacheKey, enrichedWeb)
-                    return@coroutineScope enrichedWeb
+                    streamCache[cacheKey] = webStream
+                    saveToRoomCache(context, cacheKey, webStream)
+                    return@coroutineScope webStream
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Tier 3 Headless Web scraper failed: ${e.message}")
@@ -285,17 +256,9 @@ object UnifiedStreamManager {
                 val fallback = queryFallbackApi(finalTmdbId, effectiveIsTv, season, episode)
                 if (fallback != null) {
                     Log.d(TAG, "Tier 4: Fallback stream resolved successfully!")
-                    val fetchedSubs = SubtitleFetcher.fetchSubtitles(
-                        tmdbId = finalTmdbId,
-                        title = title,
-                        isTv = effectiveIsTv,
-                        season = season,
-                        episode = episode
-                    )
-                    val enrichedFallback = fallback.copy(subtitles = (fallback.subtitles + fetchedSubs).distinctBy { it.url })
-                    streamCache[cacheKey] = enrichedFallback
-                    saveToRoomCache(context, cacheKey, enrichedFallback)
-                    return@coroutineScope enrichedFallback
+                    streamCache[cacheKey] = fallback
+                    saveToRoomCache(context, cacheKey, fallback)
+                    return@coroutineScope fallback
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Tier 4 fallback failed: ${e.message}")

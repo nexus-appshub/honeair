@@ -177,10 +177,44 @@ fun MediaDetailSheet(
                     if (isPlayingTrailer) {
                         val trailerId = youtubeTrailerId
                         if (!trailerId.isNullOrBlank()) {
-                            com.example.ui.components.AndroidYouTubePlayer(
-                                videoId = trailerId,
-                                modifier = Modifier.fillMaxSize(),
-                                autoPlay = true
+                            AndroidView(
+                                factory = { ctx ->
+                                    WebView(ctx).apply {
+                                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                                        setBackgroundColor(android.graphics.Color.BLACK)
+                                        webChromeClient = object : android.webkit.WebChromeClient() {
+                                            override fun getDefaultVideoPoster(): android.graphics.Bitmap? {
+                                                return android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
+                                            }
+                                        }
+                                        webViewClient = object : android.webkit.WebViewClient() {
+                                            override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                                                val reqUrl = request?.url?.toString() ?: return false
+                                                if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
+                                                    return false
+                                                }
+                                                return true
+                                            }
+                                        }
+                                        settings.apply {
+                                            javaScriptEnabled = true
+                                            mediaPlaybackRequiresUserGesture = false
+                                            domStorageEnabled = true
+                                            databaseEnabled = true
+                                            useWideViewPort = true
+                                            loadWithOverviewMode = true
+                                            allowFileAccess = true
+                                            allowContentAccess = true
+                                            userAgentString = "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                                                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                            }
+                                        }
+                                        val htmlData = com.example.ui.components.getYouTubeEmbedHtml(trailerId)
+                                        loadDataWithBaseURL("https://www.youtube.com", htmlData, "text/html", "UTF-8", null)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
                             )
 
                             // Overlay Buttons (Expand Popup Window & Close)

@@ -44,7 +44,7 @@ credentials = "1.5.0"
 googleid = "1.1.1"
 media3 = "1.4.1"
 jsoup = "1.18.3"
-androidYoutubePlayer = "12.1.1"
+
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -106,7 +106,7 @@ androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.re
 androidx-media3-exoplayer-hls = { group = "androidx.media3", name = "media3-exoplayer-hls", version.ref = "media3" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
-android-youtube-player = { group = "com.pierfrancescosoffritti.androidyoutubeplayer", name = "core", version.ref = "androidYoutubePlayer" }
+
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
