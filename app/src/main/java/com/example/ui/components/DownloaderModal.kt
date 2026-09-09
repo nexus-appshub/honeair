@@ -71,6 +71,7 @@ fun DownloaderModal(
     season: Int = 1,
     episode: Int = 1,
     isSeries: Boolean = false,
+    isAnime: Boolean = false,
     capturedVideoUrl: String? = null,
     coroutineScope: CoroutineScope,
     userProfile: com.example.ui.viewmodel.UserProfile? = null,
@@ -79,6 +80,29 @@ fun DownloaderModal(
     if (!showModal) return
 
     val context = LocalContext.current
+    val isEffectiveAnime = isAnime || imdbId.startsWith("anikoto_") || title.contains("anime", ignoreCase = true)
+    var preferDubForAnime by remember { mutableStateOf(false) }
+    var animeDownloadInfo by remember { mutableStateOf<com.example.download.AnimeEpisodeDownloadInfo?>(null) }
+    var isAnimeScrapingQualities by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isEffectiveAnime, preferDubForAnime, showModal, title, season, episode) {
+        if (isEffectiveAnime && showModal) {
+            isAnimeScrapingQualities = true
+            try {
+                val info = com.example.download.AnimeDownloader.resolveAnimeDownloadOptions(
+                    title = title,
+                    season = season,
+                    episode = episode,
+                    preferDub = preferDubForAnime
+                )
+                animeDownloadInfo = info
+            } catch (e: Exception) {
+                android.util.Log.e("DownloaderModal", "Anime resolve error: ${e.message}")
+            } finally {
+                isAnimeScrapingQualities = false
+            }
+        }
+    }
 
     // Launcher for Notification & Storage permissions
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -552,6 +576,355 @@ fun DownloaderModal(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
                             )
+                        }
+                    }
+                }
+            } else if (isEffectiveAnime) {
+                // Dedicated Anime Downloader Section
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(listOf(Color(0xFFFF4081), Color(0xFF7C4DFF)))
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🎌", fontSize = 18.sp)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Anime Downloader",
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFFFF4081).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "ANIKOTO CORE",
+                                        color = Color(0xFFFF4081),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 8.sp,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "$title • S${season}E${episode}",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // SUB / DUB Toggle Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(if (isDarkTheme) Color.White.copy(alpha = 0.05f) else Color.Black.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        onClick = { preferDubForAnime = false },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (!preferDubForAnime) NeonCyan.copy(alpha = 0.25f) else Color.Transparent,
+                        border = if (!preferDubForAnime) BorderStroke(1.dp, NeonCyan) else null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🇯🇵 SUB (Original + Subs)",
+                                color = if (!preferDubForAnime) NeonCyan else TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = { preferDubForAnime = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (preferDubForAnime) Color(0xFFFFB74D).copy(alpha = 0.25f) else Color.Transparent,
+                        border = if (preferDubForAnime) BorderStroke(1.dp, Color(0xFFFFB74D)) else null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🎙️ DUB (English Dubbed)",
+                                color = if (preferDubForAnime) Color(0xFFFFB74D) else TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (isAnimeScrapingQualities) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(
+                            color = NeonCyan,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "Extracting high-speed Anime streams...",
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Bypassing stream token expiration & resolving all qualities",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else if (animeDownloadInfo != null && animeDownloadInfo!!.qualities.isNotEmpty()) {
+                    val info = animeDownloadInfo!!
+
+                    // Server Info Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(Color(0xFF00E676), CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Scraped Server: ${info.serverName}",
+                                color = NeonCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Text(
+                            text = if (info.isDub) "English Dub" else "Japanese Sub",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    // Available Qualities List
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (quality in info.qualities) {
+                            val badgeColor = when (quality.resolution) {
+                                "1080p" -> Color(0xFFFFB74D)
+                                "720p" -> NeonCyan
+                                "480p" -> Color(0xFFB388FF)
+                                else -> Color(0xFF80D8FF)
+                            }
+
+                            Surface(
+                                onClick = {
+                                    checkAndRequestPermissions {
+                                        com.example.download.AnimeDownloader.startAnimeDownload(
+                                            context = context,
+                                            animeTitle = title,
+                                            season = season,
+                                            episode = episode,
+                                            qualityOption = quality,
+                                            coroutineScope = coroutineScope
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            "Downloading $title ${quality.resolution} (${quality.estimatedSize})",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        onDismiss()
+                                    }
+                                },
+                                color = if (isDarkTheme) DeepSlate else Color(0xFFF8FAFC),
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .background(badgeColor.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                                .border(1.dp, badgeColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = quality.resolution,
+                                                color = badgeColor,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = quality.title,
+                                                    style = MaterialTheme.typography.titleSmall.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp
+                                                    ),
+                                                    color = TextPrimary
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .background(badgeColor.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(
+                                                        text = quality.badge,
+                                                        color = badgeColor,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 8.sp,
+                                                        letterSpacing = 0.5.sp
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "Direct Stream • AES-128 Decrypted",
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = quality.estimatedSize,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 12.sp
+                                            ),
+                                            color = NeonCyan
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .background(NeonCyan.copy(alpha = 0.15f), CircleShape)
+                                                .padding(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Download,
+                                                contentDescription = "Download Anime",
+                                                tint = NeonCyan,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // No direct qualities fallback
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = Color.Gray,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Could not extract direct stream qualities",
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Try switching between SUB / DUB or retry scraping",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                isAnimeScrapingQualities = true
+                                coroutineScope.launch {
+                                    try {
+                                        animeDownloadInfo = com.example.download.AnimeDownloader.resolveAnimeDownloadOptions(
+                                            title = title,
+                                            season = season,
+                                            episode = episode,
+                                            preferDub = preferDubForAnime
+                                        )
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    } finally {
+                                        isAnimeScrapingQualities = false
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Retry Anime Scraping", color = SpaceBlack, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

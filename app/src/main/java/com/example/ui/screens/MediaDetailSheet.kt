@@ -1078,6 +1078,7 @@ fun MediaDetailSheet(
             season = selectedSeason,
             episode = selectedEpisode,
             isSeries = isSeries,
+            isAnime = isAnime,
             coroutineScope = scope,
             userProfile = userProfile,
             viewModel = viewModel

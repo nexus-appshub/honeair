@@ -1235,6 +1235,7 @@ fun CinemetaWebViewPlayer(
                 season = currentSeason,
                 episode = currentEpisode,
                 isSeries = isSeries,
+                isAnime = isAnime,
                 capturedVideoUrl = capturedVideoUrl ?: effectiveNativeUrl,
                 coroutineScope = scope,
                 userProfile = userProfile,

@@ -155,6 +155,7 @@ fun MovieExoPlayerView(
     var showLeftDoubleTapAnim by remember { mutableStateOf(false) }
     var showRightDoubleTapAnim by remember { mutableStateOf(false) }
     var isScreenLocked by remember { mutableStateOf(false) }
+    var showDownloaderDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(showLeftDoubleTapAnim) {
         if (showLeftDoubleTapAnim) {
@@ -983,6 +984,21 @@ fun MovieExoPlayerView(
                             )
                         }
 
+                        // Download Stream Button
+                        IconButton(
+                            onClick = { showDownloaderDialog = true },
+                            modifier = Modifier
+                                .size(if (isFullScreen) 32.dp else 28.dp)
+                                .testTag("player_download_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Download Video",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(if (isFullScreen) 20.dp else 18.dp)
+                            )
+                        }
+
                         // Fullscreen Toggle
                         IconButton(
                             onClick = onFullScreenToggle,
@@ -1617,6 +1633,18 @@ fun MovieExoPlayerView(
                     }
                 }
             }
+        }
+
+        if (showDownloaderDialog) {
+            com.example.ui.components.DownloaderModal(
+                showModal = showDownloaderDialog,
+                onDismiss = { showDownloaderDialog = false },
+                title = channelName,
+                imdbId = if (isAnime) "anikoto_$channelName" else channelName,
+                isAnime = isAnime,
+                capturedVideoUrl = currentUrl,
+                coroutineScope = scope
+            )
         }
     }
 }

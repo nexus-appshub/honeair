@@ -344,8 +344,41 @@ object MediaDownloader {
 
             try {
                 var targetFile: File? = null
+                val isAnimeStream = activeUrl.contains("anikoto") || activeUrl.contains("megacloud") ||
+                    activeUrl.contains("megaplay") || activeUrl.contains("rapid-cloud") ||
+                    activeUrl.contains("vidcloud") || activeUrl.contains("streamwish") ||
+                    referer?.contains("anikoto") == true || referer?.contains("megacloud") == true ||
+                    referer?.contains("megaplay") == true
+
                 try {
-                    targetFile = if (activeUrl.lowercase().contains("m3u8")) {
+                    targetFile = if (isAnimeStream && activeUrl.lowercase().contains("m3u8")) {
+                        try {
+                            AnimeDownloader.downloadAnimeHlsStream(
+                                context = context,
+                                playlistUrl = activeUrl,
+                                fileName = fileName,
+                                notificationId = notificationId,
+                                builder = builder,
+                                notificationManager = notificationManager,
+                                downloadId = downloadId,
+                                referer = referer
+                            )
+                        } catch (animeEx: Exception) {
+                            Log.w(TAG, "Anime-specific downloader fallback to generic HLS: ${animeEx.message}")
+                            downloadHls(
+                                context = context,
+                                m3u8Url = activeUrl,
+                                fileName = fileName,
+                                notificationId = notificationId,
+                                builder = builder,
+                                notificationManager = notificationManager,
+                                downloadId = downloadId,
+                                userAgent = userAgent,
+                                cookies = cookies,
+                                referer = referer
+                            )
+                        }
+                    } else if (activeUrl.lowercase().contains("m3u8")) {
                         downloadHls(
                             context = context,
                             m3u8Url = activeUrl,
@@ -498,7 +531,7 @@ object MediaDownloader {
         _activeDownloads.value = currentList.filter { it.id != downloadId }
     }
 
-    private fun checkCancellationAndPause(downloadId: String) {
+    internal fun checkCancellationAndPause(downloadId: String) {
         val download = _activeDownloads.value.find { it.id == downloadId }
         if (download != null) {
             if (download.isCancelled) {
@@ -527,7 +560,7 @@ object MediaDownloader {
         }
     }
 
-    private fun updateNotificationProgress(
+    internal fun updateNotificationProgress(
         context: Context,
         downloadId: String,
         percent: Int,
