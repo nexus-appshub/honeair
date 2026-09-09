@@ -2,7 +2,11 @@ package com.example.scraper
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -14,8 +18,8 @@ object VidLinkNativeScraper {
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
@@ -38,72 +42,69 @@ object VidLinkNativeScraper {
         val cleanTmdb = tmdbId.removePrefix("movie_").removePrefix("series_").removePrefix("anikoto_").trim()
         if (cleanTmdb.isBlank()) return@withContext null
 
-        for (host in VIDLINK_HOSTS) {
-            try {
-                // Try API endpoints first (Vidlink Pro API format)
-                val apiUrls = if (isTv) {
-                    listOf(
-                        "$host/api/b/tv/$cleanTmdb/$season/$episode",
-                        "$host/api/sources/tv/$cleanTmdb?s=$season&e=$episode",
-                        "$host/api/b/tv/$cleanTmdb?s=$season&e=$episode"
-                    )
-                } else {
-                    listOf(
-                        "$host/api/b/movie/$cleanTmdb",
-                        "$host/api/sources/movie/$cleanTmdb",
-                        "$host/api/b/movie/$cleanTmdb?t=${System.currentTimeMillis()}"
-                    )
-                }
+        val candidateTasks = mutableListOf<Pair<String, String>>() // (url, host)
 
-                for (apiUrl in apiUrls) {
+        for (host in VIDLINK_HOSTS) {
+            if (isTv) {
+                candidateTasks.add(Pair("$host/api/b/tv/$cleanTmdb/$season/$episode", host))
+                candidateTasks.add(Pair("$host/api/sources/tv/$cleanTmdb?s=$season&e=$episode", host))
+                candidateTasks.add(Pair("$host/api/b/tv/$cleanTmdb?s=$season&e=$episode", host))
+                candidateTasks.add(Pair("$host/tv/$cleanTmdb/$season/$episode", host))
+            } else {
+                candidateTasks.add(Pair("$host/api/b/movie/$cleanTmdb", host))
+                candidateTasks.add(Pair("$host/api/sources/movie/$cleanTmdb", host))
+                candidateTasks.add(Pair("$host/api/b/movie/$cleanTmdb?t=${System.currentTimeMillis()}", host))
+                candidateTasks.add(Pair("$host/movie/$cleanTmdb", host))
+            }
+        }
+
+        return@withContext coroutineScope {
+            val resultChannel = Channel<ScrapedStreamResult>(10)
+            val jobs = candidateTasks.map { (targetUrl, host) ->
+                launch(Dispatchers.IO) {
                     try {
+                        val isApi = targetUrl.contains("/api/")
                         val req = Request.Builder()
-                            .url(apiUrl)
+                            .url(targetUrl)
                             .header("User-Agent", DEFAULT_UA)
                             .header("Referer", "$host/")
                             .header("Origin", host)
-                            .header("Accept", "application/json, text/plain, */*")
+                            .header("Accept", if (isApi) "application/json, text/plain, */*" else "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                             .build()
 
                         val resp = httpClient.newCall(req).execute()
                         val body = resp.body?.string() ?: ""
                         if (resp.isSuccessful && body.isNotBlank()) {
-                            val stream = parseVidlinkResponse(body, host)
-                            if (stream != null && stream.streamUrl.isNotBlank()) {
-                                Log.d(TAG, "VidLink API resolved stream from $apiUrl: ${stream.streamUrl}")
-                                return@withContext stream
+                            if (isApi) {
+                                val stream = parseVidlinkResponse(body, host)
+                                if (stream != null && stream.streamUrl.isNotBlank()) {
+                                    Log.d(TAG, "VidLink API winner from $targetUrl: ${stream.streamUrl}")
+                                    resultChannel.trySend(stream)
+                                    return@launch
+                                }
+                            } else {
+                                val stream = parseHtmlForStreams(body, host)
+                                if (stream != null && stream.streamUrl.isNotBlank()) {
+                                    Log.d(TAG, "VidLink HTML winner from $targetUrl: ${stream.streamUrl}")
+                                    resultChannel.trySend(stream)
+                                    return@launch
+                                }
                             }
                         }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "VidLink API $apiUrl failed: ${e.message}")
-                    }
+                    } catch (_: Exception) {}
                 }
-
-                // Try Direct HTML Embed scraping
-                val embedPath = if (isTv) "tv/$cleanTmdb/$season/$episode" else "movie/$cleanTmdb"
-                val embedUrl = "$host/$embedPath"
-
-                val embedReq = Request.Builder()
-                    .url(embedUrl)
-                    .header("User-Agent", DEFAULT_UA)
-                    .header("Referer", "$host/")
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .build()
-
-                val embedResp = httpClient.newCall(embedReq).execute()
-                val html = embedResp.body?.string() ?: ""
-                if (embedResp.isSuccessful && html.isNotBlank()) {
-                    val stream = parseHtmlForStreams(html, host)
-                    if (stream != null && stream.streamUrl.isNotBlank()) {
-                        Log.d(TAG, "VidLink HTML resolved stream from $embedUrl: ${stream.streamUrl}")
-                        return@withContext stream
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "VidLink host $host extraction failed: ${e.message}")
             }
+
+            var winner: ScrapedStreamResult? = null
+            try {
+                winner = withTimeoutOrNull(10000L) {
+                    resultChannel.receive()
+                }
+            } catch (_: Exception) {}
+
+            jobs.forEach { it.cancel() }
+            winner
         }
-        null
     }
 
     private fun parseVidlinkResponse(body: String, host: String): ScrapedStreamResult? {

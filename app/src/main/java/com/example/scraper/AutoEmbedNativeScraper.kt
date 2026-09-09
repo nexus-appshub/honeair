@@ -2,7 +2,11 @@ package com.example.scraper
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -14,8 +18,8 @@ object AutoEmbedNativeScraper {
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(7, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(7, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
@@ -82,30 +86,42 @@ object AutoEmbedNativeScraper {
             targets.add(Triple("https://player.videasy.net/movie/$cleanTmdb", "https://player.videasy.net/", "Videasy Movie"))
         }
 
-        // Try extracting from candidate targets
-        for ((url, referer, name) in targets) {
-            try {
-                val req = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", DEFAULT_UA)
-                    .header("Referer", referer)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .build()
+        return@withContext coroutineScope {
+            val resultChannel = Channel<ScrapedStreamResult>(10)
+            val jobs = targets.map { (url, referer, name) ->
+                launch(Dispatchers.IO) {
+                    try {
+                        val req = Request.Builder()
+                            .url(url)
+                            .header("User-Agent", DEFAULT_UA)
+                            .header("Referer", referer)
+                            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                            .build()
 
-                val resp = httpClient.newCall(req).execute()
-                val html = resp.body?.string() ?: ""
-                if (resp.isSuccessful && html.isNotBlank()) {
-                    val stream = extractStreamFromHtml(html, referer)
-                    if (stream != null && stream.streamUrl.isNotBlank()) {
-                        Log.d(TAG, "[$name] successfully extracted stream from $url: ${stream.streamUrl}")
-                        return@withContext stream
-                    }
+                        val resp = httpClient.newCall(req).execute()
+                        val html = resp.body?.string() ?: ""
+                        if (resp.isSuccessful && html.isNotBlank()) {
+                            val stream = extractStreamFromHtml(html, referer)
+                            if (stream != null && stream.streamUrl.isNotBlank()) {
+                                Log.d(TAG, "[$name] winner from $url: ${stream.streamUrl}")
+                                resultChannel.trySend(stream)
+                                return@launch
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "[$name] failed: ${e.message}")
             }
+
+            var winner: ScrapedStreamResult? = null
+            try {
+                winner = withTimeoutOrNull(9000L) {
+                    resultChannel.receive()
+                }
+            } catch (_: Exception) {}
+
+            jobs.forEach { it.cancel() }
+            winner
         }
-        null
     }
 
     private fun extractStreamFromHtml(html: String, referer: String): ScrapedStreamResult? {
@@ -127,7 +143,6 @@ object AutoEmbedNativeScraper {
             }
         }
 
-        // Check for sources JSON in page
         try {
             val sourcesPattern = Regex("""(?:sources|file|streamUrl)\s*[:=]\s*["'](https?://[^"']+)["']""")
             val match = sourcesPattern.find(html)

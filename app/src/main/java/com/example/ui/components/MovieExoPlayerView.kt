@@ -357,6 +357,7 @@ fun MovieExoPlayerView(
             }
 
             val down = awaitFirstDown(requireUnconsumed = false)
+            val pointerId = down.id
             val startTime = System.currentTimeMillis()
             val startX = down.position.x
             val startY = down.position.y
@@ -373,9 +374,9 @@ fun MovieExoPlayerView(
             var isPointerActive = true
             var dragSeekPosition = currentPosition
 
-            // Launch timer for Touch & Hold 2X Fast Forward (fires after 350ms if held still)
+            // Launch timer for Touch & Hold 2X Fast Forward (fires after 300ms if held)
             val holdJob = scope.launch {
-                delay(350)
+                delay(300)
                 if (isPointerActive && !hasMoved && !isScreenLocked) {
                     isLongPressActive = true
                     isFastForward2x = true
@@ -386,20 +387,24 @@ fun MovieExoPlayerView(
             try {
                 while (true) {
                     val event = awaitPointerEvent()
-                    val anyActive = event.changes.any { it.pressed }
-                    if (!anyActive) break
+                    val change = event.changes.firstOrNull { it.id == pointerId } ?: event.changes.firstOrNull()
+                    if (change == null || !change.pressed) break
 
-                    val touch = event.changes.first()
-                    val dx = touch.position.x - startX
-                    val dy = touch.position.y - startY
+                    val dx = change.position.x - startX
+                    val dy = change.position.y - startY
 
-                    if (abs(dx) > 18f || abs(dy) > 18f) {
-                        hasMoved = true
-                        holdJob.cancel()
-                        if (isLongPressActive) {
+                    if (isLongPressActive) {
+                        // While 2X speed is active, do not cancel or switch to seek/brightness/volume on minor jitter
+                        if (abs(dx) > 75f || abs(dy) > 75f) {
                             isLongPressActive = false
                             isFastForward2x = false
                             exoPlayer?.setPlaybackSpeed(currentSpeedState)
+                            hasMoved = true
+                        }
+                    } else if (!hasMoved) {
+                        if (abs(dx) > 28f || abs(dy) > 28f) {
+                            hasMoved = true
+                            holdJob.cancel()
                         }
                     }
 
@@ -980,21 +985,6 @@ fun MovieExoPlayerView(
                                 imageVector = Icons.Default.Settings,
                                 contentDescription = "Playback Settings",
                                 tint = Color.White,
-                                modifier = Modifier.size(if (isFullScreen) 20.dp else 18.dp)
-                            )
-                        }
-
-                        // Download Stream Button
-                        IconButton(
-                            onClick = { showDownloaderDialog = true },
-                            modifier = Modifier
-                                .size(if (isFullScreen) 32.dp else 28.dp)
-                                .testTag("player_download_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = "Download Video",
-                                tint = NeonCyan,
                                 modifier = Modifier.size(if (isFullScreen) 20.dp else 18.dp)
                             )
                         }

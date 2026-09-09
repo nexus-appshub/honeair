@@ -1193,22 +1193,6 @@ fun CinemetaWebViewPlayer(
                                     )
                                 }
                             }
-
-                            // Download Button
-                            IconButton(
-                                onClick = {
-                                    showDownloaderModal = true
-                                },
-                                modifier = Modifier
-                                    .size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Download,
-                                    contentDescription = "Download Video",
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
                         }
                     }
                 }
@@ -1270,10 +1254,44 @@ fun CinemetaWebViewPlayer(
                         subtitles = activeSubtitles,
                         onFullScreenToggle = { onFullScreenChange(!isFullScreen) },
                         onPlaybackError = { _ ->
-                            // Fallback to web player if ExoPlayer encounters fatal error on stream
-                            currentServerIndex = 1
-                            isLoading = true
-                            hasError = false
+                            // Auto-fallback: If current direct stream fails or errors, automatically race through sub-servers (Delta, Sigma, Prime, VidRock, VidSrc, etc.)
+                            if (!isAnime) {
+                                scope.launch(Dispatchers.IO) {
+                                    withContext(Dispatchers.Main) {
+                                        isLoading = true
+                                    }
+                                    val fallbackResult = com.example.scraper.UnifiedStreamManager.getStream(
+                                        context = context,
+                                        title = title,
+                                        tmdbId = imdbId,
+                                        isTv = isSeries,
+                                        season = currentSeason,
+                                        episode = currentEpisode,
+                                        isAnime = false
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        if (fallbackResult != null && fallbackResult.streamUrl.isNotBlank() && fallbackResult.streamUrl != playableDirectUrl) {
+                                            capturedVideoUrl = fallbackResult.streamUrl
+                                            customScrapedHeaders = fallbackResult.headers
+                                            if (fallbackResult.subtitles.isNotEmpty()) {
+                                                activeSubtitles = fallbackResult.subtitles
+                                            }
+                                            useExoPlayer = true
+                                            isLoading = false
+                                            hasError = false
+                                        } else {
+                                            // If all direct stream extractions fail, gracefully switch to web embed Sr-1
+                                            currentServerIndex = 1
+                                            isLoading = true
+                                            hasError = false
+                                        }
+                                    }
+                                }
+                            } else {
+                                currentServerIndex = 1
+                                isLoading = true
+                                hasError = false
+                            }
                         },
                         onBack = onClosePlayer,
                         isSeries = isSeries,
@@ -2073,7 +2091,7 @@ fun CinemetaWebViewPlayer(
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
-                                        text = "MAIN: Direct Server",
+                                        text = "MAIN: Fastest Direct",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = NeonMagenta,
@@ -2082,12 +2100,19 @@ fun CinemetaWebViewPlayer(
                                 }
                             } else if (selectedVidnestServerKey != null) {
                                 val currentVidnestServer = com.example.scraper.VidnestNativeScraper.PROVIDERS.find { it.key == selectedVidnestServerKey }
+                                val serverLabel = when (selectedVidnestServerKey) {
+                                    "vidlink_direct" -> "VidLink (Pro)"
+                                    "vidsrc_direct" -> "VidSrc (Multi)"
+                                    "autoembed_direct" -> "AutoEmbed"
+                                    "vidrock_direct" -> "VidRock"
+                                    else -> currentVidnestServer?.displayName ?: "Server A"
+                                }
                                 Surface(
                                     color = Color(0xFFFF9800).copy(alpha = 0.15f),
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
-                                        text = "MULTI: ${currentVidnestServer?.displayName ?: "Server A"}",
+                                        text = "MULTI: $serverLabel",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFFFF9800),
@@ -2349,11 +2374,41 @@ fun CinemetaWebViewPlayer(
                                                     capturedVideoUrl = mainScrapedVideoUrl
                                                     customScrapedHeaders = mainScrapedHeaders ?: emptyMap()
                                                     useExoPlayer = true
+                                                } else {
+                                                    scope.launch(Dispatchers.IO) {
+                                                        withContext(Dispatchers.Main) {
+                                                            isLoading = true
+                                                            hasError = false
+                                                        }
+                                                        val res = com.example.scraper.UnifiedStreamManager.getStream(
+                                                            context = context,
+                                                            title = title,
+                                                            tmdbId = imdbId,
+                                                            isTv = isSeries,
+                                                            season = currentSeason,
+                                                            episode = currentEpisode,
+                                                            isAnime = isAnime
+                                                        )
+                                                        withContext(Dispatchers.Main) {
+                                                            if (res != null && res.streamUrl.isNotBlank()) {
+                                                                capturedVideoUrl = res.streamUrl
+                                                                customScrapedHeaders = res.headers
+                                                                mainScrapedVideoUrl = res.streamUrl
+                                                                mainScrapedHeaders = res.headers
+                                                                activeSubtitles = res.subtitles
+                                                                useExoPlayer = true
+                                                                isLoading = false
+                                                                hasError = false
+                                                            } else {
+                                                                isLoading = false
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             },
                                             label = {
                                                 Text(
-                                                    text = "MAIN (Direct)",
+                                                    text = "Main (Fast Direct)",
                                                     fontSize = 12.sp,
                                                     fontWeight = if (isMainSelected) FontWeight.Bold else FontWeight.Normal
                                                 )

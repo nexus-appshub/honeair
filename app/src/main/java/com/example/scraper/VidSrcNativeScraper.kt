@@ -2,12 +2,14 @@ package com.example.scraper
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-import java.util.regex.Pattern
 
 object VidSrcNativeScraper {
     private const val TAG = "VidSrcNativeScraper"
@@ -15,14 +17,15 @@ object VidSrcNativeScraper {
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
     }
 
     private val VIDSRC_HOSTS = listOf(
+        "https://vidsrc.sbs",
         "https://vidsrc.me",
         "https://vidsrc.to",
         "https://vidsrc.xyz",
@@ -32,7 +35,10 @@ object VidSrcNativeScraper {
         "https://vidsrc.pm",
         "https://vidsrc.net",
         "https://vidsrc.rip",
-        "https://vidsrc.pro"
+        "https://vidsrc.pro",
+        "https://vidsrc.icu",
+        "https://vidsrc.su",
+        "https://vidsrc2.to"
     )
 
     suspend fun extractStream(
@@ -45,35 +51,37 @@ object VidSrcNativeScraper {
         val cleanTmdb = tmdbId.removePrefix("movie_").removePrefix("series_").removePrefix("anikoto_").trim()
         val effectiveImdb = if (!imdbId.isNullOrBlank() && imdbId.startsWith("tt")) imdbId.trim() else null
 
-        // Try vidsrc.me / vidsrc.to / vidsrc.xyz embed endpoints
+        val candidateTasks = mutableListOf<Pair<String, String>>() // (embedUrl, host)
+
         for (host in VIDSRC_HOSTS) {
-            try {
-                val candidateUrls = mutableListOf<String>()
-
-                if (isTv) {
-                    if (!effectiveImdb.isNullOrBlank()) {
-                        candidateUrls.add("$host/embed/tv?imdb=$effectiveImdb&season=$season&episode=$episode")
-                        candidateUrls.add("$host/embed/tv/$effectiveImdb/$season/$episode")
-                    }
-                    if (cleanTmdb.all { it.isDigit() }) {
-                        candidateUrls.add("$host/embed/tv?tmdb=$cleanTmdb&season=$season&episode=$episode")
-                        candidateUrls.add("$host/embed/tv/$cleanTmdb/$season/$episode")
-                        candidateUrls.add("$host/embed/$cleanTmdb/$season/$episode")
-                    }
-                } else {
-                    if (!effectiveImdb.isNullOrBlank()) {
-                        candidateUrls.add("$host/embed/movie?imdb=$effectiveImdb")
-                        candidateUrls.add("$host/embed/movie/$effectiveImdb")
-                        candidateUrls.add("$host/embed/$effectiveImdb")
-                    }
-                    if (cleanTmdb.all { it.isDigit() }) {
-                        candidateUrls.add("$host/embed/movie?tmdb=$cleanTmdb")
-                        candidateUrls.add("$host/embed/movie/$cleanTmdb")
-                        candidateUrls.add("$host/embed/$cleanTmdb")
-                    }
+            if (isTv) {
+                if (!effectiveImdb.isNullOrBlank()) {
+                    candidateTasks.add(Pair("$host/embed/tv?imdb=$effectiveImdb&season=$season&episode=$episode", host))
+                    candidateTasks.add(Pair("$host/embed/tv/$effectiveImdb/$season/$episode", host))
                 }
+                if (cleanTmdb.all { it.isDigit() }) {
+                    candidateTasks.add(Pair("$host/embed/tv?tmdb=$cleanTmdb&season=$season&episode=$episode", host))
+                    candidateTasks.add(Pair("$host/embed/tv/$cleanTmdb/$season/$episode", host))
+                    candidateTasks.add(Pair("$host/embed/$cleanTmdb/$season/$episode", host))
+                }
+            } else {
+                if (!effectiveImdb.isNullOrBlank()) {
+                    candidateTasks.add(Pair("$host/embed/movie?imdb=$effectiveImdb", host))
+                    candidateTasks.add(Pair("$host/embed/movie/$effectiveImdb", host))
+                    candidateTasks.add(Pair("$host/embed/$effectiveImdb", host))
+                }
+                if (cleanTmdb.all { it.isDigit() }) {
+                    candidateTasks.add(Pair("$host/embed/movie?tmdb=$cleanTmdb", host))
+                    candidateTasks.add(Pair("$host/embed/movie/$cleanTmdb", host))
+                    candidateTasks.add(Pair("$host/embed/$cleanTmdb", host))
+                }
+            }
+        }
 
-                for (embedUrl in candidateUrls) {
+        return@withContext coroutineScope {
+            val resultChannel = Channel<ScrapedStreamResult>(10)
+            val jobs = candidateTasks.map { (embedUrl, host) ->
+                launch(Dispatchers.IO) {
                     try {
                         val req = Request.Builder()
                             .url(embedUrl)
@@ -89,8 +97,9 @@ object VidSrcNativeScraper {
                             // 1. Direct stream search in HTML
                             val directStream = extractDirectStreamFromHtml(html, host)
                             if (directStream != null) {
-                                Log.d(TAG, "VidSrc direct stream found from $embedUrl: ${directStream.streamUrl}")
-                                return@withContext directStream
+                                Log.d(TAG, "VidSrc direct stream winner from $embedUrl: ${directStream.streamUrl}")
+                                resultChannel.trySend(directStream)
+                                return@launch
                             }
 
                             // 2. Extract rcp or iframe hash
@@ -108,15 +117,16 @@ object VidSrcNativeScraper {
                                 if (rcpResp.isSuccessful && rcpHtml.isNotBlank()) {
                                     val rcpStream = extractDirectStreamFromHtml(rcpHtml, host)
                                     if (rcpStream != null) {
-                                        Log.d(TAG, "VidSrc RCP stream found: ${rcpStream.streamUrl}")
-                                        return@withContext rcpStream
+                                        Log.d(TAG, "VidSrc RCP stream winner: ${rcpStream.streamUrl}")
+                                        resultChannel.trySend(rcpStream)
+                                        return@launch
                                     }
 
-                                    // Check prourl / src4 / cloudflare intermediate sources
                                     val proStream = extractProUrlStream(rcpHtml, rcpUrl, host)
                                     if (proStream != null) {
-                                        Log.d(TAG, "VidSrc ProURL stream found: ${proStream.streamUrl}")
-                                        return@withContext proStream
+                                        Log.d(TAG, "VidSrc ProURL stream winner: ${proStream.streamUrl}")
+                                        resultChannel.trySend(proStream)
+                                        return@launch
                                     }
                                 }
                             }
@@ -134,20 +144,26 @@ object VidSrcNativeScraper {
                                 if (ifResp.isSuccessful && ifHtml.isNotBlank()) {
                                     val ifStream = extractDirectStreamFromHtml(ifHtml, host)
                                     if (ifStream != null) {
-                                        return@withContext ifStream
+                                        resultChannel.trySend(ifStream)
+                                        return@launch
                                     }
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "VidSrc candidate $embedUrl failed: ${e.message}")
-                    }
+                    } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "VidSrc host $host failed: ${e.message}")
             }
+
+            var winner: ScrapedStreamResult? = null
+            try {
+                winner = withTimeoutOrNull(12000L) {
+                    resultChannel.receive()
+                }
+            } catch (_: Exception) {}
+
+            jobs.forEach { it.cancel() }
+            winner
         }
-        null
     }
 
     private fun extractRcpUrl(html: String, host: String): String? {
@@ -191,7 +207,6 @@ object VidSrcNativeScraper {
     }
 
     private fun extractProUrlStream(html: String, referer: String, host: String): ScrapedStreamResult? {
-        // Search for encoded player source or hls endpoint
         val hlsPattern = Regex("""(https?://[^\s"'<>\\]+?\.(?:m3u8|mp4)[^\s"'<>\\]*)""")
         val match = hlsPattern.find(html)
         if (match != null) {
