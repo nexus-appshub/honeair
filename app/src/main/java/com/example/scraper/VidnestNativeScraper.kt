@@ -26,6 +26,7 @@ object VidnestNativeScraper {
     private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
     val PROVIDERS = listOf(
+        VidnestProviderInfo("delta", "HINDI", "allmovies", "https://vidnest.fun/"),
         VidnestProviderInfo("filxer", "Filxer (Fast)", "rogflix", "https://rogflix.fun/"),
         VidnestProviderInfo("lamda", "Lamda (Ultra)", "allmovies", "https://vidnest.fun/"),
         VidnestProviderInfo("prime", "Prime (VidRock)", "vidrock", "https://vidrock.net/"),
@@ -36,8 +37,7 @@ object VidnestNativeScraper {
         VidnestProviderInfo("ophim", "Ophim (HD)", "klikxxi", "https://vidnest.fun/"),
         VidnestProviderInfo("catflix", "Catflix (Buzz)", "buzz", "https://ployan.me/"),
         VidnestProviderInfo("beta", "Beta (VidXYZ)", "vidxyz", "https://moviesapi.to/"),
-        VidnestProviderInfo("sigma", "Sigma (Holly)", "hollymoviehd", "https://vidnest.fun/"),
-        VidnestProviderInfo("delta", "Delta (Direct)", "allmovies", "https://vidnest.fun/")
+        VidnestProviderInfo("sigma", "Sigma (Holly)", "hollymoviehd", "https://vidnest.fun/")
     )
 
     private val BASE_URLS = listOf(

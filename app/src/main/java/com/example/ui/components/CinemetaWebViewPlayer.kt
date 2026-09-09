@@ -2105,6 +2105,7 @@ fun CinemetaWebViewPlayer(
                                     "vidsrc_direct" -> "VidSrc (Multi)"
                                     "autoembed_direct" -> "AutoEmbed"
                                     "vidrock_direct" -> "VidRock"
+                                    "delta" -> "HINDI"
                                     else -> currentVidnestServer?.displayName ?: "Server A"
                                 }
                                 Surface(
@@ -2429,6 +2430,64 @@ fun CinemetaWebViewPlayer(
                                     }
 
                                     item {
+                                        val isHindiSelected = !isMainSelected && selectedVidnestServerKey == "delta"
+                                        FilterChip(
+                                            selected = isHindiSelected,
+                                            onClick = {
+                                                isMainSelected = false
+                                                selectedVidnestServerKey = "delta"
+                                                viewModel.selectAnikotoServer(null)
+                                                scope.launch(Dispatchers.IO) {
+                                                    withContext(Dispatchers.Main) {
+                                                        isLoading = true
+                                                        hasError = false
+                                                    }
+                                                    val extracted = com.example.scraper.VidnestNativeScraper.extractStreamFromProvider(
+                                                        providerKey = "delta",
+                                                        tmdbId = imdbId,
+                                                        isTv = isSeries,
+                                                        season = currentSeason,
+                                                        episode = currentEpisode
+                                                    )
+                                                    withContext(Dispatchers.Main) {
+                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                                            capturedVideoUrl = extracted.streamUrl
+                                                            customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
+                                                            useExoPlayer = true
+                                                            isLoading = false
+                                                            hasError = false
+                                                        } else {
+                                                            isLoading = false
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = "HINDI",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isHindiSelected) FontWeight.Black else FontWeight.Bold
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFFFF9800),
+                                                selectedLabelColor = Color.Black,
+                                                containerColor = SpaceBlack,
+                                                labelColor = Color(0xFFFF9800)
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = isHindiSelected,
+                                                borderColor = Color(0xFFFF9800).copy(alpha = 0.5f),
+                                                selectedBorderColor = Color(0xFFFF9800)
+                                            )
+                                        )
+                                    }
+
+                                    item {
                                         val isVidlinkSelected = !isMainSelected && selectedVidnestServerKey == "vidlink_direct"
                                         FilterChip(
                                             selected = isVidlinkSelected,
@@ -2656,7 +2715,7 @@ fun CinemetaWebViewPlayer(
                                         )
                                     }
 
-                                    items(com.example.scraper.VidnestNativeScraper.PROVIDERS) { provider ->
+                                    items(com.example.scraper.VidnestNativeScraper.PROVIDERS.filter { it.key != "delta" }) { provider ->
                                         val isSelected = !isMainSelected && selectedVidnestServerKey == provider.key
                                         FilterChip(
                                             selected = isSelected,
