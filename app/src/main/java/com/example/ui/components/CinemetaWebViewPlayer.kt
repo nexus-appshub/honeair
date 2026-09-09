@@ -1130,8 +1130,21 @@ fun CinemetaWebViewPlayer(
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(20.dp)
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
+                            // Download Icon Button
+                            IconButton(
+                                onClick = { showDownloaderModal = true },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Download Video",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
                             // Picture-in-Picture Button
                             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                                 IconButton(

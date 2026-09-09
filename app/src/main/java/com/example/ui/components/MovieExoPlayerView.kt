@@ -339,11 +339,15 @@ fun MovieExoPlayerView(
     }
 
     val currentSpeedState by rememberUpdatedState(playbackSpeed)
+    val currentPositionState by rememberUpdatedState(currentPosition)
+    val durationState by rememberUpdatedState(duration)
+    val isScreenLockedState by rememberUpdatedState(isScreenLocked)
+    val exoPlayerState by rememberUpdatedState(exoPlayer)
 
     // Gesture pointer logic block
-    val gestureModifier = Modifier.pointerInput(duration, currentPosition, isFullScreen, isScreenLocked, playbackSpeed) {
+    val gestureModifier = Modifier.pointerInput(Unit) {
         awaitEachGesture {
-            if (isScreenLocked) {
+            if (isScreenLockedState) {
                 // If screen is locked, any tap just toggles controls/lock button visibility, other gestures are ignored
                 while (true) {
                     val event = awaitPointerEvent()
@@ -366,21 +370,23 @@ fun MovieExoPlayerView(
 
             initialVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
             initialBrightness = activity?.window?.attributes?.screenBrightness?.let { if (it < 0) 0.5f else it } ?: 0.5f
-            initialPositionForSeek = currentPosition
+            initialPositionForSeek = currentPositionState
 
             var dragDirection: String? = null
             var hasMoved = false
             var isLongPressActive = false
+            var wasLongPressActive = false
             var isPointerActive = true
-            var dragSeekPosition = currentPosition
+            var dragSeekPosition = currentPositionState
 
-            // Launch timer for Touch & Hold 2X Fast Forward (fires after 300ms if held)
+            // Launch timer for Touch & Hold 2X Fast Forward (fires after 280ms if held)
             val holdJob = scope.launch {
-                delay(300)
-                if (isPointerActive && !hasMoved && !isScreenLocked) {
+                delay(280)
+                if (isPointerActive && !hasMoved && !isScreenLockedState) {
                     isLongPressActive = true
+                    wasLongPressActive = true
                     isFastForward2x = true
-                    exoPlayer?.setPlaybackSpeed(2.0f)
+                    exoPlayerState?.setPlaybackSpeed(2.0f)
                 }
             }
 
@@ -395,10 +401,10 @@ fun MovieExoPlayerView(
 
                     if (isLongPressActive) {
                         // While 2X speed is active, do not cancel or switch to seek/brightness/volume on minor jitter
-                        if (abs(dx) > 75f || abs(dy) > 75f) {
+                        if (abs(dx) > 100f || abs(dy) > 100f) {
                             isLongPressActive = false
                             isFastForward2x = false
-                            exoPlayer?.setPlaybackSpeed(currentSpeedState)
+                            exoPlayerState?.setPlaybackSpeed(currentSpeedState)
                             hasMoved = true
                         }
                     } else if (!hasMoved) {
@@ -423,7 +429,7 @@ fun MovieExoPlayerView(
                                 val sweepMultiplier = 120000f / screenWidth
                                 val deltaMs = (dx * sweepMultiplier).toLong()
                                 dragSeekOffset = deltaMs
-                                dragSeekPosition = (initialPositionForSeek + deltaMs).coerceIn(0L, duration.coerceAtLeast(1L))
+                                dragSeekPosition = (initialPositionForSeek + deltaMs).coerceIn(0L, durationState.coerceAtLeast(1L))
                                 tempSeekPosition = dragSeekPosition
                             }
                             "brightness" -> {
@@ -454,27 +460,27 @@ fun MovieExoPlayerView(
                 if (isLongPressActive || isFastForward2x) {
                     isLongPressActive = false
                     isFastForward2x = false
-                    exoPlayer?.setPlaybackSpeed(currentSpeedState)
+                    exoPlayerState?.setPlaybackSpeed(currentSpeedState)
                 }
             }
 
             // Finger released - handle tap / double tap only if not long-pressed or dragged
             val elapsedTotal = System.currentTimeMillis() - startTime
-            if (!isLongPressActive && !hasMoved && elapsedTotal < 350) {
+            if (!wasLongPressActive && !hasMoved && elapsedTotal < 350) {
                 val now = System.currentTimeMillis()
                 if (now - lastTapTime < 350 && abs(startX - lastTapX) < 120f) {
                     // Double Tap Detected!
                     if (startX < screenWidth / 2f) {
                         // Left side double tap -> Rewind 10s
-                        val target = (currentPosition - 10000L).coerceAtLeast(0L)
-                        exoPlayer?.seekTo(target)
+                        val target = (currentPositionState - 10000L).coerceAtLeast(0L)
+                        exoPlayerState?.seekTo(target)
                         currentPosition = target
                         showLeftDoubleTapAnim = true
                         lastTapTime = 0L
                     } else {
                         // Right side double tap -> Forward 10s
-                        val target = (currentPosition + 10000L).coerceIn(0L, duration.coerceAtLeast(1L))
-                        exoPlayer?.seekTo(target)
+                        val target = (currentPositionState + 10000L).coerceIn(0L, durationState.coerceAtLeast(1L))
+                        exoPlayerState?.seekTo(target)
                         currentPosition = target
                         showRightDoubleTapAnim = true
                         lastTapTime = 0L
@@ -488,8 +494,8 @@ fun MovieExoPlayerView(
 
             if (isDraggingSeek) {
                 isDraggingSeek = false
-                if (duration > 0) {
-                    exoPlayer?.seekTo(dragSeekPosition)
+                if (durationState > 0) {
+                    exoPlayerState?.seekTo(dragSeekPosition)
                     currentPosition = dragSeekPosition
                 }
             }
