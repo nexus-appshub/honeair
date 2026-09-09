@@ -8751,12 +8751,14 @@ fun MediaHubScreen(
 
                         val latestAnimeList = remember(allItems, latestReleases, allAnimeItems) {
                             val fromLatestReleases = latestReleases.filter { it.category.contains("Anime", ignoreCase = true) }
-                            val explicit = (fromLatestReleases + allAnimeItems).filter { 
-                                (it.year.toIntOrNull() ?: 0) >= 2024 || it.category.contains("Latest", ignoreCase = true) 
+                            val explicitLatest = (fromLatestReleases + allAnimeItems).filter { 
+                                it.category.contains("Latest", ignoreCase = true) || (it.year.toIntOrNull() ?: 0) >= 2025
                             }
-                            val combined = (explicit + allAnimeItems).distinctBy { it.id }
+                            val remaining = allAnimeItems.filter { it !in explicitLatest }
+                            val combined = (explicitLatest + remaining).distinctBy { it.id }
                             combined.sortedWith(
                                 compareByDescending<MediaItem> { it.year.toIntOrNull() ?: 0 }
+                                    .thenByDescending { if (it.category.contains("Latest", ignoreCase = true)) 1 else 0 }
                                     .thenByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
                             )
                         }

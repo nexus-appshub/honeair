@@ -210,6 +210,7 @@ class MediaRepository {
         addJob("Latest", "movie") { tmdbApi.getLatestReleasedMovies(page = it) }
         addJob("Latest", "series") { tmdbApi.getOnTheAirTvShows(page = it) }
         // All anime in Latest is sourced purely from Anikoto
+        val currentYearStr = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
         jobs.add(async(Dispatchers.IO) {
             try {
                 val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(sortBy = "latest-updated", page = page)
@@ -222,7 +223,7 @@ class MediaRepository {
                         category = if (isMovie) "Latest Anime Movies" else "Latest Anime Series",
                         imageUrl = item.posterUrl,
                         rating = if (item.rating.isNotBlank()) item.rating else "8.4",
-                        year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2025",
+                        year = if (item.releaseYear.isNotBlank()) item.releaseYear else currentYearStr,
                         description = item.description,
                         streamUrl = item.watchUrl,
                         episodes = item.episodesInfo,
@@ -580,6 +581,7 @@ class MediaRepository {
             catLower == "movies" -> addJob("Movies", "movie") { tmdbApi.getTrendingMovies(page = it) }
             catLower.contains("series") || catLower.contains("tv") -> addJob("Series & TV Shows", "series") { tmdbApi.getTrendingTvShows(page = it) }
             catLower.contains("anime series") || catLower == "anime" -> {
+                val currentYearStr = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
                 jobs.add(async(Dispatchers.IO) {
                     try {
                         val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "TV", page = page)
@@ -590,7 +592,7 @@ class MediaRepository {
                                 category = "Anime Series",
                                 imageUrl = item.posterUrl,
                                 rating = if (item.rating.isNotBlank()) item.rating else "8.2",
-                                year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
+                                year = if (item.releaseYear.isNotBlank()) item.releaseYear else currentYearStr,
                                 description = item.description,
                                 streamUrl = item.watchUrl,
                                 episodes = item.episodesInfo,
@@ -605,6 +607,7 @@ class MediaRepository {
                 })
             }
             catLower.contains("anime movies") -> {
+                val currentYearStr = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
                 jobs.add(async(Dispatchers.IO) {
                     try {
                         val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "Movie", page = page)
@@ -615,7 +618,7 @@ class MediaRepository {
                                 category = "Anime Movies",
                                 imageUrl = item.posterUrl,
                                 rating = if (item.rating.isNotBlank()) item.rating else "8.5",
-                                year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
+                                year = if (item.releaseYear.isNotBlank()) item.releaseYear else currentYearStr,
                                 description = item.description,
                                 streamUrl = item.watchUrl,
                                 episodes = "",
