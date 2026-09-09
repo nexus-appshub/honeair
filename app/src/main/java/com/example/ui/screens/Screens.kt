@@ -8745,6 +8745,94 @@ fun MediaHubScreen(
                             sortedNonMature + mature
                         }
 
+                        val allAnimeItems = remember(allItems) {
+                            allItems.filter { it.category.contains("Anime", ignoreCase = true) || it.type.equals("anime", ignoreCase = true) }
+                        }
+
+                        val latestAnimeList = remember(allItems, latestReleases, allAnimeItems) {
+                            val fromLatestReleases = latestReleases.filter { it.category.contains("Anime", ignoreCase = true) }
+                            val explicit = (fromLatestReleases + allAnimeItems).filter { 
+                                (it.year.toIntOrNull() ?: 0) >= 2024 || it.category.contains("Latest", ignoreCase = true) 
+                            }
+                            val combined = (explicit + allAnimeItems).distinctBy { it.id }
+                            combined.sortedWith(
+                                compareByDescending<MediaItem> { it.year.toIntOrNull() ?: 0 }
+                                    .thenByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
+                            )
+                        }
+
+                        val hotAnimeList = remember(allAnimeItems) {
+                            val hotKeywords = listOf(
+                                "naruto", "demon slayer", "jujutsu", "attack on titan", "one piece", "bleach",
+                                "solo leveling", "dragon ball", "hunter", "hero academia", "death note",
+                                "chainsaw man", "kaiju", "spy x family", "dandadan", "wind breaker"
+                            )
+                            val matches = allAnimeItems.filter { item ->
+                                val text = (item.title + " " + item.description).lowercase()
+                                hotKeywords.any { text.contains(it) } || (item.rating.toDoubleOrNull() ?: 0.0) >= 7.8
+                            }
+                            (matches + allAnimeItems).distinctBy { it.id }
+                        }
+
+                        val topAnimeList = remember(allAnimeItems) {
+                            allAnimeItems.sortedWith(
+                                compareByDescending<MediaItem> { it.rating.toDoubleOrNull() ?: 0.0 }
+                                    .thenByDescending { it.year.toIntOrNull() ?: 0 }
+                            )
+                        }
+
+                        val actionAnimeList = remember(allAnimeItems) {
+                            val actionKeywords = listOf(
+                                "action", "fight", "slayer", "titan", "hunter", "hero", "punch", "ninja", "dragon",
+                                "jujutsu", "bleach", "piece", "adventure", "battle", "sword", "solo leveling",
+                                "chainsaw", "black clover", "kaiju", "vinland", "naruto", "boruto"
+                            )
+                            val filtered = allAnimeItems.filter { item ->
+                                val text = (item.title + " " + item.description).lowercase()
+                                actionKeywords.any { text.contains(it) }
+                            }
+                            filtered.ifEmpty { allAnimeItems }
+                        }
+
+                        val romanticAnimeList = remember(allAnimeItems) {
+                            val romanceKeywords = listOf(
+                                "romance", "romantic", "love", "lie", "kimi", "your name", "weathering", "horimiya",
+                                "kaguya", "dress-up", "silent voice", "toradora", "fruits basket", "clannad", "heart",
+                                "couple", "girlfriend", "darling", "yamada", "maid", "sweet", "ao haru", "rent-a-girlfriend",
+                                "tonikawa", "kubo", "insomniacs", "tomo-chan", "higehiro", "skip and loafer", "dangers in my heart"
+                            )
+                            val filtered = allAnimeItems.filter { item ->
+                                val text = (item.title + " " + item.description).lowercase()
+                                romanceKeywords.any { text.contains(it) }
+                            }
+                            if (filtered.isNotEmpty()) filtered else {
+                                val fallback = allAnimeItems.filter { item ->
+                                    val title = item.title.lowercase()
+                                    title.contains("love") || title.contains("heart") || title.contains("girl") || title.contains("voice")
+                                }
+                                if (fallback.isNotEmpty()) fallback else allAnimeItems.take(15)
+                            }
+                        }
+
+                        val comedyAnimeList = remember(allAnimeItems) {
+                            val comedyKeywords = listOf(
+                                "comedy", "funny", "spy", "gintama", "kono suba", "saiki", "bocchi", "nichijou",
+                                "mashle", "shin-chan", "doraemon", "school", "devil", "humor", "parody", "grand blue",
+                                "daily lives", "assassination classroom", "dr. stone", "great teacher"
+                            )
+                            val filtered = allAnimeItems.filter { item ->
+                                val text = (item.title + " " + item.description).lowercase()
+                                comedyKeywords.any { text.contains(it) }
+                            }
+                            if (filtered.isNotEmpty()) filtered else {
+                                val fallback = allAnimeItems.filter { item ->
+                                    val text = (item.title + " " + item.description).lowercase()
+                                    text.contains("spy") || text.contains("family") || text.contains("school") || text.contains("friend")
+                                }
+                                if (fallback.isNotEmpty()) fallback else allAnimeItems.take(15)
+                            }
+                        }
+
                         val seriesList = remember(allItems) { allItems.filter { it.category.equals("Series & TV Shows", ignoreCase = true) } }
                         val actionList = remember(allItems) { allItems.filter { it.category.equals("Action", ignoreCase = true) } }
                         val sciFiList = remember(allItems) { allItems.filter { it.category.equals("Sci-Fi", ignoreCase = true) } }
@@ -8950,7 +9038,7 @@ fun MediaHubScreen(
                                 }
 
                                 "Anime" -> {
-                                    val animeFeatured = (animeSeriesList + animeMoviesList).take(6)
+                                    val animeFeatured = (hotAnimeList + animeSeriesList + animeMoviesList).take(6)
                                     if (animeFeatured.isNotEmpty()) {
                                         item {
                                             Spacer(modifier = Modifier.height(8.dp))
@@ -8960,18 +9048,63 @@ fun MediaHubScreen(
                                             )
                                         }
                                     }
-                                    if (animeSeriesList.isNotEmpty()) {
+
+                                    // 1. Hot Anime Category Row
+                                    if (hotAnimeList.isNotEmpty()) {
                                         item {
                                             MediaCategoryRowSection(
-                                                title = " Anime Series",
-                                                items = animeSeriesList,
-                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime Series") },
+                                                title = "🔥 Hot & Trending Anime",
+                                                items = hotAnimeList,
+                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime") },
                                                 onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
                                                 onPlayClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
                                                 onLoadMore = { viewModel.loadMoreMedia() }
                                             )
                                         }
                                     }
+
+                                    // 2. Latest Anime Category Row
+                                    if (latestAnimeList.isNotEmpty()) {
+                                        item {
+                                            MediaCategoryRowSection(
+                                                title = "✨ Latest Airing Anime",
+                                                items = latestAnimeList,
+                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime") },
+                                                onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onPlayClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onLoadMore = { viewModel.loadMoreMedia() }
+                                            )
+                                        }
+                                    }
+
+                                    // 3. Top Anime Category Row
+                                    if (topAnimeList.isNotEmpty()) {
+                                        item {
+                                            MediaCategoryRowSection(
+                                                title = "⭐ Top Rated Anime",
+                                                items = topAnimeList,
+                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime") },
+                                                onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onPlayClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onLoadMore = { viewModel.loadMoreMedia() }
+                                            )
+                                        }
+                                    }
+
+                                    // 4. Action Anime Category Row
+                                    if (actionAnimeList.isNotEmpty()) {
+                                        item {
+                                            MediaCategoryRowSection(
+                                                title = "⚔️ Action Anime",
+                                                items = actionAnimeList,
+                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime") },
+                                                onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onPlayClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onLoadMore = { viewModel.loadMoreMedia() }
+                                            )
+                                        }
+                                    }
+
                                     if (suggestedList.isNotEmpty()) {
                                         item {
                                             Spacer(modifier = Modifier.height(12.dp))
@@ -8982,10 +9115,54 @@ fun MediaHubScreen(
                                             Spacer(modifier = Modifier.height(8.dp))
                                         }
                                     }
+
+                                    // 5. Romantic Anime Category Row
+                                    if (romanticAnimeList.isNotEmpty()) {
+                                        item {
+                                            MediaCategoryRowSection(
+                                                title = "💖 Romantic Anime",
+                                                items = romanticAnimeList,
+                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime") },
+                                                onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onPlayClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onLoadMore = { viewModel.loadMoreMedia() }
+                                            )
+                                        }
+                                    }
+
+                                    // 6. Comedy Anime Category Row
+                                    if (comedyAnimeList.isNotEmpty()) {
+                                        item {
+                                            MediaCategoryRowSection(
+                                                title = "😂 Comedy Anime",
+                                                items = comedyAnimeList,
+                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime") },
+                                                onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onPlayClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onLoadMore = { viewModel.loadMoreMedia() }
+                                            )
+                                        }
+                                    }
+
+                                    // 7. Anime Series Category Row
+                                    if (animeSeriesList.isNotEmpty()) {
+                                        item {
+                                            MediaCategoryRowSection(
+                                                title = "📺 Anime Series",
+                                                items = animeSeriesList,
+                                                onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime Series") },
+                                                onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onPlayClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },
+                                                onLoadMore = { viewModel.loadMoreMedia() }
+                                            )
+                                        }
+                                    }
+
+                                    // 8. Anime Feature Movies Category Row
                                     if (animeMoviesList.isNotEmpty()) {
                                         item {
                                             MediaCategoryRowSection(
-                                                title = " Anime Feature Movies",
+                                                title = "🎬 Anime Feature Movies",
                                                 items = animeMoviesList,
                                                 onSeeAllClick = { viewModel.setSelectedMediaCategory("Anime Movies") },
                                                 onItemClick = { item -> viewModel.preScrapeMediaItem(item); selectedItemForDetail = item },

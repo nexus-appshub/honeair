@@ -876,11 +876,19 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             catLower.contains("hindi series") -> itemCat.contains("hindi series")
                             catLower.contains("hindi dubbed k-drama") || catLower.contains("hindi dubbed kdrama") -> itemCat.contains("hindi dubbed k-dramas") || itemCat.contains("hindi dubbed kdrama")
                             catLower.contains("hindi dubbed") || catLower.contains("dubbed") -> itemCat.contains("dubbed") || itemCat.contains("hindi dubbed")
+                            catLower.contains("romantic") || catLower.contains("romance") -> {
+                                val romanceKeywords = listOf("romance", "romantic", "love", "lie", "kimi", "your name", "weathering", "horimiya", "kaguya", "dress-up", "silent voice", "toradora", "fruits basket", "clannad", "heart", "couple", "girlfriend", "darling")
+                                itemCat.contains("anime") && romanceKeywords.any { (item.title + " " + item.description).lowercase().contains(it) }
+                            }
+                            catLower.contains("comedy") -> {
+                                val comedyKeywords = listOf("comedy", "funny", "spy", "gintama", "kono suba", "saiki", "bocchi", "nichijou", "mashle", "shin-chan", "doraemon", "school", "devil", "humor", "parody")
+                                itemCat.contains("anime") && comedyKeywords.any { (item.title + " " + item.description).lowercase().contains(it) }
+                            }
                             catLower == "movies" -> itemCat == "movies"
                             catLower == "anime" || catLower.contains("anime") -> itemCat.contains("anime")
                             catLower.contains("series") || catLower.contains("tv") -> itemCat.contains("series") || itemCat.contains("tv")
                             catLower.contains("k-drama") || catLower.contains("kdrama") -> itemCat.contains("k-drama") || itemCat.contains("kdrama") || itemCat.contains("korean")
-                            catLower == "action" -> itemCat == "action"
+                            catLower == "action" -> itemCat == "action" || (itemCat.contains("anime") && listOf("action", "fight", "slayer", "titan", "hunter", "hero", "punch", "ninja", "dragon", "jujutsu", "bleach", "piece", "battle", "solo leveling").any { (item.title + " " + item.description).lowercase().contains(it) })
                             catLower.contains("sci-fi") || catLower.contains("scifi") -> itemCat.contains("sci-fi") || itemCat.contains("scifi")
                             else -> itemCat == catLower || itemCat.contains(catLower)
                         }
