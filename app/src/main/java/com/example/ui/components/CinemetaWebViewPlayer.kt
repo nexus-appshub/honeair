@@ -2374,6 +2374,177 @@ fun CinemetaWebViewPlayer(
                                     }
 
                                     item {
+                                        val isVidlinkSelected = !isMainSelected && selectedVidnestServerKey == "vidlink_direct"
+                                        FilterChip(
+                                            selected = isVidlinkSelected,
+                                            onClick = {
+                                                isMainSelected = false
+                                                selectedVidnestServerKey = "vidlink_direct"
+                                                viewModel.selectAnikotoServer(null)
+                                                scope.launch(Dispatchers.IO) {
+                                                    withContext(Dispatchers.Main) {
+                                                        isLoading = true
+                                                        hasError = false
+                                                    }
+                                                    val extracted = com.example.scraper.VidLinkNativeScraper.extractStream(
+                                                        tmdbId = imdbId,
+                                                        isTv = isSeries,
+                                                        season = currentSeason,
+                                                        episode = currentEpisode
+                                                    )
+                                                    withContext(Dispatchers.Main) {
+                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                                            capturedVideoUrl = extracted.streamUrl
+                                                            customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
+                                                            useExoPlayer = true
+                                                            isLoading = false
+                                                            hasError = false
+                                                        } else {
+                                                            isLoading = false
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = "VidLink (Pro)",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isVidlinkSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF6C5CE7),
+                                                selectedLabelColor = Color.White,
+                                                containerColor = SpaceBlack,
+                                                labelColor = TextPrimary
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = isVidlinkSelected,
+                                                borderColor = BorderColor,
+                                                selectedBorderColor = Color(0xFF6C5CE7)
+                                            )
+                                        )
+                                    }
+
+                                    item {
+                                        val isVidsrcSelected = !isMainSelected && selectedVidnestServerKey == "vidsrc_direct"
+                                        FilterChip(
+                                            selected = isVidsrcSelected,
+                                            onClick = {
+                                                isMainSelected = false
+                                                selectedVidnestServerKey = "vidsrc_direct"
+                                                viewModel.selectAnikotoServer(null)
+                                                scope.launch(Dispatchers.IO) {
+                                                    withContext(Dispatchers.Main) {
+                                                        isLoading = true
+                                                        hasError = false
+                                                    }
+                                                    val extracted = com.example.scraper.VidSrcNativeScraper.extractStream(
+                                                        tmdbId = imdbId,
+                                                        isTv = isSeries,
+                                                        season = currentSeason,
+                                                        episode = currentEpisode
+                                                    )
+                                                    withContext(Dispatchers.Main) {
+                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                                            capturedVideoUrl = extracted.streamUrl
+                                                            customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
+                                                            useExoPlayer = true
+                                                            isLoading = false
+                                                            hasError = false
+                                                        } else {
+                                                            isLoading = false
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = "VidSrc (Multi)",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isVidsrcSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFFFF5252),
+                                                selectedLabelColor = Color.White,
+                                                containerColor = SpaceBlack,
+                                                labelColor = TextPrimary
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = isVidsrcSelected,
+                                                borderColor = BorderColor,
+                                                selectedBorderColor = Color(0xFFFF5252)
+                                            )
+                                        )
+                                    }
+
+                                    item {
+                                        val isAutoEmbedSelected = !isMainSelected && selectedVidnestServerKey == "autoembed_direct"
+                                        FilterChip(
+                                            selected = isAutoEmbedSelected,
+                                            onClick = {
+                                                isMainSelected = false
+                                                selectedVidnestServerKey = "autoembed_direct"
+                                                viewModel.selectAnikotoServer(null)
+                                                scope.launch(Dispatchers.IO) {
+                                                    withContext(Dispatchers.Main) {
+                                                        isLoading = true
+                                                        hasError = false
+                                                    }
+                                                    val extracted = com.example.scraper.AutoEmbedNativeScraper.extractStream(
+                                                        tmdbId = imdbId,
+                                                        isTv = isSeries,
+                                                        season = currentSeason,
+                                                        episode = currentEpisode
+                                                    )
+                                                    withContext(Dispatchers.Main) {
+                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                                            capturedVideoUrl = extracted.streamUrl
+                                                            customScrapedHeaders = extracted.headers
+                                                            if (extracted.subtitles.isNotEmpty()) {
+                                                                activeSubtitles = extracted.subtitles
+                                                            }
+                                                            useExoPlayer = true
+                                                            isLoading = false
+                                                            hasError = false
+                                                        } else {
+                                                            isLoading = false
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = "AutoEmbed",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isAutoEmbedSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = Color(0xFF00B894),
+                                                selectedLabelColor = Color.White,
+                                                containerColor = SpaceBlack,
+                                                labelColor = TextPrimary
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = isAutoEmbedSelected,
+                                                borderColor = BorderColor,
+                                                selectedBorderColor = Color(0xFF00B894)
+                                            )
+                                        )
+                                    }
+
+                                    item {
                                         val isVidrockSelected = !isMainSelected && selectedVidnestServerKey == "vidrock_direct"
                                         FilterChip(
                                             selected = isVidrockSelected,

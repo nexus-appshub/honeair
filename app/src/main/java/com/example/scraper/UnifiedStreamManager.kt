@@ -92,6 +92,7 @@ object UnifiedStreamManager {
 
         var finalTmdbId = tmdbId.trim()
         var effectiveIsTv = isTv
+        var resolvedImdbId: String? = if (finalTmdbId.startsWith("tt")) finalTmdbId else null
 
         if (finalTmdbId.startsWith("movie_")) {
             finalTmdbId = finalTmdbId.removePrefix("movie_")
@@ -153,13 +154,70 @@ object UnifiedStreamManager {
             }
         }
 
-        // PARALLEL HIGH POWER EXACT TMDB RACING:
-        // Execute Vidnest Concurrent Sub-Servers (12 sub-providers) & Vidrock Deep Native Scraper simultaneously
+        // PARALLEL HIGH POWER MULTI-SERVER RACING ENGINE:
+        // Execute 5 Concurrent Engines: [VidLink] + [VidSrc Multi-Host] + [AutoEmbed/Smashy/2Embed] + [VidNest 12-Sub] + [VidRock Deep]
         return coroutineScope {
-            Log.d(TAG, "Launching Exact TMDB Concurrent Scrapers: [VidNest 12-Providers] + [VidRock Deep] for TMDB ID: $finalTmdbId...")
-            val resultChannel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(8)
+            Log.d(TAG, "Launching High-Power Multi-Server Concurrent Scrapers for TMDB ID: $finalTmdbId (IMDb: $resolvedImdbId)...")
+            val resultChannel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(12)
 
-            // Task 1: VidNest Concurrent Multi-Provider Scraper (Fastest among 12 sub-providers)
+            // Task 1: VidLink Native Engine (vidlink.pro / api / sources)
+            val vidlinkJob = launch(Dispatchers.IO) {
+                try {
+                    val res = VidLinkNativeScraper.extractStream(
+                        tmdbId = finalTmdbId,
+                        isTv = effectiveIsTv,
+                        season = season,
+                        episode = episode,
+                        imdbId = resolvedImdbId
+                    )
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        Log.d(TAG, "VidLink scraper WINNER: ${res.streamUrl}")
+                        resultChannel.trySend(res)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "VidLink task error: ${e.message}")
+                }
+            }
+
+            // Task 2: VidSrc Multi-Host Engine (vidsrc.me, vidsrc.to, vidsrc.xyz, vidsrc.vip, vidsrc.cc, vidsrc.pm, etc.)
+            val vidsrcJob = launch(Dispatchers.IO) {
+                try {
+                    val res = VidSrcNativeScraper.extractStream(
+                        tmdbId = finalTmdbId,
+                        isTv = effectiveIsTv,
+                        season = season,
+                        episode = episode,
+                        imdbId = resolvedImdbId
+                    )
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        Log.d(TAG, "VidSrc scraper WINNER: ${res.streamUrl}")
+                        resultChannel.trySend(res)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "VidSrc task error: ${e.message}")
+                }
+            }
+
+            // Task 3: AutoEmbed & Multi-Source Engine (AutoEmbed, 2Embed, SmashyStream, MultiEmbed, Videasy)
+            val autoEmbedJob = launch(Dispatchers.IO) {
+                try {
+                    val res = AutoEmbedNativeScraper.extractStream(
+                        tmdbId = finalTmdbId,
+                        isTv = effectiveIsTv,
+                        season = season,
+                        episode = episode,
+                        imdbId = resolvedImdbId
+                    )
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        Log.d(TAG, "AutoEmbed scraper WINNER: ${res.streamUrl}")
+                        resultChannel.trySend(res)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "AutoEmbed task error: ${e.message}")
+                }
+            }
+
+            // Task 4: VidNest Concurrent Multi-Provider Scraper (Fastest among 12 sub-providers)
             val vidnestJob = launch(Dispatchers.IO) {
                 try {
                     val res = VidnestNativeScraper.extractStream(
@@ -169,6 +227,7 @@ object UnifiedStreamManager {
                         episode = episode
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
+                        Log.d(TAG, "VidNest scraper WINNER: ${res.streamUrl}")
                         resultChannel.trySend(res)
                     }
                 } catch (e: Exception) {
@@ -176,7 +235,7 @@ object UnifiedStreamManager {
                 }
             }
 
-            // Task 2: VidRock Architecture Deep Scraper (vidrock.ru / vidsrc.xyz / dynamic proxies)
+            // Task 5: VidRock Architecture Deep Scraper (vidrock.ru / vidrock.net / dynamic proxies)
             val vidrockJob = launch(Dispatchers.IO) {
                 try {
                     val res = VidrockNativeScraper.extractStream(
@@ -186,6 +245,7 @@ object UnifiedStreamManager {
                         episode = episode
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
+                        Log.d(TAG, "VidRock scraper WINNER: ${res.streamUrl}")
                         resultChannel.trySend(res)
                     }
                 } catch (e: Exception) {
@@ -195,16 +255,19 @@ object UnifiedStreamManager {
 
             var winningStream: ScrapedStreamResult? = null
             try {
-                winningStream = kotlinx.coroutines.withTimeoutOrNull(50000L) {
+                winningStream = kotlinx.coroutines.withTimeoutOrNull(28000L) {
                     resultChannel.receive()
                 }
             } catch (_: Exception) {}
 
+            vidlinkJob.cancel()
+            vidsrcJob.cancel()
+            autoEmbedJob.cancel()
             vidnestJob.cancel()
             vidrockJob.cancel()
 
             if (winningStream != null && winningStream.streamUrl.isNotBlank()) {
-                Log.d(TAG, "Exact TMDB Winning Stream selected: ${winningStream.streamUrl}")
+                Log.d(TAG, "Multi-Server Winning Stream selected: ${winningStream.streamUrl}")
                 streamCache[cacheKey] = winningStream
                 saveToRoomCache(context, cacheKey, winningStream)
                 return@coroutineScope winningStream
@@ -238,7 +301,8 @@ object UnifiedStreamManager {
                     tmdbId = "$finalTmdbId",
                     isTv = effectiveIsTv,
                     season = season,
-                    episode = episode
+                    episode = episode,
+                    imdbId = resolvedImdbId
                 )
                 if (webStream != null && webStream.streamUrl.isNotEmpty()) {
                     Log.d(TAG, "Tier 3: In-App Headless Scraper resolved stream successfully!")
@@ -365,10 +429,10 @@ object UnifiedStreamManager {
                         streamUrl = streamUrl,
                         headers = mapOf(
                             "User-Agent" to NetworkModule.USER_AGENT,
-                            "Referer" to "https://vidnest.fun/",
-                            "Origin" to "https://vidnest.fun"
+                            "Referer" to "https://vidlink.pro/",
+                            "Origin" to "https://vidlink.pro"
                         ),
-                        referer = "https://vidnest.fun/"
+                        referer = "https://vidlink.pro/"
                     )
                 }
             }

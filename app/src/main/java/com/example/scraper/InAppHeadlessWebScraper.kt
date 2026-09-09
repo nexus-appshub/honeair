@@ -31,38 +31,57 @@ object InAppHeadlessWebScraper {
         tmdbId: String,
         isTv: Boolean = false,
         season: Int = 1,
-        episode: Int = 1
+        episode: Int = 1,
+        imdbId: String? = null
     ): ScrapedStreamResult? = suspendCancellableCoroutine { continuation ->
 
         Handler(Looper.getMainLooper()).post {
             val isNumeric = tmdbId.all { it.isDigit() }
             val cleanId = tmdbId.trim()
+            val effectiveImdb = if (!imdbId.isNullOrBlank() && imdbId.startsWith("tt")) imdbId.trim() else null
 
             val providerUrls = mutableListOf<Pair<String, String>>()
             if (isTv) {
-                providerUrls.add(Pair("https://vidnest.fun/tv/$cleanId/$season/$episode", "https://vidnest.fun/"))
                 providerUrls.add(Pair("https://vidlink.pro/tv/$cleanId/$season/$episode", "https://vidlink.pro/"))
+                providerUrls.add(Pair("https://player.autoembed.cc/embed/tv/$cleanId/$season/$episode", "https://player.autoembed.cc/"))
                 providerUrls.add(Pair("https://vidsrc.me/embed/tv?${if (isNumeric) "tmdb" else "imdb"}=$cleanId&season=$season&episode=$episode", "https://vidsrc.me/"))
+                if (!effectiveImdb.isNullOrBlank()) {
+                    providerUrls.add(Pair("https://vidsrc.me/embed/tv?imdb=$effectiveImdb&season=$season&episode=$episode", "https://vidsrc.me/"))
+                    providerUrls.add(Pair("https://www.2embed.cc/embedtvfull/$effectiveImdb/$season/$episode", "https://www.2embed.cc/"))
+                }
                 providerUrls.add(Pair("https://vidrock.net/embed/tv/$cleanId/$season/$episode", "https://vidrock.net/"))
-                providerUrls.add(Pair("https://smashystream.xyz/tv/$cleanId/$season/$episode", "https://smashystream.xyz/"))
+                providerUrls.add(Pair("https://www.2embed.cc/embedtv/$cleanId&s=$season&e=$episode", "https://www.2embed.cc/"))
+                providerUrls.add(Pair("https://player.smashy.stream/tv/$cleanId?s=$season&e=$episode", "https://player.smashy.stream/"))
+                providerUrls.add(Pair("https://multiembed.mov/?video_id=$cleanId&tmdb=1&s=$season&e=$episode", "https://multiembed.mov/"))
                 providerUrls.add(Pair("https://player.videasy.net/tv/$cleanId/$season/$episode", "https://player.videasy.net/"))
-                providerUrls.add(Pair("https://vidsrc.sbs/embed/tv/$cleanId/$season/$episode", "https://vidsrc.sbs/"))
-                providerUrls.add(Pair("https://vidsrc2.ru/embed/tv/$cleanId/$season/$episode", "https://vidsrc2.ru/"))
+                providerUrls.add(Pair("https://vidsrc.vip/embed/tv/$cleanId/$season/$episode", "https://vidsrc.vip/"))
+                providerUrls.add(Pair("https://vidsrc.to/embed/tv/$cleanId/$season/$episode", "https://vidsrc.to/"))
+                providerUrls.add(Pair("https://vidsrc.xyz/embed/tv/$cleanId/$season/$episode", "https://vidsrc.xyz/"))
+                providerUrls.add(Pair("https://vidnest.fun/tv/$cleanId/$season/$episode", "https://vidnest.fun/"))
             } else {
-                providerUrls.add(Pair("https://vidnest.fun/movie/$cleanId", "https://vidnest.fun/"))
                 providerUrls.add(Pair("https://vidlink.pro/movie/$cleanId", "https://vidlink.pro/"))
+                providerUrls.add(Pair("https://player.autoembed.cc/embed/movie/$cleanId", "https://player.autoembed.cc/"))
                 providerUrls.add(Pair("https://vidsrc.me/embed/movie?${if (isNumeric) "tmdb" else "imdb"}=$cleanId", "https://vidsrc.me/"))
+                if (!effectiveImdb.isNullOrBlank()) {
+                    providerUrls.add(Pair("https://vidsrc.me/embed/movie?imdb=$effectiveImdb", "https://vidsrc.me/"))
+                    providerUrls.add(Pair("https://www.2embed.cc/embed/$effectiveImdb", "https://www.2embed.cc/"))
+                }
                 providerUrls.add(Pair("https://vidrock.net/embed/movie/$cleanId", "https://vidrock.net/"))
-                providerUrls.add(Pair("https://smashystream.xyz/movie/$cleanId", "https://smashystream.xyz/"))
+                providerUrls.add(Pair("https://www.2embed.cc/embed/$cleanId", "https://www.2embed.cc/"))
+                providerUrls.add(Pair("https://player.smashy.stream/movie/$cleanId", "https://player.smashy.stream/"))
+                providerUrls.add(Pair("https://multiembed.mov/?video_id=$cleanId&tmdb=1", "https://multiembed.mov/"))
                 providerUrls.add(Pair("https://player.videasy.net/movie/$cleanId", "https://player.videasy.net/"))
-                providerUrls.add(Pair("https://vidsrc.sbs/embed/movie/$cleanId", "https://vidsrc.sbs/"))
-                providerUrls.add(Pair("https://vidsrc2.ru/embed/movie/$cleanId", "https://vidsrc2.ru/"))
+                providerUrls.add(Pair("https://vidsrc.vip/embed/movie/$cleanId", "https://vidsrc.vip/"))
+                providerUrls.add(Pair("https://vidsrc.to/embed/movie/$cleanId", "https://vidsrc.to/"))
+                providerUrls.add(Pair("https://vidsrc.xyz/embed/movie/$cleanId", "https://vidsrc.xyz/"))
+                providerUrls.add(Pair("https://vidnest.fun/movie/$cleanId", "https://vidnest.fun/"))
             }
 
             var webView: WebView? = null
             var hasResumed = false
             var currentProviderIndex = 0
             val handler = Handler(Looper.getMainLooper())
+            val capturedSubs = mutableListOf<SubtitleTrack>()
 
             fun cleanup() {
                 try {
@@ -90,7 +109,8 @@ object InAppHeadlessWebScraper {
                             ScrapedStreamResult(
                                 streamUrl = streamUrl,
                                 referer = referer,
-                                headers = headers
+                                headers = headers,
+                                subtitles = capturedSubs.distinctBy { it.url }
                             )
                         )
                     }
@@ -114,7 +134,7 @@ object InAppHeadlessWebScraper {
 
                 val (targetUrl, ref) = providerUrls[currentProviderIndex]
                 currentProviderIndex++
-                Log.d(TAG, "Headless scraper loading provider: $targetUrl")
+                Log.d(TAG, "Headless scraper loading provider [${currentProviderIndex}/${providerUrls.size}]: $targetUrl")
 
                 try {
                     val customHeaders = mapOf(
@@ -132,7 +152,7 @@ object InAppHeadlessWebScraper {
                         tryNextProvider()
                     }
                 }
-                handler.postDelayed(cycleRunnable!!, 4500)
+                handler.postDelayed(cycleRunnable!!, 3800)
             }
 
             val overallTimeoutRunnable = Runnable {
@@ -145,7 +165,7 @@ object InAppHeadlessWebScraper {
                     }
                 }
             }
-            handler.postDelayed(overallTimeoutRunnable, 16000)
+            handler.postDelayed(overallTimeoutRunnable, 22000)
 
             try {
                 webView = WebView(context).apply {
@@ -158,7 +178,7 @@ object InAppHeadlessWebScraper {
                     addJavascriptInterface(
                         ScraperBridge { url, ref ->
                             handler.post {
-                                completeWithResult(url, if (ref.isNotBlank()) ref else "https://vidnest.fun/")
+                                completeWithResult(url, if (ref.isNotBlank()) ref else "https://vidlink.pro/")
                             }
                         },
                         "AndroidScraperBridge"
@@ -201,12 +221,12 @@ object InAppHeadlessWebScraper {
                                     var src = vids[i].src || vids[i].currentSrc;
                                     if (src) report(src);
                                 }
-                                var plays = document.querySelectorAll('.play-btn, #play, .jw-display-icon-container, [aria-label="Play"], button.vjs-big-play-button');
+                                var plays = document.querySelectorAll('.play-btn, #play, .jw-display-icon-container, [aria-label="Play"], button.vjs-big-play-button, .vjs-big-play-button, #player, .plyr__control--overlaid');
                                 for (var j = 0; j < plays.length; j++) {
                                     try { plays[j].click(); } catch(e){}
                                 }
                             };
-                            setInterval(checkMedia, 600);
+                            setInterval(checkMedia, 500);
                         } catch(e) {}
                     })();
                 """.trimIndent()
@@ -218,6 +238,20 @@ object InAppHeadlessWebScraper {
                     ): WebResourceResponse? {
                         val url = request?.url?.toString() ?: ""
                         val lower = url.lowercase()
+
+                        // Subtitles interception
+                        if (lower.endsWith(".vtt") || lower.endsWith(".srt") || lower.contains("/subs/") || lower.contains("/subtitles/")) {
+                            if (!lower.contains("preview") && !lower.contains("thumb")) {
+                                capturedSubs.add(
+                                    SubtitleTrack(
+                                        url = url,
+                                        label = "English",
+                                        lang = "en",
+                                        default = capturedSubs.isEmpty()
+                                    )
+                                )
+                            }
+                        }
 
                         // Filter unnecessary heavy telemetry/media
                         if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
@@ -235,7 +269,7 @@ object InAppHeadlessWebScraper {
                                 val currentRef = if (currentProviderIndex > 0 && currentProviderIndex - 1 < providerUrls.size) {
                                     providerUrls[currentProviderIndex - 1].second
                                 } else {
-                                    "https://vidnest.fun/"
+                                    "https://vidlink.pro/"
                                 }
                                 completeWithResult(url, currentRef)
                             }
@@ -280,4 +314,3 @@ object InAppHeadlessWebScraper {
         }
     }
 }
-
