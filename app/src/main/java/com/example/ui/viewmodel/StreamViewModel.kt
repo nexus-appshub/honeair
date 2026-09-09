@@ -312,12 +312,16 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 _availableDubServers.value = group.dubServers
                 currentServerWatchUrl = group.watchUrl
 
-                // Auto-select first SUB server if none selected or if previously selected is not in new list
+                // Auto-select server while preserving user's current SUB / DUB and server preference across episodes!
                 val current = _selectedServer.value
-                val all = group.subServers + group.dubServers
-                if (current == null || all.none { it.linkId == current.linkId }) {
-                    _selectedServer.value = group.subServers.firstOrNull() ?: group.dubServers.firstOrNull()
-                }
+                val isDub = current?.type?.lowercase() == "dub"
+                val targetServers = if (isDub) group.dubServers else group.subServers
+                val matched = targetServers.find { it.name.equals(current?.name, ignoreCase = true) }
+                    ?: targetServers.firstOrNull()
+                    ?: group.subServers.firstOrNull()
+                    ?: group.dubServers.firstOrNull()
+
+                _selectedServer.value = matched
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {

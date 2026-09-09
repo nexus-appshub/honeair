@@ -23,7 +23,12 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -59,6 +64,7 @@ import androidx.media3.ui.PlayerView
 import com.example.network.SmartNetworkBoosterEngine
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonMagenta
+import com.example.ui.theme.NeonPurple
 import com.example.ui.theme.SpaceBlack
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -80,7 +86,15 @@ fun MovieExoPlayerView(
     isSeries: Boolean = false,
     onNextEpisode: (() -> Unit)? = null,
     initialStartPositionMs: Long = 0L,
-    onProgressUpdate: (Long, Long) -> Unit = { _, _ -> }
+    onProgressUpdate: (Long, Long) -> Unit = { _, _ -> },
+    isAnime: Boolean = false,
+    subServers: List<com.example.scraper.AnikotoServer> = emptyList(),
+    dubServers: List<com.example.scraper.AnikotoServer> = emptyList(),
+    selectedAnikotoServer: com.example.scraper.AnikotoServer? = null,
+    onSelectAnikotoServer: ((com.example.scraper.AnikotoServer) -> Unit)? = null,
+    embedServers: List<Pair<String, String>> = emptyList(),
+    currentEmbedServerIndex: Int = 0,
+    onSelectEmbedServerIndex: ((Int) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -110,7 +124,8 @@ fun MovieExoPlayerView(
 
     // Settings & Qualities State
     var selectedQuality by remember { mutableStateOf("Auto") }
-    var showQualityMenu by remember { mutableStateOf(false) }
+    var showSettingsMenu by remember { mutableStateOf(false) }
+    var settingsMenuPage by remember { mutableStateOf("MAIN") }
 
     // Touch & Drag Gesture States
     var isFastForward2x by remember { mutableStateOf(false) }
@@ -322,8 +337,10 @@ fun MovieExoPlayerView(
         }
     }
 
+    val currentSpeedState by rememberUpdatedState(playbackSpeed)
+
     // Gesture pointer logic block
-    val gestureModifier = Modifier.pointerInput(duration, currentPosition, isFullScreen, isScreenLocked) {
+    val gestureModifier = Modifier.pointerInput(duration, currentPosition, isFullScreen, isScreenLocked, playbackSpeed) {
         awaitEachGesture {
             if (isScreenLocked) {
                 // If screen is locked, any tap just toggles controls/lock button visibility, other gestures are ignored
@@ -351,78 +368,93 @@ fun MovieExoPlayerView(
 
             var dragDirection: String? = null
             var hasMoved = false
-            var isLongPress = false
+            var isLongPressActive = false
+            var isPointerActive = true
             var dragSeekPosition = currentPosition
 
-            while (true) {
-                val event = awaitPointerEvent()
-                val anyActive = event.changes.any { it.pressed }
-                if (!anyActive) break
-
-                val touch = event.changes.first()
-                val elapsed = System.currentTimeMillis() - startTime
-
-                // Trigger 2X Speed Hold after 500ms
-                if (!hasMoved && elapsed > 500 && !isLongPress) {
-                    isLongPress = true
+            // Launch timer for Touch & Hold 2X Fast Forward (fires after 350ms if held still)
+            val holdJob = scope.launch {
+                delay(350)
+                if (isPointerActive && !hasMoved && !isScreenLocked) {
+                    isLongPressActive = true
                     isFastForward2x = true
                     exoPlayer?.setPlaybackSpeed(2.0f)
                 }
+            }
 
-                val dx = touch.position.x - startX
-                val dy = touch.position.y - startY
+            try {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val anyActive = event.changes.any { it.pressed }
+                    if (!anyActive) break
 
-                if (abs(dx) > 18f || abs(dy) > 18f) {
-                    hasMoved = true
-                }
+                    val touch = event.changes.first()
+                    val dx = touch.position.x - startX
+                    val dy = touch.position.y - startY
 
-                if (hasMoved && !isLongPress) {
-                    if (dragDirection == null) {
-                        if (abs(dx) > abs(dy)) {
-                            dragDirection = "seek"
-                        } else {
-                            dragDirection = if (startX < screenWidth / 2f) "brightness" else "volume"
+                    if (abs(dx) > 18f || abs(dy) > 18f) {
+                        hasMoved = true
+                        holdJob.cancel()
+                        if (isLongPressActive) {
+                            isLongPressActive = false
+                            isFastForward2x = false
+                            exoPlayer?.setPlaybackSpeed(currentSpeedState)
                         }
                     }
 
-                    when (dragDirection) {
-                        "seek" -> {
-                            isDraggingSeek = true
-                            val sweepMultiplier = 120000f / screenWidth
-                            val deltaMs = (dx * sweepMultiplier).toLong()
-                            dragSeekOffset = deltaMs
-                            dragSeekPosition = (initialPositionForSeek + deltaMs).coerceIn(0L, duration.coerceAtLeast(1L))
-                            tempSeekPosition = dragSeekPosition
-                        }
-                        "brightness" -> {
-                            isDraggingBrightness = true
-                            val delta = -dy / screenHeight
-                            val targetBrightness = (initialBrightness + delta).coerceIn(0.01f, 1.0f)
-                            currentBrightness = targetBrightness
-                            activity?.let { act ->
-                                val lp = act.window.attributes
-                                lp.screenBrightness = targetBrightness
-                                act.window.attributes = lp
+                    if (hasMoved && !isLongPressActive) {
+                        if (dragDirection == null) {
+                            if (abs(dx) > abs(dy)) {
+                                dragDirection = "seek"
+                            } else {
+                                dragDirection = if (startX < screenWidth / 2f) "brightness" else "volume"
                             }
                         }
-                        "volume" -> {
-                            isDraggingVolume = true
-                            val delta = -dy / screenHeight
-                            val targetVolume = (initialVolume + (delta * maxVolume).toInt()).coerceIn(0, maxVolume)
-                            currentVolume = targetVolume
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+
+                        when (dragDirection) {
+                            "seek" -> {
+                                isDraggingSeek = true
+                                val sweepMultiplier = 120000f / screenWidth
+                                val deltaMs = (dx * sweepMultiplier).toLong()
+                                dragSeekOffset = deltaMs
+                                dragSeekPosition = (initialPositionForSeek + deltaMs).coerceIn(0L, duration.coerceAtLeast(1L))
+                                tempSeekPosition = dragSeekPosition
+                            }
+                            "brightness" -> {
+                                isDraggingBrightness = true
+                                val delta = -dy / screenHeight
+                                val targetBrightness = (initialBrightness + delta).coerceIn(0.01f, 1.0f)
+                                currentBrightness = targetBrightness
+                                activity?.let { act ->
+                                    val lp = act.window.attributes
+                                    lp.screenBrightness = targetBrightness
+                                    act.window.attributes = lp
+                                }
+                            }
+                            "volume" -> {
+                                isDraggingVolume = true
+                                val delta = -dy / screenHeight
+                                val targetVolume = (initialVolume + (delta * maxVolume).toInt()).coerceIn(0, maxVolume)
+                                currentVolume = targetVolume
+                                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+                            }
                         }
+                        event.changes.forEach { it.consume() }
                     }
-                    event.changes.forEach { it.consume() }
+                }
+            } finally {
+                isPointerActive = false
+                holdJob.cancel()
+                if (isLongPressActive || isFastForward2x) {
+                    isLongPressActive = false
+                    isFastForward2x = false
+                    exoPlayer?.setPlaybackSpeed(currentSpeedState)
                 }
             }
 
-            // Finger released
+            // Finger released - handle tap / double tap only if not long-pressed or dragged
             val elapsedTotal = System.currentTimeMillis() - startTime
-            if (isLongPress) {
-                isFastForward2x = false
-                exoPlayer?.setPlaybackSpeed(playbackSpeed)
-            } else if (!hasMoved && elapsedTotal < 350) {
+            if (!isLongPressActive && !hasMoved && elapsedTotal < 350) {
                 val now = System.currentTimeMillis()
                 if (now - lastTapTime < 350 && abs(startX - lastTapX) < 120f) {
                     // Double Tap Detected!
@@ -933,14 +965,19 @@ fun MovieExoPlayerView(
                             )
                         }
 
-                        // Settings Gear Button for Quality selection
+                        // Settings Gear Button (Quality & Server Selection)
                         IconButton(
-                            onClick = { showQualityMenu = true },
-                            modifier = Modifier.size(if (isFullScreen) 32.dp else 28.dp)
+                            onClick = {
+                                settingsMenuPage = "MAIN"
+                                showSettingsMenu = true
+                            },
+                            modifier = Modifier
+                                .size(if (isFullScreen) 32.dp else 28.dp)
+                                .testTag("player_settings_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
-                                contentDescription = "Quality Selection",
+                                contentDescription = "Playback Settings",
                                 tint = Color.White,
                                 modifier = Modifier.size(if (isFullScreen) 20.dp else 18.dp)
                             )
@@ -1042,62 +1079,367 @@ fun MovieExoPlayerView(
             }
         }
 
-        // Quality selection dialog popup
-        if (showQualityMenu) {
-            Dialog(onDismissRequest = { showQualityMenu = false }) {
+        // Compact Multi-Option Settings Dialog Popup (Quality & Servers)
+        if (showSettingsMenu) {
+            Dialog(onDismissRequest = { showSettingsMenu = false }) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C1E)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                    modifier = Modifier.width(280.dp)
+                    modifier = Modifier.width(320.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        modifier = Modifier.padding(16.dp)
                     ) {
-                        Text(
-                            text = "Stream Video Quality",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Select max playback resolution",
-                            color = Color.Gray,
-                            fontSize = 12.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        val qualities = listOf("Auto", "1080p", "720p", "480p")
-                        qualities.forEach { quality ->
-                            val isSelected = selectedQuality == quality
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        selectedQuality = quality
-                                        showQualityMenu = false
-                                    }
-                                    .background(if (isSelected) NeonCyan.copy(alpha = 0.08f) else Color.Transparent)
-                                    .padding(vertical = 12.dp, horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = if (quality == "Auto") "Auto (Best)" else quality,
-                                    color = if (isSelected) NeonCyan else Color.White,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 14.sp
-                                )
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(16.dp)
+                        when (settingsMenuPage) {
+                            "MAIN" -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Playback Settings",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
                                     )
+                                    IconButton(
+                                        onClick = { showSettingsMenu = false },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close",
+                                            tint = Color.White.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Option 1: Quality
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.06f))
+                                        .clickable { settingsMenuPage = "QUALITY" }
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.HighQuality,
+                                            contentDescription = "Quality",
+                                            tint = NeonCyan,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "Quality",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = if (selectedQuality == "Auto") "Auto (Best)" else selectedQuality,
+                                                color = Color.Gray,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                        contentDescription = "Open Quality",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Option 2: Servers
+                                val currentServerName = if (isAnime) {
+                                    val type = selectedAnikotoServer?.type?.uppercase() ?: "SUB"
+                                    val name = selectedAnikotoServer?.name ?: "Server 1"
+                                    "$type: $name"
+                                } else {
+                                    val effectiveIdx = if (embedServers.isNotEmpty()) currentEmbedServerIndex % embedServers.size else 0
+                                    embedServers.getOrNull(effectiveIdx)?.first?.substringBefore(" (") ?: "Direct Server"
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.06f))
+                                        .clickable { settingsMenuPage = "SERVERS" }
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Dns,
+                                            contentDescription = "Servers",
+                                            tint = NeonPurple,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "Servers",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = currentServerName,
+                                                color = Color.Gray,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                        contentDescription = "Open Servers",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+
+                            "QUALITY" -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(
+                                        onClick = { settingsMenuPage = "MAIN" },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Select Quality",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                val qualities = listOf("Auto", "1080p", "720p", "480p")
+                                qualities.forEach { quality ->
+                                    val isSelected = selectedQuality == quality
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                selectedQuality = quality
+                                                subtitleHudMessage = "Quality: $quality"
+                                                showSettingsMenu = false
+                                            }
+                                            .background(if (isSelected) NeonCyan.copy(alpha = 0.08f) else Color.Transparent)
+                                            .padding(vertical = 12.dp, horizontal = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = if (quality == "Auto") "Auto (Best)" else quality,
+                                            color = if (isSelected) NeonCyan else Color.White,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 14.sp
+                                        )
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = NeonCyan,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            "SERVERS" -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(
+                                        onClick = { settingsMenuPage = "MAIN" },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Select Server",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                if (isAnime) {
+                                    // Anime SUB & DUB Servers
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 280.dp)
+                                    ) {
+                                        // SUB Servers section
+                                        if (subServers.isNotEmpty()) {
+                                            Text(
+                                                text = "SUBTITLED (SUB)",
+                                                color = NeonCyan,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            LazyRow(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                items(subServers) { srv ->
+                                                    val isSelected = selectedAnikotoServer?.linkId == srv.linkId ||
+                                                            (selectedAnikotoServer == null && srv == subServers.firstOrNull())
+                                                    FilterChip(
+                                                        selected = isSelected,
+                                                        onClick = {
+                                                            onSelectAnikotoServer?.invoke(srv)
+                                                            subtitleHudMessage = "Server: SUB ${srv.name}"
+                                                            showSettingsMenu = false
+                                                        },
+                                                        label = {
+                                                            Text(
+                                                                text = srv.name,
+                                                                fontSize = 12.sp,
+                                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                            )
+                                                        },
+                                                        colors = FilterChipDefaults.filterChipColors(
+                                                            selectedContainerColor = NeonCyan,
+                                                            selectedLabelColor = Color.Black,
+                                                            containerColor = Color.White.copy(alpha = 0.08f),
+                                                            labelColor = Color.White
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // DUB Servers section
+                                        if (dubServers.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(14.dp))
+                                            Text(
+                                                text = "DUBBED (DUB)",
+                                                color = NeonPurple,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            LazyRow(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                items(dubServers) { srv ->
+                                                    val isSelected = selectedAnikotoServer?.linkId == srv.linkId
+                                                    FilterChip(
+                                                        selected = isSelected,
+                                                        onClick = {
+                                                            onSelectAnikotoServer?.invoke(srv)
+                                                            subtitleHudMessage = "Server: DUB ${srv.name}"
+                                                            showSettingsMenu = false
+                                                        },
+                                                        label = {
+                                                            Text(
+                                                                text = srv.name,
+                                                                fontSize = 12.sp,
+                                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                            )
+                                                        },
+                                                        colors = FilterChipDefaults.filterChipColors(
+                                                            selectedContainerColor = NeonPurple,
+                                                            selectedLabelColor = Color.White,
+                                                            containerColor = Color.White.copy(alpha = 0.08f),
+                                                            labelColor = Color.White
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Movie & TV Series Servers list
+                                    val serverList = if (embedServers.isNotEmpty()) embedServers else listOf(Pair("Direct Fast Stream", ""))
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 260.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        itemsIndexed(serverList) { index, server ->
+                                            val isSelected = index == (currentEmbedServerIndex % serverList.size)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        onSelectEmbedServerIndex?.invoke(index)
+                                                        subtitleHudMessage = "Server: ${server.first}"
+                                                        showSettingsMenu = false
+                                                    }
+                                                    .background(if (isSelected) NeonCyan.copy(alpha = 0.12f) else Color.Transparent)
+                                                    .padding(vertical = 10.dp, horizontal = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = server.first,
+                                                    color = if (isSelected) NeonCyan else Color.White,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    fontSize = 13.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = NeonCyan,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

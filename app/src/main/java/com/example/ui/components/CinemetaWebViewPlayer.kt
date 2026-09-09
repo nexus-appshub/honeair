@@ -417,6 +417,32 @@ fun CinemetaWebViewPlayer(
     var showTrailerDialog by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<com.example.data.model.MediaItem?>(null) }
 
+    // Auto-extract stream when user or episode switches the selected Anikoto server (preserves SUB / DUB)
+    LaunchedEffect(selectedServer, currentSeason, currentEpisode) {
+        val srv = selectedServer
+        if (isAnime && srv != null) {
+            withContext(Dispatchers.IO) {
+                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
+                val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                    server = srv,
+                    watchUrl = watchUrl
+                )
+                if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                    withContext(Dispatchers.Main) {
+                        capturedVideoUrl = extracted.streamUrl
+                        customScrapedHeaders = extracted.headers
+                        if (extracted.subtitles.isNotEmpty()) {
+                            activeSubtitles = extracted.subtitles
+                        }
+                        useExoPlayer = true
+                        isLoading = false
+                        hasError = false
+                    }
+                }
+            }
+        }
+    }
+
     LaunchedEffect(currentMediaItem) {
         viewModel.clearYouTubeTrailerId()
         currentMediaItem?.let {
@@ -1269,6 +1295,44 @@ fun CinemetaWebViewPlayer(
                         initialStartPositionMs = initialStartPos,
                         onProgressUpdate = { pos, dur ->
                             viewModel.saveMediaPlaybackProgress(watchProgressKey, pos, dur)
+                        },
+                        isAnime = isAnime,
+                        subServers = subServers,
+                        dubServers = dubServers,
+                        selectedAnikotoServer = selectedServer,
+                        onSelectAnikotoServer = { srv ->
+                            selectedVidnestServerKey = null
+                            viewModel.selectAnikotoServer(srv)
+                            scope.launch(Dispatchers.IO) {
+                                withContext(Dispatchers.Main) {
+                                    isLoading = true
+                                    hasError = false
+                                }
+                                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
+                                val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                                    server = srv,
+                                    watchUrl = watchUrl
+                                )
+                                withContext(Dispatchers.Main) {
+                                    if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                        capturedVideoUrl = extracted.streamUrl
+                                        customScrapedHeaders = extracted.headers
+                                        if (extracted.subtitles.isNotEmpty()) {
+                                            activeSubtitles = extracted.subtitles
+                                        }
+                                        useExoPlayer = true
+                                        isLoading = false
+                                        hasError = false
+                                    } else {
+                                        isLoading = false
+                                    }
+                                }
+                            }
+                        },
+                        embedServers = embedServers,
+                        currentEmbedServerIndex = currentServerIndex,
+                        onSelectEmbedServerIndex = { idx ->
+                            currentServerIndex = idx
                         },
                         modifier = Modifier.fillMaxSize()
                     )
