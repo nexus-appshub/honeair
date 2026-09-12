@@ -199,10 +199,7 @@ object AnikotoScraper {
                     val totalCount = element.selectFirst(".ep-status.total, .tick-eps, .tick-item.tick-eps")?.text()?.trim() ?: ""
                     val desc = element.selectFirst(".description, .film-description, .text-dimmed")?.text()?.trim() ?: ""
                     val rating = element.selectFirst(".tick-item.tick-rate, .tick-rate, .tick-imdb")?.text()?.trim() ?: ""
-                    val rawYearText = element.selectFirst(".fdi-item.fdi-duration, .release-year, .year, .fdi-item")?.text()?.trim() ?: ""
-                    val yearMatch = Regex("""\b(20\d{2}|19\d{2})\b""").find(rawYearText)
-                    val currentYearStr = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR).toString()
-                    val releaseYear = yearMatch?.value ?: if (rawYearText.length == 4 && rawYearText.all { it.isDigit() }) rawYearText else currentYearStr
+                    val releaseYear = element.selectFirst(".fdi-item.fdi-duration, .release-year, .year")?.text()?.trim() ?: ""
 
                     val id = extractSlugId(watchUrl).ifEmpty {
                         title.lowercase().replace(Regex("[^a-z0-9]"), "-")

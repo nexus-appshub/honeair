@@ -925,12 +925,14 @@ fun HomeScreen(
     }
 
     var isLiveTvViewMode by remember { mutableStateOf(false) }
+    var isSportsViewMode by remember { mutableStateOf(false) }
     var showLiveTvBottomSheet by remember { mutableStateOf(false) }
     var isIptvSearchActive by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         viewModel.tabReselectEvent.collect { tabIndex ->
             if (tabIndex == 0) {
                 isLiveTvViewMode = false
+                isSportsViewMode = false
                 isIptvSearchActive = false
             }
         }
@@ -1052,6 +1054,8 @@ fun HomeScreen(
             selectedItemForDetail = null
         } else if (selectedPlaylist != null) {
             viewModel.clearSelectedPlaylist()
+        } else if (isSportsViewMode) {
+            isSportsViewMode = false
         } else if (isLiveTvViewMode) {
             isLiveTvViewMode = false
         } else {
@@ -1808,8 +1812,13 @@ fun HomeScreen(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-                // VIEW 1: ADVANCED MAIN DASHBOARD HUB
-                if (!isLiveTvViewMode && selectedPlaylist == null) {
+                if (isSportsViewMode) {
+                    SportsSection(
+                        viewModel = viewModel,
+                        onNavigateToPlayer = onNavigateToPlayer
+                    )
+                } else if (!isLiveTvViewMode && selectedPlaylist == null) {
+                    // VIEW 1: ADVANCED MAIN DASHBOARD HUB
             var isHomeRefreshing by remember { mutableStateOf(false) }
             val homeScope = rememberCoroutineScope()
             @OptIn(ExperimentalMaterial3Api::class)
@@ -2499,6 +2508,7 @@ fun HomeScreen(
                 Column {
                     val fallbackUrl = remember(activeChannel!!.url) { viewModel.getBackupChannel(activeChannel!!.name)?.url }
                     val isBatterySaverMode by viewModel.batterySaverMode.collectAsState()
+                    val activeChannelHeaders by viewModel.activeChannelHeaders.collectAsState()
                     ExoPlayerView(
                         streamUrl = activeChannel!!.url,
                         channelName = activeChannel!!.name,
@@ -2511,6 +2521,7 @@ fun HomeScreen(
                         onAutoNext = { viewModel.playNextChannel() },
                         onAutoPrev = { viewModel.playPrevChannel() },
                         isBatterySaverMode = isBatterySaverMode,
+                        customHeaders = activeChannelHeaders,
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
@@ -3154,6 +3165,44 @@ fun HomeScreen(
                         )
                     }
 
+                    // Sports option circular button
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable {
+                            showLiveTvBottomSheet = false
+                            isSportsViewMode = true
+                            isLiveTvViewMode = false
+                        }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .background(
+                                    color = NeonCyan.copy(alpha = 0.15f),
+                                    shape = CircleShape
+                                )
+                                .border(
+                                    width = 2.dp,
+                                    color = NeonCyan,
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SportsCricket,
+                                contentDescription = "Sports",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Sports",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = homeTextColor
+                        )
+                    }
+
                     // Dashboard option circular button
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -3722,6 +3771,7 @@ fun PlayerScreen(
             ) {
                 // 1. Embed Media3 player view directly at top of screen
                 val isBatterySaverMode by viewModel.batterySaverMode.collectAsState()
+                val activeChannelHeaders by viewModel.activeChannelHeaders.collectAsState()
                 ExoPlayerView(
                     streamUrl = channel.url,
                     channelName = channel.name,
@@ -3741,6 +3791,7 @@ fun PlayerScreen(
                     channels = filteredChannels,
                     onSelectChannel = { selectedCh -> viewModel.setActiveChannel(selectedCh) },
                     isBatterySaverMode = isBatterySaverMode,
+                    customHeaders = activeChannelHeaders,
                     modifier = if (isFullScreen || isInPipMode) {
                         Modifier.fillMaxSize().background(Color.Black)
                     } else {
@@ -8751,14 +8802,12 @@ fun MediaHubScreen(
 
                         val latestAnimeList = remember(allItems, latestReleases, allAnimeItems) {
                             val fromLatestReleases = latestReleases.filter { it.category.contains("Anime", ignoreCase = true) }
-                            val explicitLatest = (fromLatestReleases + allAnimeItems).filter { 
-                                it.category.contains("Latest", ignoreCase = true) || (it.year.toIntOrNull() ?: 0) >= 2025
+                            val explicit = (fromLatestReleases + allAnimeItems).filter { 
+                                (it.year.toIntOrNull() ?: 0) >= 2024 || it.category.contains("Latest", ignoreCase = true) 
                             }
-                            val remaining = allAnimeItems.filter { it !in explicitLatest }
-                            val combined = (explicitLatest + remaining).distinctBy { it.id }
+                            val combined = (explicit + allAnimeItems).distinctBy { it.id }
                             combined.sortedWith(
                                 compareByDescending<MediaItem> { it.year.toIntOrNull() ?: 0 }
-                                    .thenByDescending { if (it.category.contains("Latest", ignoreCase = true)) 1 else 0 }
                                     .thenByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
                             )
                         }
