@@ -95,6 +95,7 @@ data class AppControlConfig(
     val redeemCode: String = "",
     val redeemValidityHours: Int = 24,
     val redeemExpiryTimestamp: Long = 0L,
+    val fancodeValidityHours: Int = 168,
     val premiumLiveTvIds: List<String> = emptyList(),
     val premiumLiveTvCategories: List<String> = emptyList(),
     val isLiveTvLockEnabled: Boolean = false
@@ -161,7 +162,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 isFanCodeLocked = p.getBoolean("isFanCodeLocked", false),
                 redeemCode = p.getString("redeemCode", "") ?: "",
                 redeemValidityHours = p.getInt("redeemValidityHours", 24),
-                redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L)
+                redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L),
+                fancodeValidityHours = p.getInt("fancodeValidityHours", 168)
             )
         } else null
     )
@@ -347,7 +349,19 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _isSportsUnlockedLocally = MutableStateFlow(false)
     val isSportsUnlockedLocally: StateFlow<Boolean> = _isSportsUnlockedLocally.asStateFlow()
 
-    private val _isAppUnlockedWithFanCode = MutableStateFlow(false)
+    private val _isAppUnlockedWithFanCode = MutableStateFlow(
+        run {
+            val p = application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
+            val savedCode = p.getString("fancode_unlocked_code", "") ?: ""
+            val unlockedUntil = p.getLong("fancode_unlocked_until", 0L)
+            val currentServerCode = p.getString("fancodeCode", "") ?: ""
+            if (savedCode.isNotBlank() && currentServerCode.isNotBlank() && savedCode == currentServerCode) {
+                unlockedUntil == 0L || System.currentTimeMillis() < unlockedUntil
+            } else {
+                false
+            }
+        }
+    )
     val isAppUnlockedWithFanCode: StateFlow<Boolean> = _isAppUnlockedWithFanCode.asStateFlow()
 
     private val _showPremiumPaywall = MutableStateFlow(false)
@@ -489,8 +503,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun unlockAppWithFanCode(enteredCode: String): Boolean {
-        val requiredCode = _appControlConfig.value?.fancodeCode ?: ""
+        val config = _appControlConfig.value
+        val requiredCode = config?.fancodeCode ?: ""
         if (requiredCode.isBlank() || enteredCode.trim() == requiredCode.trim()) {
+            val validityHours = config?.fancodeValidityHours ?: 168
+            val validityMs = if (validityHours > 0) validityHours * 3600000L else 0L
+            val unlockUntil = if (validityMs > 0) System.currentTimeMillis() + validityMs else 0L
+
+            controlPrefs.edit()
+                .putString("fancode_unlocked_code", requiredCode)
+                .putLong("fancode_unlocked_until", unlockUntil)
+                .apply()
+
             _isAppUnlockedWithFanCode.value = true
             return true
         }
@@ -589,6 +613,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val redeemCode = json.optString("redeemCode", "").ifBlank { json.optString("redeem_code", "") }
                             val redeemValidityHours = json.optInt("redeemValidityHours", 24)
                             val redeemExpiryTimestamp = json.optLong("redeemExpiryTimestamp", 0L)
+                            val fancodeValidityHours = json.optInt("fancodeValidityHours", json.optInt("fancode_validity_hours", 168))
 
                             val premiumLiveTvIds = mutableListOf<String>()
                             val jsonLiveTvIds = json.optJSONArray("premiumLiveTvIds")
@@ -632,10 +657,16 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putString("redeemCode", redeemCode)
                                     .putInt("redeemValidityHours", redeemValidityHours)
                                     .putLong("redeemExpiryTimestamp", redeemExpiryTimestamp)
+                                    .putInt("fancodeValidityHours", fancodeValidityHours)
                                     .apply()
                             } catch (e: Throwable) {
                                 Log.e("StreamViewModel", "Error saving control preferences", e)
                             }
+
+                            val savedUnlockCode = controlPrefs.getString("fancode_unlocked_code", "") ?: ""
+                            val savedUnlockUntil = controlPrefs.getLong("fancode_unlocked_until", 0L)
+                            val isAlreadyUnlocked = savedUnlockCode.isNotBlank() && savedUnlockCode == fancodeCode && (savedUnlockUntil == 0L || System.currentTimeMillis() < savedUnlockUntil)
+                            _isAppUnlockedWithFanCode.value = isAlreadyUnlocked
 
                             _appControlConfig.value = AppControlConfig(
                                 isAppSuspended = isSuspended,
@@ -664,6 +695,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 redeemCode = redeemCode,
                                 redeemValidityHours = redeemValidityHours,
                                 redeemExpiryTimestamp = redeemExpiryTimestamp,
+                                fancodeValidityHours = fancodeValidityHours,
                                 premiumLiveTvIds = premiumLiveTvIds,
                                 premiumLiveTvCategories = premiumLiveTvCategories,
                                 isLiveTvLockEnabled = isLiveTvLockEnabled

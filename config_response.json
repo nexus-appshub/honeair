@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <meta name="google-site-verification" content="Vuc8DY8Wks3QLGyyWnBT4jraKzJA_lIZX3QXZUB7mHA" />
+    <meta name="google-site-verification" content="IBVAswPbhQv26_irIfldd7T2E6KTDFk8PScKjLcQO2Q" />
+    <title>Home Air Tv | Watch Live TV, Movies & Anime | Xubilas Web Dev Corp</title>
+    
+    <!-- Comprehensive SEO Meta Tags -->
+    <meta name="description" content="Home Air Tv by Xubilas Web Dev Corp. Stream the latest movies, live TV shows, anime, and worldwide broadcast channels. The ultimate home entertainment experience." />
+    
+    <meta name="keywords" content="Home Air Tv, HomeAirTv, Home Air Television, Home Air TV streaming, Xubilas, Xubilas Web Dev Corp, Xubilas Home Air Tv, Home Air Tv Xubilas, Zubilas, Hme ar tv, hom air tv, hom air television, homeair tv, xubilastv, zubilas tv, home air live tv, home tv, air tv, home-air-tv, xubilas web dev, watch live tv, watch movies online, stream anime, home ari tv, homa air tv, home aer tv, home ear tv, home airt tv, home aie tv, hom aor tv, home aitr tv, home air rtv, home ir tv, hume air tv, home air tevi, home air tiv, hime air tv, home ait tv, xobilas, xublias, xubilas web dev corp, xubilas web development, xubiluz, xubilas tv, xubilas streaming, home air tv app, homeair tv website, xubilas home entertainment, home air tv live, home air tv movies, home air tv shows, zobilas, xubillas, xubeelas, homeairtv app, homeairtv apk, homeairtv web, homeair.tv, home-air.tv, homeair television, xubila, xubilaswebdevcorp, home air tv online, free home air tv, home air iptv, home air tv player, homeairtv movies, homeairtv anime, home air tv sports, home air tv news, xubilas entertainment, zubillas, xobilas, home atv, home artv, hoem air tv, home iar tv, home air vt, home air tb, home air tvv" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://homeairtv.xubilaswebdevcorp.shop/" />
+    <meta property="og:title" content="Home Air Tv | Live Streaming, Movies & Anime by Xubilas" />
+    <meta property="og:description" content="Stream live IPTV, trending movies, and top anime with Home Air Tv by Xubilas Web Dev Corp." />
+    <meta property="og:image" content="/favicon.svg" />
+    <meta property="og:site_name" content="Home Air Tv - Xubilas Web Dev Corp" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://homeairtv.xubilaswebdevcorp.shop/" />
+    <meta name="twitter:title" content="Home Air Tv | Watch Live TV, Movies & Anime | Xubilas" />
+    <meta name="twitter:description" content="Stream live IPTV, trending movies, and top anime with Home Air Tv by Xubilas Web Dev Corp." />
+    <meta name="twitter:image" content="/favicon.svg" />
+
+    <!-- Additional Search Engine Optimizations -->
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="author" content="Xubilas Web Dev Corp" />
+    <meta name="publisher" content="Xubilas Web Dev Corp" />
+    <meta name="application-name" content="Home Air Tv" />
+    <meta name="theme-color" content="#0b0813" />
+    <meta name="msapplication-TileColor" content="#0b0813" />
+    <meta name="msapplication-TileImage" content="/icon-512x512.png" />
+    
+    <!-- PWA & Shortcut Icons -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <link rel="canonical" href="https://homeairtv.xubilaswebdevcorp.shop/" />
+    
+    <!-- Comprehensive Structured Data (JSON-LD) for Search Engine Crawlers -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://homeairtv.xubilaswebdevcorp.shop/#website",
+          "url": "https://homeairtv.xubilaswebdevcorp.shop/",
+          "name": "Home Air Tv",
+          "description": "Stream live IPTV channels, trending movies, TV shows, anime, and worldwide broadcasts.",
+          "publisher": {
+            "@type": "Organization",
+            "name": "Xubilas Web Dev Corp",
+            "url": "https://homeairtv.xubilaswebdevcorp.shop/"
+          },
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://homeairtv.xubilaswebdevcorp.shop/?q={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "WebApplication",
+          "@id": "https://homeairtv.xubilaswebdevcorp.shop/#webapp",
+          "name": "Home Air Tv",
+          "applicationCategory": "EntertainmentApplication",
+          "operatingSystem": "All",
+          "url": "https://homeairtv.xubilaswebdevcorp.shop/",
+          "author": {
+            "@type": "Organization",
+            "name": "Xubilas Web Dev Corp"
+          }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://homeairtv.xubilaswebdevcorp.shop/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Live TV",
+              "item": "https://homeairtv.xubilaswebdevcorp.shop/live"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "Cinema Central",
+              "item": "https://homeairtv.xubilaswebdevcorp.shop/cinema"
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+    <style>
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes pulse-glow {
+        0%, 100% { opacity: 0.5; transform: scale(0.95); }
+        50% { opacity: 0.9; transform: scale(1.05); }
+      }
+      @keyframes water-ripple {
+        0% { transform: scale(0.9); opacity: 0.85; }
+        50% { opacity: 0.45; }
+        100% { transform: scale(2.2); opacity: 0; }
+      }
+      .water-ripple-ring-1 { animation: water-ripple 2.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite; }
+      .water-ripple-ring-2 { animation: water-ripple 2.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite 0.93s; }
+      .water-ripple-ring-3 { animation: water-ripple 2.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite 1.86s; }
+
+      @keyframes playTriangleFlyBounce {
+        0% { transform: translate(0, 0) rotate(0deg) scale(1); }
+        20% { transform: translate(0, 0) rotate(360deg) scale(1); }
+        26% { transform: translate(-6px, 6px) rotate(340deg) scale(1.15); }
+        32% { transform: translate(180px, -140px) rotate(580deg) scale(0.7); }
+        38% { transform: translate(450px, -350px) rotate(900deg) scale(0.2); }
+        48% { transform: translate(-450px, -300px) rotate(980deg) scale(0.2); }
+        56% { transform: translate(-120px, -80px) rotate(1150deg) scale(0.7); }
+        64% { transform: translate(12px, 8px) rotate(1400deg) scale(1.2); }
+        72% { transform: translate(-6px, -4px) rotate(1420deg) scale(0.92); }
+        80% { transform: translate(2px, 1px) rotate(1438deg) scale(1.04); }
+        88%, 100% { transform: translate(0, 0) rotate(1440deg) scale(1); }
+      }
+      .loading-play-triangle {
+        transform-origin: 256px 256px;
+        animation: playTriangleFlyBounce 8s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      /* Theme responsive loading screen */
+      .loading-day {
+        background-color: #f8fafc !important;
+        color: #0f172a !important;
+      }
+      .loading-day h1 {
+        color: #0f172a !important;
+      }
+      .loading-day p {
+        color: #64748b !important;
+      }
+      .loading-day .loading-spinner-ring {
+        border-color: rgba(15, 23, 42, 0.15) !important;
+        border-top-color: #f97316 !important;
+      }
+      .loading-dark {
+        background-color: #070714 !important;
+        color: #ffffff !important;
+      }
+      .loading-dark h1 {
+        color: #ffffff !important;
+      }
+      .loading-dark p {
+        color: #94a3b8 !important;
+      }
+      .loading-dark .loading-spinner-ring {
+        border-color: rgba(255, 255, 255, 0.15) !important;
+        border-top-color: #f97316 !important;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-BLjerzZc.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-mZ7U_KFl.css">
+  </head>
+  <body class="min-h-screen">
+    <div id="root"></div>
+
+    <!-- Theme-Responsive Fast Lightweight Preloader displayed during initial JavaScript load -->
+    <div id="loading-screen" class="loading-day" style="position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; z-index: 99999; font-family: system-ui, -apple-system, sans-serif; transition: opacity 0.3s ease-out;">
+      <div style="margin-bottom: 24px; position: relative; display: flex; align-items: center; justify-content: center; width: 84px; height: 84px;">
+        <!-- Continuous Water Drop Ripple Waves -->
+        <div class="water-ripple-ring-1" style="position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(249, 115, 22, 0.7); pointer-events: none;"></div>
+        <div class="water-ripple-ring-2" style="position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(251, 191, 36, 0.7); pointer-events: none;"></div>
+        <div class="water-ripple-ring-3" style="position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(249, 115, 22, 0.7); pointer-events: none;"></div>
+
+        <!-- Clean Inline SVG Logo with Flying & Bouncing Play Triangle -->
+        <div style="display: flex; position: relative; align-items: center; justify-content: center; width: 72px; height: 72px; border-radius: 50%; overflow: visible; z-index: 10; filter: drop-shadow(0 0 16px rgba(255, 106, 0, 0.6));">
+          <svg viewBox="0 0 512 512" style="width: 100%; height: 100%; overflow: visible;">
+            <defs>
+              <linearGradient id="loadingOrangeCore" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#FF8A00" />
+                <stop offset="50%" stop-color="#FF6A00" />
+                <stop offset="100%" stop-color="#E55300" />
+              </linearGradient>
+              <linearGradient id="loadingOuterRing" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#FFE8D6" />
+                <stop offset="100%" stop-color="#FDCAA7" />
+              </linearGradient>
+            </defs>
+
+            <!-- Outer Soft Peach Ring -->
+            <circle cx="256" cy="256" r="240" fill="url(#loadingOuterRing)" />
+
+            <!-- Inner Orange Core Circle -->
+            <circle cx="256" cy="256" r="186" fill="url(#loadingOrangeCore)" stroke="#FFE3CF" stroke-width="8" />
+
+            <!-- Bouncing & Flying White Play Triangle -->
+            <path
+              d="M 215 165 C 215 157 224 152 231 156 L 345 246 C 352 250 352 262 345 266 L 231 356 C 224 360 215 355 215 347 Z"
+              fill="#FFFFFF"
+              class="loading-play-triangle"
+              style="filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8));"
+            />
+          </svg>
+        </div>
+      </div>
+      <h1 style="font-size: 24px; font-weight: 800; margin: 0 0 8px 0; letter-spacing: -0.5px;">
+        Home Air Tv
+      </h1>
+      <div style="display: flex; align-items: center; gap: 8px; justify-content: center; margin-top: 8px;">
+        <div class="loading-spinner-ring" style="width: 16px; height: 16px; border-radius: 50%; border: 2.5px solid rgba(15,23,42,0.15); border-top-color: #f97316; animation: spin 0.7s linear infinite;"></div>
+        <p style="font-size: 13px; margin: 0; font-weight: 600; letter-spacing: 0.2px;">
+          Loading Home Air Tv Engine v4.6...
+        </p>
+      </div>
+    </div>
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem("homeair_theme");
+          var isDark = saved === "dark";
+          var el = document.getElementById("loading-screen");
+          if (el) {
+            if (isDark) {
+              el.className = "loading-dark";
+              document.body.style.backgroundColor = "#070714";
+            } else {
+              el.className = "loading-day";
+              document.body.style.backgroundColor = "#f8fafc";
+            }
+          }
+        } catch(e) {}
+      })();
+    </script>
+
+    <!-- Static SEO Pre-rendered Content for Search Engine Crawlers (Googlebot, Bingbot) - Visually hidden to prevent unstyled text flicker on refresh -->
+    <div id="seo-pre-rendered-content" style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;" aria-hidden="true">
+      <header>
+        <h1>Home Air Tv - Stream Live TV, Movies, TV Shows & Anime Online</h1>
+        <p>Welcome to Home Air Tv by Xubilas Web Dev Corp. Watch live worldwide broadcast IPTV channels, trending Hindi dubbed movies, Korean dramas, Hollywood blockbusters, and popular anime series in ultra HD quality.</p>
+        <nav aria-label="Site Navigation">
+          <ul>
+            <li><a href="https://homeairtv.xubilaswebdevcorp.shop/">Home Air Tv Main</a></li>
+            <li><a href="https://homeairtv.xubilaswebdevcorp.shop/live">Watch Live TV Channels</a></li>
+            <li><a href="https://homeairtv.xubilaswebdevcorp.shop/cinema">Cinema Central Movies & Series</a></li>
+            <li><a href="https://homeairtv.xubilaswebdevcorp.shop/sitemap.xml">XML Sitemap</a></li>
+          </ul>
+        </nav>
+      </header>
+      <main>
+        <section>
+          <h2>Features of Home Air Tv by Xubilas</h2>
+          <ul>
+            <li><strong>8,000+ Live Channels:</strong> Instant access to sports, news, entertainment, and regional Bangladeshi and Indian TV channels.</li>
+            <li><strong>Cinema Central Hub:</strong> Unlimited streaming of new release movies, popular web series, and anime with English & Hindi subtitles.</li>
+            <li><strong>Fast Streaming Engine:</strong> Buffer-free HLS adaptive streaming with automatic server fallback for uninterrupted playback.</li>
+          </ul>
+        </section>
+      </main>
+      <footer>
+        <p>© 2026 Home Air Tv - Xubilas Web Dev Corp. All rights reserved.</p>
+      </footer>
+    </div>
+    <script>
+      (function() {
+        // Fallback safety timeout in case React fails or takes too long to load
+        setTimeout(function() {
+          var el = document.getElementById('loading-screen');
+          if (el) {
+            el.style.opacity = '0';
+            el.style.pointerEvents = 'none';
+            setTimeout(function() { if (el && el.parentNode) el.parentNode.removeChild(el); }, 300);
+          }
+        }, 3500);
+      })();
+    </script>
+  </body>
+</html>
