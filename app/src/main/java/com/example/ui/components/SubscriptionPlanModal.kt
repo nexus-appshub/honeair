@@ -153,51 +153,26 @@ fun SubscriptionPlanModal(
     var selectedPlanIndex by remember { mutableIntStateOf(if (plans.size > 1) 1 else 0) }
     var showPaymentGuideStep by remember { androidx.compose.runtime.mutableStateOf(false) }
     var selectedPaymentMethod by remember { androidx.compose.runtime.mutableStateOf("bkash") }
+    
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    Dialog(
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        sheetState = sheetState,
+        containerColor = SpaceBlack,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
     ) {
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.85f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(bottom = 24.dp, start = 24.dp, end = 24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth(0.92f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    ),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = SpaceBlack),
-                border = BorderStroke(
-                    1.5.dp,
-                    Brush.verticalGradient(
-                        listOf(
-                            Color(0xFFFFD700),
-                            Color(0xFFFF8C00),
-                            Color(0xFF2C1A30)
-                        )
-                    )
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Header Bar with Close Button
+            // Header Bar with Close Button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -809,8 +784,6 @@ fun SubscriptionPlanModal(
                         color = TextSecondary,
                         textAlign = TextAlign.Center
                     )
-                }
-            }
         }
     }
 }

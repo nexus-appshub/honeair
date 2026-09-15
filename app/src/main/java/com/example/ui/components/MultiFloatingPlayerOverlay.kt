@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -190,15 +191,20 @@ private fun DraggableFloatingPlayerWindow(
 ) {
     val context = LocalContext.current
 
-    // Stagger initial positions nicely across the screen
-    val playerWidthDp = 220.dp
-    val playerHeightDp = 135.dp
+    // Scale and Size logic
+    var scale by remember(instance.id) { mutableFloatStateOf(1f) }
+    val baseWidthDp = 220.dp
+    val baseHeightDp = 135.dp
+    val playerWidthDp = baseWidthDp * scale
+    val playerHeightDp = baseHeightDp * scale
+
     val density = LocalDensity.current
     val playerWidthPx = with(density) { playerWidthDp.toPx() }
     val playerHeightPx = with(density) { playerHeightDp.toPx() }
 
-    val defaultStartX = (index % 2) * (playerWidthPx * 0.95f) + 30f
-    val defaultStartY = 160f + (index / 2) * (playerHeightPx + 40f)
+    // Stagger initial positions nicely across the screen
+    val defaultStartX = (index % 2) * (with(density) { baseWidthDp.toPx() } * 0.95f) + 30f
+    val defaultStartY = 160f + (index / 2) * (with(density) { baseHeightDp.toPx() } + 40f)
 
     var offsetX by remember(instance.id) { mutableFloatStateOf(defaultStartX) }
     var offsetY by remember(instance.id) { mutableFloatStateOf(defaultStartY) }
@@ -287,10 +293,10 @@ private fun DraggableFloatingPlayerWindow(
             .background(Color.Black)
             .border(1.5.dp, NeonCyan.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
             .pointerInput(instance.id) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    offsetX += dragAmount.x
-                    offsetY += dragAmount.y
+                detectTransformGestures { _, pan, zoom, _ ->
+                    scale = (scale * zoom).coerceIn(0.5f, 2.5f)
+                    offsetX += pan.x
+                    offsetY += pan.y
                 }
             }
     ) {

@@ -531,7 +531,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val isSportsLocked = json.optBoolean("isSportsTabLocked", false)
                             val sportsStatus = json.optString("sportsTabStatusText", "Live")
                             val sportsReason = json.optString("sportsLockReason", "Sports hub is currently locked by administrator.")
-                            val fancodeCode = json.optString("fancodeCode", "").ifBlank { json.optString("fanCode", "") }
+                            val fancodeCode = json.optString("fancodeCode", "")
+                                .ifBlank { json.optString("fanCode", "") }
+                                .ifBlank { json.optString("fancode", "") }
+                                .ifBlank { json.optString("fan_code", "") }
                             val isFanCodeLocked = json.optBoolean("isFanCodeLocked", false) || json.optBoolean("isFanCodeRequired", false)
 
                             val lockedTabs = mutableListOf<String>()
@@ -2788,6 +2791,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         
         // 2. Check if channel name, URL, or tvgId matches any specific Live TV premium channel IDs/names
         if (config.premiumLiveTvIds.any {
+            cleanName.contains(it, ignoreCase = true) ||
+            cleanUrl.contains(it, ignoreCase = true) ||
+            (cleanTvgId.isNotBlank() && cleanTvgId.equals(it.trim(), ignoreCase = true))
+        }) {
+            return true
+        }
+
+        // 3. Fallback to standard admin panel lock fields (premiumCategories, lockedTabs, premiumMediaIds)
+        if (cleanGroup.isNotBlank() && config.premiumCategories.any { cleanGroup.contains(it.lowercase()) }) {
+            return true
+        }
+        if (cleanGroup.isNotBlank() && config.lockedTabs.any { cleanGroup.contains(it.lowercase()) }) {
+            return true
+        }
+        if (config.premiumMediaIds.any {
             cleanName.contains(it, ignoreCase = true) ||
             cleanUrl.contains(it, ignoreCase = true) ||
             (cleanTvgId.isNotBlank() && cleanTvgId.equals(it.trim(), ignoreCase = true))
