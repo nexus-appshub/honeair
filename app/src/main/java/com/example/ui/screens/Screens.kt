@@ -98,6 +98,7 @@ import com.example.ui.components.ExoPlayerView
 import com.example.ui.components.ShimmerAsyncImage
 import com.example.ui.components.PreloadImages
 import com.example.ui.components.CinemetaWebView
+import com.example.subscription.SubscriptionManager
 import com.example.ui.components.OfficialGoogleLogo
 import com.example.ui.viewmodel.StreamViewModel
 import com.example.ui.viewmodel.TelemetryStats
@@ -6555,6 +6556,11 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val isPremium by SubscriptionManager.isPremium.collectAsState()
+    val isRedeemActive = viewModel.isRedeemCodeActive(profile?.email)
+    val effectiveIsPremium = isPremium || isRedeemActive
+    val redeemPlanName = if (isRedeemActive) viewModel.getRedeemPlanName() else ""
+
     var showSignInSheetInSettings by remember { mutableStateOf(false) }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showWatchHistorySheet by remember { mutableStateOf(false) }
@@ -7267,32 +7273,63 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF2C2C2E),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Active Plan", color = Color.Gray, fontSize = 13.sp)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFFFF6B00))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                if (effectiveIsPremium) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF2C2C2E),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("VIP UNLIMITED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("Active Plan", color = Color.Gray, fontSize = 13.sp)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xFFFF6B00))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(if (isRedeemActive) redeemPlanName.uppercase() else "VIP PREMIUM", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
                             }
-                        }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("All Live Channels, 4K Movies & VidSrc Player Active", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("Renewal: Lifetime Pass Active", color = Color.LightGray, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("All Live Channels, 4K Movies & VidSrc Player Active", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(if (isRedeemActive) "Promo Pass Activated" else "Renewal: Lifetime Pass Active", color = Color.LightGray, fontSize = 12.sp)
+                        }
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF2C2C2E),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Current Plan", color = Color.Gray, fontSize = 13.sp)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.Gray)
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("FREE TIER", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Limited Access to Live TV & Movies", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Upgrade to VIP for full experience", color = Color.LightGray, fontSize = 12.sp)
+                        }
                     }
                 }
 
@@ -7309,7 +7346,7 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .height(46.dp)
                 ) {
-                    Text("Manage Plan", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(if (effectiveIsPremium) "Manage Plan" else "Upgrade to VIP", color = Color.White, fontWeight = FontWeight.Bold)
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
