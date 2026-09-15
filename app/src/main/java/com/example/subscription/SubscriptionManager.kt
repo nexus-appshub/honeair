@@ -43,6 +43,9 @@ object SubscriptionManager {
     private val _expiryDate = MutableStateFlow<String?>(null)
     val expiryDate: StateFlow<String?> = _expiryDate.asStateFlow()
 
+    private val _expiryTimestamp = MutableStateFlow<Long?>(null)
+    val expiryTimestamp: StateFlow<Long?> = _expiryTimestamp.asStateFlow()
+
     private val _isExpired = MutableStateFlow(false)
     val isExpired: StateFlow<Boolean> = _isExpired.asStateFlow()
 
@@ -183,6 +186,7 @@ object SubscriptionManager {
                 var foundPremium = false
                 var planTitle = "VIP Premium"
                 var validUntil: String? = null
+                var foundTimestamp: Long? = null
                 var hasExpiredFlag = false
 
                 // Helper to parse document fields
@@ -202,6 +206,8 @@ object SubscriptionManager {
                         ?: doc.getTimestamp("expiryDate")?.toDate()?.time
                         ?: doc.getTimestamp("expiresAt")?.toDate()?.time
                         ?: doc.getTimestamp("validUntil")?.toDate()?.time
+
+                    foundTimestamp = expiresTimestamp
 
                     val expired = isPastExpiryDate(validUntil, expiresTimestamp)
                     if (expired) {
@@ -249,6 +255,7 @@ object SubscriptionManager {
                     foundPremium = synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
                 }
 
+                _expiryTimestamp.value = if (foundPremium) foundTimestamp else null
                 _isPremium.value = foundPremium
                 _isExpired.value = hasExpiredFlag && !foundPremium
                 _subscriptionStatus.value = when {
@@ -275,9 +282,64 @@ object SubscriptionManager {
         val isPrem = cleanEmail != null && synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
         _isPremium.value = isPrem
         _isExpired.value = false
+        _expiryTimestamp.value = null
         _subscriptionStatus.value = if (isPrem) "VIP Premium Active" else "Free Member"
         _subscriptionPlan.value = if (isPrem) "VIP Plan" else "Free Tier"
         _expiryDate.value = if (isPrem) "Lifetime Access" else null
+    }
+
+    /**
+     * Calculates user-friendly remaining subscription duration (Days and Hours remaining)
+     */
+    fun getRemainingTimeDescription(ts: Long? = _expiryTimestamp.value, dateStr: String? = _expiryDate.value): String? {
+        var targetTs = ts
+        if (targetTs == null || targetTs <= 0L) {
+            if (!dateStr.isNullOrBlank()) {
+                val clean = dateStr.trim().lowercase()
+                if (clean.contains("lifetime") || clean.contains("unlimited") || clean.contains("permanent")) {
+                    return "Unlimited Lifetime Access"
+                }
+                val dateFormats = listOf(
+                    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US),
+                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US),
+                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US),
+                    SimpleDateFormat("yyyy-MM-dd", Locale.US),
+                    SimpleDateFormat("dd/MM/yyyy", Locale.US),
+                    SimpleDateFormat("MM/dd/yyyy", Locale.US),
+                    SimpleDateFormat("dd-MM-yyyy", Locale.US),
+                    SimpleDateFormat("MMM dd, yyyy", Locale.US),
+                    SimpleDateFormat("dd MMM yyyy", Locale.US)
+                )
+                for (fmt in dateFormats) {
+                    try {
+                        val p = fmt.parse(dateStr)
+                        if (p != null) {
+                            targetTs = p.time
+                            break
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
+        if (targetTs == null || targetTs <= 0L) return null
+
+        val now = System.currentTimeMillis()
+        val diff = targetTs - now
+        if (diff <= 0) {
+            return "Expired"
+        }
+
+        val days = java.util.concurrent.TimeUnit.MILLISECONDS.toDays(diff)
+        val hours = java.util.concurrent.TimeUnit.MILLISECONDS.toHours(diff) % 24
+        val minutes = java.util.concurrent.TimeUnit.MILLISECONDS.toMinutes(diff) % 60
+
+        return when {
+            days > 1 -> "$days Days, $hours Hours Remaining"
+            days == 1L -> "1 Day, $hours Hours Remaining"
+            hours > 0 -> "$hours Hours, $minutes Mins Remaining"
+            else -> "$minutes Minutes Remaining"
+        }
     }
 
     /**

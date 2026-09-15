@@ -316,6 +316,8 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             message = config?.premiumPaywallMessage ?: "This content or tab is reserved for Premium Subscribers. Please purchase a subscription to continue.",
             buttonText = config?.premiumPaywallButtonText ?: "Buy Subscription Now",
             buttonUrl = config?.premiumPaywallButtonUrl ?: "",
+            viewModel = viewModel,
+            userProfile = userProfile,
             onDismiss = { viewModel.triggerPremiumPaywall(false) }
         )
     }

@@ -1398,6 +1398,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val title = channel?.name ?: mediaItem?.title ?: "Player ${currentList.size + 1}"
         val isChan = channel != null
 
+        // Premium protection check
+        val currentEmail = _userProfile.value?.email
+        if (!isUserPremium(currentEmail)) {
+            if (channel != null && isChannelPremium(channel)) {
+                triggerPremiumPaywall(true)
+                return
+            }
+            if (mediaItem != null && !checkContentAccess(mediaItem.id, mediaItem.title, mediaItem.category, episode, currentEmail)) {
+                return
+            }
+        }
+
         // Check if already playing this exact item to prevent duplicate streams
         val existing = currentList.find {
             (channel != null && it.channel?.url == channel.url) ||
@@ -2630,16 +2642,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _playbackErrorChannelUrl.value = null
         if (channel != null) {
             val currentEmail = _userProfile.value?.email
-            val channelCategory = if (channel.group.isNotBlank()) channel.group else "livetv"
-            val channelId = if (channel.tvgId.isNotBlank()) channel.tvgId else channel.url
-            if (!checkContentAccess(
-                    mediaId = channelId,
-                    title = channel.name,
-                    category = channelCategory,
-                    episodeNum = 1,
-                    userEmail = currentEmail
-                )) {
-                return
+            if (!isUserPremium(currentEmail)) {
+                // Live TV specific channel and category lock (completely isolated from movie/anime locks)
+                if (isChannelPremium(channel)) {
+                    triggerPremiumPaywall(true)
+                    return
+                }
             }
         }
         viewModelScope.launch {
@@ -2771,20 +2779,19 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val cleanName = channel.name.trim()
         val cleanUrl = channel.url.trim()
         val cleanGroup = channel.group.trim().lowercase()
+        val cleanTvgId = channel.tvgId.trim()
         
-        // 1. Check if group is in specific live tv premium categories
+        // 1. Check if group/category is in specific Live TV premium categories (completely separate from movie/anime categories)
         if (cleanGroup.isNotBlank() && config.premiumLiveTvCategories.any { cleanGroup.contains(it.lowercase()) }) {
             return true
         }
         
-        // 2. Check if name or URL matches any specific live tv premium IDs/names
-        if (config.premiumLiveTvIds.any { cleanName.contains(it, ignoreCase = true) || cleanUrl.contains(it, ignoreCase = true) }) {
-            return true
-        }
-        
-        // 3. Fallback check if name or URL is in local DB premiumMedia list (manual toggle fallback)
-        val premiumDbIds = premiumMedia.value.map { it.id }.toSet()
-        if (premiumDbIds.any { cleanName.contains(it, ignoreCase = true) || cleanUrl.contains(it, ignoreCase = true) }) {
+        // 2. Check if channel name, URL, or tvgId matches any specific Live TV premium channel IDs/names
+        if (config.premiumLiveTvIds.any {
+            cleanName.contains(it, ignoreCase = true) ||
+            cleanUrl.contains(it, ignoreCase = true) ||
+            (cleanTvgId.isNotBlank() && cleanTvgId.equals(it.trim(), ignoreCase = true))
+        }) {
             return true
         }
         

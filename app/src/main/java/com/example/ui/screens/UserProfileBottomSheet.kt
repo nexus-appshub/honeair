@@ -33,6 +33,7 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.runtime.collectAsState
@@ -44,6 +45,8 @@ import androidx.compose.ui.graphics.Brush
 import coil.compose.AsyncImage
 import com.example.subscription.SubscriptionManager
 import com.example.ui.components.SubscriptionPlanModal
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.viewmodel.StreamViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +73,11 @@ fun UserProfileBottomSheet(
     val isExpired by SubscriptionManager.isExpired.collectAsState()
     val planName by SubscriptionManager.subscriptionPlan.collectAsState()
     val expiryText by SubscriptionManager.expiryDate.collectAsState()
+    val expiryTimestamp by SubscriptionManager.expiryTimestamp.collectAsState()
+    val viewModel: StreamViewModel = viewModel()
+    val isRedeemActive = viewModel.isRedeemCodeActive(profile?.email)
+    val redeemExpiry = if (isRedeemActive) viewModel.getRedeemUnlockExpiry() else 0L
+    val effectiveIsPremium = isPremium || isRedeemActive
     var showPlanModal by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
@@ -179,7 +187,7 @@ fun UserProfileBottomSheet(
                             ) {
                                 Icon(
                                     imageVector = when {
-                                        isPremium -> Icons.Filled.Verified
+                                        effectiveIsPremium -> Icons.Filled.Verified
                                         isExpired -> Icons.Filled.Star
                                         else -> Icons.Filled.WorkspacePremium
                                     },
@@ -197,6 +205,7 @@ fun UserProfileBottomSheet(
                                 )
                                 Text(
                                     text = when {
+                                        isRedeemActive -> "VIP Active (Promo Unlock)"
                                         isPremium -> "VIP Premium Active"
                                         isExpired -> "Subscription Expired"
                                         else -> "Free Plan"
@@ -204,7 +213,7 @@ fun UserProfileBottomSheet(
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = when {
-                                        isPremium -> Color(0xFF81C784)
+                                        effectiveIsPremium -> Color(0xFF81C784)
                                         isExpired -> Color(0xFFFF6B6B)
                                         else -> Color(0xFFFFD700)
                                     }
@@ -217,12 +226,12 @@ fun UserProfileBottomSheet(
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = when {
-                                    isPremium -> Color(0xFF2E7D32)
+                                    effectiveIsPremium -> Color(0xFF2E7D32)
                                     isExpired -> Color(0xFFFF4444)
                                     else -> Color(0xFFFFD700)
                                 },
                                 contentColor = when {
-                                    isPremium -> Color.White
+                                    effectiveIsPremium -> Color.White
                                     isExpired -> Color.White
                                     else -> Color.Black
                                 }
@@ -232,13 +241,62 @@ fun UserProfileBottomSheet(
                         ) {
                             Text(
                                 text = when {
-                                    isPremium -> "Manage"
+                                    effectiveIsPremium -> "Manage"
                                     isExpired -> "Renew Now"
                                     else -> "Upgrade Now"
                                 },
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+
+                    // Remaining Subscription / Promo Duration Display
+                    val remainingDuration = if (isRedeemActive) {
+                        SubscriptionManager.getRemainingTimeDescription(redeemExpiry, null)
+                    } else if (isPremium) {
+                        SubscriptionManager.getRemainingTimeDescription(expiryTimestamp, expiryText)
+                    } else null
+
+                    if (effectiveIsPremium && remainingDuration != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF2E7D32).copy(alpha = 0.22f),
+                            border = BorderStroke(1.dp, Color(0xFF81C784).copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Timer,
+                                    contentDescription = null,
+                                    tint = Color(0xFF81C784),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Time Left: $remainingDuration",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFC8E6C9)
+                                    )
+                                    val dateSubText = if (isRedeemActive) {
+                                        val fmt = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())
+                                        "Expires on: ${fmt.format(java.util.Date(redeemExpiry))}"
+                                    } else {
+                                        expiryText ?: "Active Subscription"
+                                    }
+                                    Text(
+                                        text = dateSubText,
+                                        fontSize = 10.sp,
+                                        color = Color.LightGray
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -249,14 +307,14 @@ fun UserProfileBottomSheet(
                             fontSize = 11.sp,
                             color = Color(0xFFFFCDD2)
                         )
-                    } else if (!isPremium) {
+                    } else if (!effectiveIsPremium) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "Upgrade to unlock all series episodes & remove 100% of ads.",
                             fontSize = 11.sp,
                             color = Color.LightGray.copy(alpha = 0.8f)
                         )
-                    } else if (expiryText != null) {
+                    } else if (expiryText != null && remainingDuration == null) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "Plan: $planName • $expiryText",
