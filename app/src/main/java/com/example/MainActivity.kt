@@ -1,5 +1,8 @@
 package com.example
 
+import kotlin.math.roundToInt
+import androidx.compose.foundation.gestures.*
+import androidx.compose.ui.input.pointer.*
 import androidx.compose.foundation.clickable
 import android.Manifest
 import android.content.pm.PackageManager
@@ -655,14 +658,25 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                     val shouldShowPlayer = isPlayerTab || isMiniPlayerMode
 
                     if (shouldShowPlayer) {
+                        var miniPlayerOffsetX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+                        var miniPlayerOffsetY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+
                         Box(
                             modifier = if (isMiniPlayerMode && !isPlayerTab) {
                                 Modifier
                                     .align(Alignment.BottomEnd)
                                     .padding(bottom = 120.dp, end = 16.dp)
+                                    .offset { androidx.compose.ui.unit.IntOffset(miniPlayerOffsetX.roundToInt(), miniPlayerOffsetY.roundToInt()) }
                                     .size(width = 240.dp, height = 135.dp) // 16:9 ratio mini player
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(Color.Black)
+                                    .pointerInput(Unit) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            miniPlayerOffsetX += dragAmount.x
+                                            miniPlayerOffsetY += dragAmount.y
+                                        }
+                                    }
                             } else {
                                 Modifier.fillMaxSize()
                             }

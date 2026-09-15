@@ -81,10 +81,10 @@ object VidnestNativeScraper {
                     chunk += "="
                 }
 
-                val l0 = charMap[chunk[0].code]
-                val l1 = charMap[chunk[1].code]
-                val l2 = charMap[chunk[2].code]
-                val l3 = charMap[chunk[3].code]
+                val c0 = chunk[0].code; val l0 = if(c0 < 256) charMap[c0] else 64
+                val c1 = chunk[1].code; val l1 = if(c1 < 256) charMap[c1] else 64
+                val c2 = chunk[2].code; val l2 = if(c2 < 256) charMap[c2] else 64
+                val c3 = chunk[3].code; val l3 = if(c3 < 256) charMap[c3] else 64
 
                 val b0 = ((l0 shl 2) or (l1 shr 4)) and 0xFF
                 bytesOut.write(b0)

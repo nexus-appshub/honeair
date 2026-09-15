@@ -33,7 +33,11 @@ object VidrockNativeScraper {
         "https://vidsrc.pm",
         "https://vidsrc.to",
         "https://vidsrc2.ru",
-        "https://vidsrc.sbs"
+        "https://vidsrc.sbs",
+        "https://vidsrc.nl",
+        "https://vidsrc.pro",
+        "https://vidsrc.dev",
+        "https://vidsrc.icu"
     )
 
     private fun sanitizeTmdbId(rawId: String): String {
