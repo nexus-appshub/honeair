@@ -17,7 +17,10 @@ data class VipConfigResponse(
     val paymentGateways: PaymentGateways? = null,
     val modalNotice: ModalNotice? = null,
     val premiumUsers: List<String> = emptyList(),
-    val redeemCodes: List<RedeemCode> = emptyList()
+    val redeemCodes: List<RedeemCode> = emptyList(),
+    val isMobilePaymentEnabled: Boolean = true,
+    val mobilePaymentDisabledNote: String? = null,
+    val externalPaymentUrl: String? = null
 )
 
 @JsonClass(generateAdapter = true)

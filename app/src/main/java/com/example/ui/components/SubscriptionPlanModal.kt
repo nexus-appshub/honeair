@@ -38,6 +38,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Shield
@@ -100,7 +102,7 @@ data class PlanOption(
 fun SubscriptionPlanModal(
     isVisible: Boolean,
     onDismiss: () -> Unit,
-    checkoutUrl: String = "https://xubilasappshub.xubilaswebdevcorp.shop/pricing"
+    checkoutUrl: String = "https://www.hmair.xyz/vip"
 ) {
     if (!isVisible) return
 
@@ -453,38 +455,68 @@ fun SubscriptionPlanModal(
                             }
                         }
 
-                        // Live Payment Gateways preview display if available
-                        val paymentGateways = liveVipConfig?.paymentGateways
-                        if (paymentGateways != null) {
+                        // Check if mobile payments are disabled via admin
+                        val isMobilePaymentEnabled = liveVipConfig?.isMobilePaymentEnabled != false
+                        
+                        if (isMobilePaymentEnabled) {
+                            // Live Payment Gateways preview display if available
+                            val paymentGateways = liveVipConfig?.paymentGateways
+                            if (paymentGateways != null) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF141923),
+                                    border = BorderStroke(1.dp, Color(0xFF242E42)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = "Available In-App Payment Methods:",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFFFB300)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            paymentGateways.bkash?.let {
+                                                Text("bKash", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                            }
+                                            paymentGateways.nagad?.let {
+                                                Text("Nagad", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                            }
+                                            paymentGateways.rocket?.let {
+                                                Text("Rocket", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Display admin notes if mobile payment is disabled
+                            val disabledNote = liveVipConfig?.mobilePaymentDisabledNote ?: "In-App mobile payments are currently disabled. Please click below to complete your payment securely on our official website."
                             Spacer(modifier = Modifier.height(12.dp))
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFF141923),
-                                border = BorderStroke(1.dp, Color(0xFF242E42)),
+                                color = Color(0xFF2C1A30), // soft purple/reddish tint
+                                border = BorderStroke(1.dp, Color(0xFFD32F2F).copy(alpha = 0.5f)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(
-                                        text = "Available In-App Payment Methods:",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFFFB300)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        paymentGateways.bkash?.let {
-                                            Text("bKash", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                        }
-                                        paymentGateways.nagad?.let {
-                                            Text("Nagad", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                        }
-                                        paymentGateways.rocket?.let {
-                                            Text("Rocket", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                        }
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(imageVector = Icons.Default.Info, contentDescription = "Notice", tint = Color(0xFFFF6B6B), modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Notice", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF6B6B))
                                     }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = disabledNote,
+                                        fontSize = 11.sp,
+                                        color = Color.White.copy(alpha = 0.9f),
+                                        lineHeight = 16.sp
+                                    )
                                 }
                             }
                         }
@@ -494,7 +526,17 @@ fun SubscriptionPlanModal(
                         // Action Button
                         Button(
                             onClick = {
-                                showPaymentGuideStep = true
+                                if (isMobilePaymentEnabled) {
+                                    showPaymentGuideStep = true
+                                } else {
+                                    val urlToOpen = liveVipConfig?.externalPaymentUrl ?: checkoutUrl
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -506,14 +548,18 @@ fun SubscriptionPlanModal(
                             )
                         ) {
                             Icon(
-                                imageVector = Icons.Default.WorkspacePremium,
+                                imageVector = if (isMobilePaymentEnabled) Icons.Default.WorkspacePremium else Icons.Default.OpenInNew,
                                 contentDescription = null,
                                 tint = Color.Black,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isExpired) "Renew Now (${chosenPlan.price})" else "Subscribe Now (${chosenPlan.price})",
+                                text = if (isMobilePaymentEnabled) {
+                                    if (isExpired) "Renew Now (${chosenPlan.price})" else "Subscribe Now (${chosenPlan.price})"
+                                } else {
+                                    "Pay on Website"
+                                },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
                             )
@@ -752,7 +798,7 @@ fun SubscriptionPlanModal(
                         // Secondary backup Website Redirect
                         OutlinedButton(
                             onClick = {
-                                val urlToOpen = if (checkoutUrl.isNotBlank()) checkoutUrl else "https://xubilasappshub.xubilaswebdevcorp.shop/pricing"
+                                val urlToOpen = if (checkoutUrl.isNotBlank()) checkoutUrl else "https://www.hmair.xyz/vip"
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
                                 try {
                                     context.startActivity(intent)
@@ -768,7 +814,7 @@ fun SubscriptionPlanModal(
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                         ) {
                             Text(
-                                 text = "Or Pay via Website / Apps Hub",
+                                 text = "Pay via Website",
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 12.sp
                             )

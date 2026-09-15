@@ -10365,32 +10365,15 @@ fun CompactMediaCard(
 
                 // Premium VIP Badge Overlay Top Left
                 if (item.isPremium) {
-                    Box(
+                    Icon(
+                        imageVector = Icons.Default.WorkspacePremium,
+                        contentDescription = "VIP",
+                        tint = Color(0xFFFFD700),
                         modifier = Modifier
-                            .padding(4.dp)
+                            .padding(6.dp)
+                            .size(16.dp)
                             .align(Alignment.TopStart)
-                            .background(
-                                Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
-                                RoundedCornerShape(4.dp)
-                            )
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.WorkspacePremium,
-                                contentDescription = "VIP",
-                                tint = Color.Black,
-                                modifier = Modifier.size(9.dp)
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Text(
-                                text = "VIP",
-                                color = Color.Black,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
+                    )
                 }
 
                 // IMDb Rating Badge
@@ -10564,32 +10547,15 @@ fun MediaCard(
 
                 // Premium VIP Badge Overlay
                 if (item.isPremium) {
-                    Box(
+                    Icon(
+                        imageVector = Icons.Default.WorkspacePremium,
+                        contentDescription = "VIP",
+                        tint = Color(0xFFFFD700),
                         modifier = Modifier
-                            .padding(6.dp)
+                            .padding(8.dp)
+                            .size(18.dp)
                             .align(Alignment.TopEnd)
-                            .background(
-                                Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
-                                RoundedCornerShape(4.dp)
-                            )
-                            .padding(horizontal = 5.dp, vertical = 2.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.WorkspacePremium,
-                                contentDescription = "VIP",
-                                tint = Color.Black,
-                                modifier = Modifier.size(10.dp)
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Text(
-                                text = "VIP",
-                                color = Color.Black,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
+                    )
                 }
 
                 // Rating Badge (moved to top-left and category name removed)
