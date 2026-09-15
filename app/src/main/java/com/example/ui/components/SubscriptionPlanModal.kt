@@ -2,6 +2,11 @@ package com.example.ui.components
 
 import android.content.Intent
 import android.net.Uri
+import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
+import android.widget.Toast
+import com.example.data.api.GatewayInfo
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +33,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -133,6 +140,8 @@ fun SubscriptionPlanModal(
 
     val plans = if (!dynamicPlans.isNullOrEmpty()) dynamicPlans else defaultPlans
     var selectedPlanIndex by remember { mutableIntStateOf(if (plans.size > 1) 1 else 0) }
+    var showPaymentGuideStep by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var selectedPaymentMethod by remember { androidx.compose.runtime.mutableStateOf("bkash") }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -184,25 +193,41 @@ fun SubscriptionPlanModal(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .background(
-                                        Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
-                                        CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.WorkspacePremium,
-                                    contentDescription = "VIP",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(22.dp)
-                                )
+                            if (showPaymentGuideStep) {
+                                IconButton(
+                                    onClick = { showPaymentGuideStep = false },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(Color(0xFF232B3E), CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(
+                                            Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.WorkspacePremium,
+                                        contentDescription = "VIP",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "VIP Subscription",
+                                text = if (showPaymentGuideStep) "Payment Guide" else "VIP Subscription",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White
@@ -212,8 +237,8 @@ fun SubscriptionPlanModal(
                         IconButton(
                             onClick = onDismiss,
                             modifier = Modifier
-                                .size(32.dp)
-                                .background(Color(0xFF232B3E), CircleShape)
+                                        .size(32.dp)
+                                        .background(Color(0xFF232B3E), CircleShape)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
@@ -297,218 +322,470 @@ fun SubscriptionPlanModal(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Text(
-                        text = "Choose Your VIP Plan",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Plan selection cards
                     val safeIndex = selectedPlanIndex.coerceIn(0, (plans.size - 1).coerceAtLeast(0))
-                    plans.forEachIndexed { index, plan ->
-                        val isSelected = safeIndex == index
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable { selectedPlanIndex = index },
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) Color(0xFF241C35) else Color(0xFF161B26)
-                            ),
-                            border = BorderStroke(
-                                if (isSelected) 2.dp else 1.dp,
-                                if (isSelected) Color(0xFFFFD700) else Color(0xFF2D3748)
-                            )
-                        ) {
-                            Row(
+                    val chosenPlan = plans[safeIndex]
+
+                    if (!showPaymentGuideStep) {
+                        Text(
+                            text = "Choose Your VIP Plan",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Plan selection cards
+                        plans.forEachIndexed { index, plan ->
+                            val isSelected = safeIndex == index
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(14.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(vertical = 4.dp)
+                                    .clickable { selectedPlanIndex = index },
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) Color(0xFF241C35) else Color(0xFF161B26)
+                                ),
+                                border = BorderStroke(
+                                    if (isSelected) 2.dp else 1.dp,
+                                    if (isSelected) Color(0xFFFFD700) else Color(0xFF2D3748)
+                                )
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .background(
-                                                if (isSelected) Color(0xFFFFD700) else Color.Transparent,
-                                                CircleShape
-                                            )
-                                            .border(2.dp, if (isSelected) Color(0xFFFFD700) else Color.Gray, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isSelected) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = Color.Black,
-                                                modifier = Modifier.size(14.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .background(
+                                                    if (isSelected) Color(0xFFFFD700) else Color.Transparent,
+                                                    CircleShape
+                                                )
+                                                .border(2.dp, if (isSelected) Color(0xFFFFD700) else Color.Gray, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = Color.Black,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = plan.title,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp,
+                                                    color = Color.White
+                                                )
+                                                if (plan.tag != null) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .background(
+                                                                 if (plan.isPopular) Color(0xFFFF8C00) else Color(0xFF3B82F6),
+                                                                RoundedCornerShape(4.dp)
+                                                            )
+                                                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = plan.tag,
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = Color.White
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            Text(
+                                                text = plan.duration,
+                                                fontSize = 11.sp,
+                                                color = TextSecondary
                                             )
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = plan.price,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 14.sp,
+                                        color = if (isSelected) Color(0xFFFFD700) else Color.White
+                                    )
+                                }
+                            }
+                        }
 
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = plan.title,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = Color.White
-                                            )
-                                            if (plan.tag != null) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Box(
-                                                    modifier = Modifier
-                                                        .background(
-                                                             if (plan.isPopular) Color(0xFFFF8C00) else Color(0xFF3B82F6),
-                                                            RoundedCornerShape(4.dp)
-                                                        )
-                                                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text(
-                                                        text = plan.tag,
-                                                        fontSize = 8.sp,
-                                                        fontWeight = FontWeight.ExtraBold,
-                                                        color = Color.White
-                                                    )
-                                                }
-                                            }
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Benefits List
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF10141E), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Included with VIP Membership:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = NeonCyan
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            val features = listOf(
+                                "🔓 Unlock ALL episodes for Series, Movies & Anime",
+                                "🚫 100% Ad-Free (No interstitial or banner ads)",
+                                "⚡ 4K Ultra HD & 1080p Fast Streaming Servers",
+                                "💾 Fast Unlimited In-App Video Downloads",
+                                "👑 Special VIP Badge on your Profile"
+                            )
+                            features.forEach { feat ->
+                                Row(
+                                    modifier = Modifier.padding(vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = feat,
+                                        fontSize = 11.sp,
+                                        color = Color.White.copy(alpha = 0.9f)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Live Payment Gateways preview display if available
+                        val paymentGateways = liveVipConfig?.paymentGateways
+                        if (paymentGateways != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF141923),
+                                border = BorderStroke(1.dp, Color(0xFF242E42)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = "Available In-App Payment Methods:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFFFB300)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        paymentGateways.bkash?.let {
+                                            Text("bKash", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
                                         }
+                                        paymentGateways.nagad?.let {
+                                            Text("Nagad", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
+                                        paymentGateways.rocket?.let {
+                                            Text("Rocket", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Action Button
+                        Button(
+                            onClick = {
+                                showPaymentGuideStep = true
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFFD700),
+                                contentColor = Color.Black
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WorkspacePremium,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isExpired) "Renew Now (${chosenPlan.price})" else "Subscribe Now (${chosenPlan.price})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    } else {
+                        // === PAYMENT INSTRUCTIONS VIEW ===
+                        val paymentGateways = liveVipConfig?.paymentGateways
+                        
+                        // Default Fallback details if live config is empty
+                        val fallbackBkash = GatewayInfo(number = "01783350280", type = "Personal")
+                        val fallbackNagad = GatewayInfo(number = "01783350280", type = "Personal")
+                        val fallbackRocket = GatewayInfo(number = "01783350280", type = "Personal")
+                        
+                        val activeBkash = paymentGateways?.bkash ?: fallbackBkash
+                        val activeNagad = paymentGateways?.nagad ?: fallbackNagad
+                        val activeRocket = paymentGateways?.rocket ?: fallbackRocket
+                        
+                        val selectedGateway = when (selectedPaymentMethod) {
+                            "bkash" -> activeBkash
+                            "nagad" -> activeNagad
+                            "rocket" -> activeRocket
+                            else -> activeBkash
+                        }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF141923)),
+                            border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    text = "Selected Plan: ${chosenPlan.title}",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Amount to Send: ${chosenPlan.price}",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 16.sp,
+                                    color = Color(0xFFFFD700)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = "Select Payment Method:",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Row of Payment Method Cards
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val methods = listOf(
+                                Triple("bkash", "bKash", Color(0xFFE2125B)),
+                                Triple("nagad", "Nagad", Color(0xFFF15922)),
+                                Triple("rocket", "Rocket", Color(0xFF8C3494))
+                            )
+                            methods.forEach { (id, name, color) ->
+                                val isSelected = selectedPaymentMethod == id
+                                Card(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { selectedPaymentMethod = id },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isSelected) color.copy(alpha = 0.15f) else Color(0xFF10141E)
+                                    ),
+                                    border = BorderStroke(
+                                        if (isSelected) 2.dp else 1.dp,
+                                        if (isSelected) color else Color(0xFF2D3748)
+                                    )
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .background(if (isSelected) color else Color.Transparent, CircleShape)
+                                                .border(2.dp, if (isSelected) color else Color.Gray, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
                                         Text(
-                                            text = plan.duration,
-                                            fontSize = 11.sp,
-                                            color = TextSecondary
+                                            text = name,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = if (isSelected) Color.White else Color.Gray
                                         )
                                     }
                                 }
-
-                                Text(
-                                    text = plan.price,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 14.sp,
-                                    color = if (isSelected) Color(0xFFFFD700) else Color.White
-                                )
                             }
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    // Benefits List
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF10141E), RoundedCornerShape(12.dp))
-                            .padding(12.dp)
-                    ) {
-                        Text(
-                            text = "Included with VIP Membership:",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = NeonCyan
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        val features = listOf(
-                            "🔓 Unlock ALL episodes for Series, Movies & Anime",
-                            "🚫 100% Ad-Free (No interstitial or banner ads)",
-                            "⚡ 4K Ultra HD & 1080p Fast Streaming Servers",
-                            "💾 Fast Unlimited In-App Video Downloads",
-                            "👑 Special VIP Badge on your Profile"
-                        )
-                        features.forEach { feat ->
-                            Row(
-                                modifier = Modifier.padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = feat,
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.9f)
-                                )
-                            }
-                        }
-                    }
-
-                    // Live Payment Gateways display if available
-                    val paymentGateways = liveVipConfig?.paymentGateways
-                    if (paymentGateways != null) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        // Gateway Details (Number & Copy)
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF141923),
-                            border = BorderStroke(1.dp, Color(0xFF242E42)),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF1A2235),
+                            border = BorderStroke(1.dp, Color(0xFF2C3E5B))
                         ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text(
-                                    text = "Supported Payment Methods:",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFFFB300)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
+                            Column(modifier = Modifier.padding(14.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    paymentGateways.bkash?.let {
-                                        Text("bKash: ${it.number}", fontSize = 10.sp, color = Color.White)
+                                    Column {
+                                        Text(
+                                            text = "${selectedPaymentMethod.uppercase()} Number",
+                                            fontSize = 11.sp,
+                                            color = TextSecondary
+                                        )
+                                        Text(
+                                            text = selectedGateway.number,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Account Type: ${selectedGateway.type}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color(0xFFFFD700)
+                                        )
                                     }
-                                    paymentGateways.nagad?.let {
-                                        Text("Nagad: ${it.number}", fontSize = 10.sp, color = Color.White)
-                                    }
-                                    paymentGateways.rocket?.let {
-                                        Text("Rocket: ${it.number}", fontSize = 10.sp, color = Color.White)
+
+                                    IconButton(
+                                        onClick = {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            val clip = ClipData.newPlainText("Payment Number", selectedGateway.number)
+                                            clipboard.setPrimaryClip(clip)
+                                            Toast.makeText(context, "${selectedPaymentMethod.uppercase()} Number Copied!", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .background(Color(0xFF2B3A54), RoundedCornerShape(8.dp))
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copy Number",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
                                 }
                             }
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    // Action Button
-                    val chosenPlan = plans[safeIndex]
-                    Button(
-                        onClick = {
-                            val urlToOpen = if (checkoutUrl.isNotBlank()) checkoutUrl else "https://xubilasappshub.xubilaswebdevcorp.shop/pricing"
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
-                            try {
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                e.printStackTrace()
+                        // How to pay Guidelines
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF10141E))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "How to Pay (পেমেন্ট নিয়মাবলী):",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = NeonCyan
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                val sendMethod = if (selectedGateway.type.lowercase().contains("merchant")) "Make Payment" else "Send Money"
+                                
+                                Text(
+                                    text = "1. Copy the number displayed above.\n" +
+                                           "2. Open your ${selectedPaymentMethod.capitalize()} wallet app.\n" +
+                                           "3. Choose option: **$sendMethod**.\n" +
+                                           "4. Send EXACTLY **${chosenPlan.price}** BDT to this number.\n" +
+                                           "5. After success, COPY the **Transaction ID (TrxID)**.\n" +
+                                           "6. Tap 'Submit via WhatsApp' below and message Admin the TrxID for instant VIP activation!",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    lineHeight = 16.sp
+                                )
                             }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFFD700),
-                            contentColor = Color.Black
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.WorkspacePremium,
-                            contentDescription = null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isExpired) "Renew Now (${chosenPlan.price})" else "Subscribe Now (${chosenPlan.price})",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // WhatsApp Admin Link & Action Button
+                        val rawWhatsapp = paymentGateways?.whatsapp ?: "+8801783350280"
+                        val whatsappUrl = if (rawWhatsapp.startsWith("http")) {
+                            rawWhatsapp
+                        } else {
+                            val cleanNum = rawWhatsapp.replace("+", "").replace(" ", "").trim()
+                            "https://wa.me/$cleanNum?text=Hello%20Admin,%20I%20have%20sent%20${chosenPlan.price}%20BDT%20via%20${selectedPaymentMethod.capitalize()}%20for%20the%20VIP%20Premium%20Plan%20(${chosenPlan.title}).%20Please%20verify%20and%20activate%20my%20device."
+                        }
+
+                        Button(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(whatsappUrl))
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "WhatsApp is not installed on this device.", Toast.LENGTH_SHORT).show()
+                                    e.printStackTrace()
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF25D366),
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(
+                                text = "Submit TxID via WhatsApp",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Secondary backup Website Redirect
+                        OutlinedButton(
+                            onClick = {
+                                val urlToOpen = if (checkoutUrl.isNotBlank()) checkoutUrl else "https://xubilasappshub.xubilaswebdevcorp.shop/pricing"
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        ) {
+                            Text(
+                                text = "Or Pay via Website / Apps Hub",
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))

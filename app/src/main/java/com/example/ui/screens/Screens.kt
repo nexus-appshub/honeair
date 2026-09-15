@@ -2958,6 +2958,7 @@ fun HomeScreen(
                                         onClick = {
                                             viewModel.setActiveChannel(channel)
                                         },
+                                        onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                         isSelected = isSelected,
                                         hasError = hasError
                                     )
@@ -3496,6 +3497,7 @@ fun ChannelListRow(
     isFavorite: Boolean,
     onFavoriteToggle: () -> Unit,
     onClick: () -> Unit,
+    onFloatClick: (() -> Unit)? = null,
     isSelected: Boolean = false,
     hasError: Boolean = false
 ) {
@@ -3594,6 +3596,15 @@ fun ChannelListRow(
 
             // Action icon
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onFloatClick != null) {
+                    IconButton(onClick = onFloatClick) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInNew,
+                            contentDescription = "Float PIP Player",
+                            tint = NeonCyan
+                        )
+                    }
+                }
                 IconButton(onClick = onFavoriteToggle) {
                     Icon(
                         imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
@@ -4587,6 +4598,7 @@ fun FavoritesScreen(
                                 viewModel.setActiveChannel(channel)
                                 onNavigateToPlayer()
                             },
+                            onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                             isSelected = isSelected,
                             hasError = hasError
                         )
@@ -4620,6 +4632,7 @@ fun FavoritesScreen(
                                 viewModel.setActiveChannel(channel)
                                 onNavigateToPlayer()
                             },
+                            onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                             isSelected = isSelected,
                             hasError = hasError
                         )
@@ -4851,6 +4864,7 @@ fun WatchHistorySheet(
                                         onDismiss()
                                         onNavigateToPlayer()
                                     },
+                                    onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                     isSelected = channel.url == activeCh?.url,
                                     hasError = channel.url == activeCh?.url && errUrl == channel.url
                                 )
@@ -6478,6 +6492,7 @@ fun SettingsScreen(
     var showWatchHistorySheet by remember { mutableStateOf(false) }
     var showWebVersionView by remember { mutableStateOf(false) }
     var showSubscriptionSheet by remember { mutableStateOf(false) }
+    var showSubscriptionPlanModalInProfile by remember { mutableStateOf(false) }
     var showHelpCenterSheet by remember { mutableStateOf(false) }
     var showLanguageSheet by remember { mutableStateOf(false) }
     var showUpdateSheet by remember { mutableStateOf(false) }
@@ -7217,7 +7232,7 @@ fun SettingsScreen(
 
                 Button(
                     onClick = {
-                        Toast.makeText(context, "VIP Subscription is active on your device!", Toast.LENGTH_SHORT).show()
+                        showSubscriptionPlanModalInProfile = true
                         showSubscriptionSheet = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
@@ -7233,6 +7248,11 @@ fun SettingsScreen(
             }
         }
     }
+
+    com.example.ui.components.SubscriptionPlanModal(
+        isVisible = showSubscriptionPlanModalInProfile,
+        onDismiss = { showSubscriptionPlanModalInProfile = false }
+    )
 
     // 3. Help Centre Bottom Sheet
     if (showHelpCenterSheet) {

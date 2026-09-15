@@ -10,6 +10,7 @@ import com.example.data.database.AppDatabase
 import com.example.data.model.IptvChannel
 import com.example.data.model.IptvPlaylist
 import com.example.data.model.MediaItem
+import com.example.data.model.FloatingPlayerInstance
 import com.example.data.repository.MediaRepository
 import com.example.data.repository.StreamRepository
 import com.example.data.repository.HomaiRepository
@@ -1244,6 +1245,108 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val clamped = count.coerceIn(2, 6)
         _maxFloatingPlayers.value = clamped
         sharedPrefs.edit().putInt("setting_max_floating_players", clamped).apply()
+    }
+
+    private val _activeFloatingPlayers = MutableStateFlow<List<FloatingPlayerInstance>>(emptyList())
+    val activeFloatingPlayers: StateFlow<List<FloatingPlayerInstance>> = _activeFloatingPlayers.asStateFlow()
+
+    fun addFloatingPlayer(
+        channel: IptvChannel? = null,
+        mediaItem: MediaItem? = null,
+        streamUrl: String? = null,
+        headers: Map<String, String> = emptyMap(),
+        season: Int = 1,
+        episode: Int = 1
+    ) {
+        val currentList = _activeFloatingPlayers.value.toMutableList()
+        val limit = _maxFloatingPlayers.value.coerceIn(2, 6)
+
+        val title = channel?.name ?: mediaItem?.title ?: "Player ${currentList.size + 1}"
+        val isChan = channel != null
+
+        // Check if already playing this exact item to prevent duplicate streams
+        val existing = currentList.find {
+            (channel != null && it.channel?.url == channel.url) ||
+            (mediaItem != null && it.mediaItem?.id == mediaItem.id && it.season == season && it.episode == episode)
+        }
+        if (existing != null) {
+            return
+        }
+
+        if (currentList.size >= limit) {
+            currentList.removeAt(0)
+        }
+
+        val offsetStep = (currentList.size * 40).toFloat()
+        val newInstance = FloatingPlayerInstance(
+            id = java.util.UUID.randomUUID().toString(),
+            title = title,
+            subtitle = if (isChan) (channel?.group ?: "Live TV") else "S${season}E${episode}",
+            isChannel = isChan,
+            channel = channel,
+            mediaItem = mediaItem,
+            streamUrl = streamUrl ?: channel?.url,
+            headers = headers,
+            season = season,
+            episode = episode,
+            isMuted = currentList.isNotEmpty(), // Mute subsequent streams to prevent sound clashing
+            isPlaying = true,
+            initialX = offsetStep,
+            initialY = offsetStep + 80f
+        )
+        currentList.add(newInstance)
+        _activeFloatingPlayers.value = currentList
+        _isMiniPlayerMode.value = true
+    }
+
+    fun removeFloatingPlayer(id: String) {
+        val updated = _activeFloatingPlayers.value.filter { it.id != id }
+        _activeFloatingPlayers.value = updated
+        if (updated.isEmpty()) {
+            _isMiniPlayerMode.value = false
+        }
+    }
+
+    fun toggleFloatingPlayerMute(id: String) {
+        _activeFloatingPlayers.value = _activeFloatingPlayers.value.map {
+            if (it.id == id) it.copy(isMuted = !it.isMuted) else it
+        }
+    }
+
+    fun toggleFloatingPlayerPlay(id: String) {
+        _activeFloatingPlayers.value = _activeFloatingPlayers.value.map {
+            if (it.id == id) it.copy(isPlaying = !it.isPlaying) else it
+        }
+    }
+
+    fun clearAllFloatingPlayers() {
+        _activeFloatingPlayers.value = emptyList()
+        _isMiniPlayerMode.value = false
+    }
+
+    fun popCurrentToFloating() {
+        val ch = _activeChannel.value
+        val med = _activeMediaItem.value
+        val strUrl = _activeMediaStreamUrl.value
+        val hdrs = _activeMediaStreamHeaders.value
+        val s = _activeMediaSeason.value
+        val ep = _activeMediaEpisode.value
+
+        if (ch != null) {
+            addFloatingPlayer(channel = ch)
+        } else if (med != null) {
+            addFloatingPlayer(mediaItem = med, season = s, episode = ep, streamUrl = strUrl, headers = hdrs)
+        }
+    }
+
+    fun expandFloatingPlayerToMain(instance: FloatingPlayerInstance) {
+        if (instance.isChannel && instance.channel != null) {
+            setActiveChannel(instance.channel)
+        } else if (instance.mediaItem != null) {
+            playMediaItem(instance.mediaItem, instance.season, instance.episode)
+        }
+        removeFloatingPlayer(instance.id)
+        setSelectedTabIndex(2)
     }
 
     init {

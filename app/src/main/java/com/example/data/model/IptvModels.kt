@@ -56,3 +56,20 @@ data class SportChannel(
     val group: String?
 )
 
+data class FloatingPlayerInstance(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val subtitle: String = "",
+    val isChannel: Boolean = true,
+    val channel: IptvChannel? = null,
+    val mediaItem: MediaItem? = null,
+    val streamUrl: String? = null,
+    val headers: Map<String, String> = emptyMap(),
+    val season: Int = 1,
+    val episode: Int = 1,
+    val isMuted: Boolean = false,
+    val isPlaying: Boolean = true,
+    val initialX: Float = 0f,
+    val initialY: Float = 0f
+)
+

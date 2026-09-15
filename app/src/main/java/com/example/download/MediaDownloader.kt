@@ -24,8 +24,12 @@ import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URI
+import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 fun formatByteSize(bytes: Long): String {
     if (bytes <= 0) return "0 MB"
@@ -727,29 +731,91 @@ object MediaDownloader {
     ): File? {
         val lines = playlistContent.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val segmentUrls = mutableListOf<String>()
+        var keyUrl: String? = null
+        var keyIvBytes: ByteArray? = null
+        var isAesEncrypted = false
+
         for (line in lines) {
-            if (!line.startsWith("#")) {
+            if (line.startsWith("#EXT-X-KEY")) {
+                if (line.contains("METHOD=AES-128")) {
+                    isAesEncrypted = true
+                    val uriMatch = Regex("""URI=["']([^"']+)["']""").find(line)
+                    if (uriMatch != null) {
+                        keyUrl = resolveAbsoluteUrl(playlistUrl, uriMatch.groupValues[1])
+                    }
+                    val ivMatch = Regex("""IV=0x([0-9a-fA-F]+)""").find(line)
+                    if (ivMatch != null) {
+                        val hex = ivMatch.groupValues[1]
+                        keyIvBytes = hexStringToByteArray(hex)
+                    }
+                }
+            } else if (!line.startsWith("#")) {
                 segmentUrls.add(resolveAbsoluteUrl(playlistUrl, line))
             }
         }
+
         if (segmentUrls.isEmpty()) {
             throw Exception("No video segments found in the playlist.")
+        }
+
+        // Fetch AES-128 key if encrypted
+        var aesKeyBytes: ByteArray? = null
+        if (isAesEncrypted && !keyUrl.isNullOrBlank()) {
+            Log.d("MediaDownloader", "HLS stream is AES-128 encrypted. Fetching key from: $keyUrl")
+            val keyHost = try { Uri.parse(keyUrl).host } catch (e: Exception) { null } ?: ""
+            val keyRequests = mutableListOf<Request>()
+            keyRequests.add(getRequest(keyUrl, userAgent, cookies, referer))
+            if (keyHost.isNotEmpty()) {
+                keyRequests.add(
+                    Request.Builder()
+                        .url(keyUrl)
+                        .header("User-Agent", userAgent ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                        .header("Accept", "*/*")
+                        .header("Referer", "https://$keyHost/")
+                        .header("Origin", "https://$keyHost")
+                        .build()
+                )
+            }
+            
+            for (req in keyRequests) {
+                try {
+                    okHttpClient.newCall(req).execute().use { r ->
+                        if (r.isSuccessful) {
+                            val bodyBytes = r.body?.bytes()
+                            if (bodyBytes != null && bodyBytes.size == 16) {
+                                aesKeyBytes = bodyBytes
+                                return@use
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("MediaDownloader", "Error fetching AES key with candidate request: ${e.message}")
+                }
+                if (aesKeyBytes != null) break
+            }
+
+            if (aesKeyBytes == null) {
+                Log.w("MediaDownloader", "Failed to fetch valid AES-128 key (16 bytes), segments will be downloaded raw.")
+            } else {
+                Log.d("MediaDownloader", "AES-128 HLS decryption key loaded successfully.")
+            }
         }
 
         val outputStream = FileOutputStream(targetFile)
         val totalSegments = segmentUrls.size
         var downloadedSegments = 0
         var totalBytesDownloadedSoFar = 0L
-        val buffer = ByteArray(65536)
         var segmentDelayMs = 120L
         var lastUpdateMs = 0L
+        var failedSegmentsCount = 0
 
         try {
             for (i in 0 until totalSegments) {
                 checkCancellationAndPause(downloadId)
                 val segmentUrl = segmentUrls[i]
                 var success = false
-                var retries = 3
+                var retries = 5
+                var segBytes: ByteArray? = null
 
                 try {
                     Thread.sleep(segmentDelayMs)
@@ -801,27 +867,16 @@ object MediaDownloader {
                         }
 
                         if (segResp != null && segResp.isSuccessful) {
-                            val byteStream = segResp.body?.byteStream() ?: throw Exception("Empty segment")
-                            var bytesRead: Int
-                            while (byteStream.read(buffer).also { bytesRead = it } != -1) {
-                                checkCancellationAndPause(downloadId)
-                                outputStream.write(buffer, 0, bytesRead)
-                                totalBytesDownloadedSoFar += bytesRead
-                                val currentMs = System.currentTimeMillis()
-                                if (currentMs - lastUpdateMs > 300) {
-                                    val percent = ((downloadedSegments * 100) / totalSegments).coerceIn(0, 100)
-                                    val approxTotalBytes = if (downloadedSegments > 0) {
-                                        (totalBytesDownloadedSoFar * totalSegments) / downloadedSegments
-                                    } else -1L
-                                    updateNotificationProgress(context, downloadId, percent, totalBytesDownloadedSoFar, approxTotalBytes, builder, notificationManager, notificationId)
-                                    lastUpdateMs = currentMs
-                                }
-                            }
-                            byteStream.close()
+                            segBytes = segResp.body?.bytes()
                             segResp.close()
-                            success = true
-                            if (segmentDelayMs > 120L) {
-                                segmentDelayMs -= 10L
+                            if (segBytes != null && segBytes.isNotEmpty()) {
+                                success = true
+                                if (segmentDelayMs > 120L) {
+                                    segmentDelayMs -= 10L
+                                }
+                            } else {
+                                retries--
+                                Thread.sleep(300)
                             }
                         } else {
                             retries--
@@ -834,16 +889,42 @@ object MediaDownloader {
                     }
                 }
 
-                if (!success) {
-                    throw Exception("Failed to download video segment $i after retries.")
+                if (!success || segBytes == null) {
+                    failedSegmentsCount++
+                    Log.w("MediaDownloader", "Segment $i failed to download after all retries.")
+                    // If more than 15% of segments fail, abort the download. Otherwise, skip and continue to avoid aborting a long download.
+                    if (failedSegmentsCount > (totalSegments * 0.15).coerceAtLeast(3.0)) {
+                        throw Exception("Failed to download too many segments ($failedSegmentsCount segments failed).")
+                    }
+                    continue
                 }
 
+                // Decrypt segment if needed
+                val finalBytes = if (aesKeyBytes != null && aesKeyBytes?.size == 16) {
+                    try {
+                        val iv = keyIvBytes ?: generateSequenceIv(i)
+                        decryptAes128(segBytes, aesKeyBytes!!, iv)
+                    } catch (e: Exception) {
+                        Log.w("MediaDownloader", "AES decryption error for segment $i: ${e.message}, writing raw bytes instead.")
+                        segBytes
+                    }
+                } else {
+                    segBytes
+                }
+
+                outputStream.write(finalBytes)
+                totalBytesDownloadedSoFar += finalBytes.size
                 downloadedSegments++
-                val percent = ((downloadedSegments * 100) / totalSegments).coerceIn(0, 100)
-                val estimatedTotalBytes = if (downloadedSegments > 0) {
-                    (totalBytesDownloadedSoFar * totalSegments) / downloadedSegments
-                } else -1L
-                updateNotificationProgress(context, downloadId, percent, totalBytesDownloadedSoFar, estimatedTotalBytes, builder, notificationManager, notificationId)
+
+                val currentMs = System.currentTimeMillis()
+                if (currentMs - lastUpdateMs > 300 || i == totalSegments - 1) {
+                    val percent = ((downloadedSegments * 100) / totalSegments).coerceIn(0, 100)
+                    val approxTotalBytes = if (downloadedSegments > 0) {
+                        (totalBytesDownloadedSoFar * totalSegments) / downloadedSegments
+                    } else -1L
+                    updateNotificationProgress(context, downloadId, percent, totalBytesDownloadedSoFar, approxTotalBytes, builder, notificationManager, notificationId)
+                    lastUpdateMs = currentMs
+                }
             }
         } finally {
             try {
@@ -852,10 +933,10 @@ object MediaDownloader {
             } catch (e: Exception) {}
         }
 
-        if (targetFile.exists() && targetFile.length() < 10_000) {
+        if (targetFile.exists() && targetFile.length() < 1000) {
             val length = targetFile.length()
             targetFile.delete()
-            throw Exception("Downloaded HLS file is invalid (${length} bytes). Stream may be expired or blocked.")
+            throw Exception("Downloaded HLS file is empty or corrupted ($length bytes). Stream link might be protected or expired.")
         }
 
         return targetFile
@@ -1108,5 +1189,32 @@ object MediaDownloader {
         } catch (_: Exception) {
             cleanRel
         }
+    }
+
+    private fun decryptAes128(cipherText: ByteArray, key: ByteArray, iv: ByteArray): ByteArray {
+        val secretKey = SecretKeySpec(key, "AES")
+        val ivSpec = IvParameterSpec(iv)
+        val cipher = Cipher.getInstance("AES/CBC/PKCS7Padding")
+        cipher.init(Cipher.DECRYPT_MODE, secretKey, ivSpec)
+        return cipher.doFinal(cipherText)
+    }
+
+    private fun generateSequenceIv(sequenceNumber: Int): ByteArray {
+        val buffer = ByteBuffer.allocate(16)
+        buffer.putLong(0)
+        buffer.putLong(sequenceNumber.toLong())
+        return buffer.array()
+    }
+
+    private fun hexStringToByteArray(s: String): ByteArray {
+        val clean = if (s.startsWith("0x", ignoreCase = true)) s.substring(2) else s
+        val len = clean.length
+        val data = ByteArray(len / 2)
+        var i = 0
+        while (i < len) {
+            data[i / 2] = ((Character.digit(clean[i], 16) shl 4) + Character.digit(clean[i + 1], 16)).toByte()
+            i += 2
+        }
+        return data
     }
 }

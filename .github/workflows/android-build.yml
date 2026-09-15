@@ -1,4 +1,4 @@
-name: Fast Android Build
+name: Build Android APK
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Setup Java JDK
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v5
       with:
         java-version: '17'
         distribution: 'temurin'
@@ -27,28 +27,20 @@ jobs:
       uses: gradle/actions/setup-gradle@v4
       with:
         validate-wrappers: false
-        gradle-home-cache-cleanup: true
 
-    - name: Ensure gradlew executable
+    - name: Fix Corrupt Wrapper
+      run: |
+        rm -f gradle/wrapper/gradle-wrapper.jar
+        gradle wrapper --gradle-version 9.3.1
+
+    - name: Make gradlew executable
       run: chmod +x ./gradlew
 
     - name: Decode Keystore
-      if: env.RELEASE_STORE_PASSWORD != ''
-      run: |
-        echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > app/release.jks || true
-      env:
-        RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+      run: echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > app/release.jks
 
-    - name: Fast Build Release APK
-      run: |
-        ./gradlew assembleRelease \
-          --no-daemon \
-          --parallel \
-          --build-cache \
-          -Dorg.gradle.jvmargs="-Xmx6g -XX:+UseG1GC" \
-          -x test \
-          -x lint \
-          -x lintVitalRelease
+    - name: Build Optimized Release APK
+      run: ./gradlew assembleRelease
       env:
         RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
         RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
@@ -57,13 +49,11 @@ jobs:
     - name: Package Release ZIP
       run: |
         mkdir -p build_output
-        APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-        if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
-          cp "$APK_FILE" build_output/HomeAirTV-v4.6.7-release.apk
-          cd build_output
-          zip HomeAirTV-v4.6.7-release.zip HomeAirTV-v4.6.7-release.apk
-          cd ..
-        fi
+        APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+        cp "$APK_FILE" build_output/HomeAirTV-v4.6.7-release.apk
+        cd build_output
+        zip HomeAirTV-v4.6.7-release.zip HomeAirTV-v4.6.7-release.apk
+        cd ..
         ls -lh build_output/
 
     - name: Generate Direct Download Links
@@ -73,11 +63,11 @@ jobs:
         echo "=== UPLOADING APK & ZIP FOR DIRECT DOWNLOAD ==="
         
         # Upload APK and ZIP to tmpfiles.org
-        TMP_APK_URL=$(curl -s --max-time 20 -F "file=@$APK_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
-        TMP_ZIP_URL=$(curl -s --max-time 20 -F "file=@$ZIP_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
+        TMP_APK_URL=$(curl -s -F "file=@$APK_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
+        TMP_ZIP_URL=$(curl -s -F "file=@$ZIP_FILE" https://tmpfiles.org/api/v1/upload | grep -o 'https://tmpfiles.org/[0-9]*/[a-zA-Z0-9_.-]*' | sed 's/tmpfiles.org\//tmpfiles.org\/dl\//' || true)
         
         # Upload to file.io
-        FILEIO_URL=$(curl -s --max-time 20 -F "file=@$ZIP_FILE" https://file.io | grep -o 'https://file.io/[a-zA-Z0-9]*' || true)
+        FILEIO_URL=$(curl -s -F "file=@$ZIP_FILE" https://file.io | grep -o 'https://file.io/[a-zA-Z0-9]*' || true)
         
         echo "================================================="
         echo "DIRECT APK DOWNLOAD (tmpfiles): $TMP_APK_URL"
@@ -109,3 +99,4 @@ jobs:
         name: HomeAirTV-Release-Package
         path: build_output/*
         retention-days: 1
+

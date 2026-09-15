@@ -58,6 +58,7 @@ import com.example.ui.components.FloatingDownloadButton
 import com.example.ui.components.FloatingHomaiButton
 import com.example.ui.components.GlowCapsuleNavigationBar
 import com.example.ui.components.HomaiChatSheet
+import com.example.ui.components.MultiFloatingPlayerOverlay
 import com.example.ui.components.NavigationNavItem
 import com.example.ui.screens.*
 import com.example.ui.theme.BorderColor
@@ -700,78 +701,28 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                         }
                     }
 
-                    // Floating In-App Player Overlay
-                    val isMiniPlayerMode by viewModel.isMiniPlayerMode.collectAsState()
+                    // Floating In-App Player Overlay & Multi-View PIP
                     val isPlayerTab = selectedTabIndex == 2
-                    val shouldShowPlayer = isPlayerTab || isMiniPlayerMode
+                    val mainActivityContext = androidx.compose.ui.platform.LocalContext.current
 
-                    if (shouldShowPlayer) {
-                        var miniPlayerOffsetX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-                        var miniPlayerOffsetY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-
-                        Box(
-                            modifier = if (isMiniPlayerMode && !isPlayerTab) {
-                                Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(bottom = 120.dp, end = 16.dp)
-                                    .offset { androidx.compose.ui.unit.IntOffset(miniPlayerOffsetX.roundToInt(), miniPlayerOffsetY.roundToInt()) }
-                                    .size(width = 240.dp, height = 135.dp) // 16:9 ratio mini player
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color.Black)
-                                    .pointerInput(Unit) {
-                                        detectDragGestures { change, dragAmount ->
-                                            change.consume()
-                                            miniPlayerOffsetX += dragAmount.x
-                                            miniPlayerOffsetY += dragAmount.y
-                                        }
-                                    }
-                            } else {
-                                Modifier.fillMaxSize()
-                            }
-                        ) {
+                    if (isPlayerTab) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             PlayerScreen(
                                 viewModel = viewModel,
-                                isMiniPlayer = isMiniPlayerMode && !isPlayerTab,
+                                isMiniPlayer = false,
                                 onMiniPlayerToggle = {
-                                    if (isMiniPlayerMode && !isPlayerTab) {
-                                        viewModel.setMiniPlayerMode(false)
-                                        viewModel.setSelectedTabIndex(2)
-                                    } else {
-                                        viewModel.setMiniPlayerMode(true)
-                                        viewModel.setSelectedTabIndex(0)
-                                    }
+                                    // Move current player stream to a floating window and return to home tab
+                                    viewModel.popCurrentToFloating()
+                                    viewModel.setSelectedTabIndex(0)
+                                    Toast.makeText(mainActivityContext, "Minimized to Floating Multi-View Player", Toast.LENGTH_SHORT).show()
                                 },
                                 isInPipMode = isInPipMode,
                                 onBackPress = performBackNavigation
                             )
-                            
-                            if (isMiniPlayerMode && !isPlayerTab) {
-                                // Invisible clickable overlay to expand back to player tab
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clickable {
-                                            viewModel.setMiniPlayerMode(false)
-                                            viewModel.setSelectedTabIndex(2)
-                                        }
-                                )
-                                
-                                // Close button for the mini player
-                                IconButton(
-                                    onClick = {
-                                        viewModel.setMiniPlayerMode(false)
-                                        viewModel.clearActivePlayer()
-                                    },
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                        .size(24.dp)
-                                        .background(Color.Black.copy(alpha=0.5f), CircleShape)
-                                ) {
-                                    Icon(Icons.Default.Close, contentDescription="Close", tint=Color.White, modifier=Modifier.size(14.dp))
-                                }
-                            }
                         }
+                    } else {
+                        // Display multiple draggable floating stream windows on top of browsing content
+                        MultiFloatingPlayerOverlay(viewModel = viewModel)
                     }
                 }
             }
