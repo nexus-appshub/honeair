@@ -96,7 +96,8 @@ data class AppControlConfig(
     val redeemValidityHours: Int = 24,
     val redeemExpiryTimestamp: Long = 0L,
     val premiumLiveTvIds: List<String> = emptyList(),
-    val premiumLiveTvCategories: List<String> = emptyList()
+    val premiumLiveTvCategories: List<String> = emptyList(),
+    val isLiveTvLockEnabled: Boolean = false
 )
 
 class StreamViewModel(application: Application) : AndroidViewModel(application) {
@@ -374,54 +375,37 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         return System.currentTimeMillis() < unlockedUntil
     }
 
-    enum class RedeemResult {
-        SUCCESS,
-        NOT_LOGGED_IN,
-        INVALID_CODE,
-        EXPIRED_CODE
-    }
-
-    fun applyRedeemCode(code: String, userEmail: String?): RedeemResult {
+    suspend fun applyRedeemCode(code: String, userEmail: String?): Pair<Boolean, String> {
         val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
         if (cleanEmail.isBlank()) {
-            return RedeemResult.NOT_LOGGED_IN
+            return Pair(false, "Please login first.")
         }
-
-        val config = _appControlConfig.value
-        val websiteRedeemCode = config?.redeemCode ?: ""
-        val websiteFanCode = config?.fancodeCode ?: ""
 
         val entered = code.trim()
         if (entered.isBlank()) {
-            return RedeemResult.INVALID_CODE
+            return Pair(false, "Invalid code! Please check and try again.")
         }
 
-        val isMatch = (websiteRedeemCode.isNotBlank() && entered.equals(websiteRedeemCode, ignoreCase = true)) ||
-                      (websiteFanCode.isNotBlank() && entered.equals(websiteFanCode, ignoreCase = true))
-
-        if (!isMatch) {
-            return RedeemResult.INVALID_CODE
+        return try {
+            val response = com.example.data.api.VipApiClient.apiService.redeemCode(
+                com.example.data.api.RedeemRequest(
+                    code = entered,
+                    email = cleanEmail,
+                    platform = "android"
+                )
+            )
+            
+            if (response.success) {
+                // If successful, refresh the VIP config so the local app knows they are premium
+                com.example.subscription.SubscriptionManager.fetchLiveVipConfig()
+                Pair(true, response.message ?: "Congratulations! VIP has been activated.")
+            } else {
+                Pair(false, response.message ?: "Invalid or expired code.")
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, "Network error while applying redeem code. Please try again.")
         }
-
-        val expiryTimestamp = config?.redeemExpiryTimestamp ?: 0L
-        if (expiryTimestamp > 0L && System.currentTimeMillis() > expiryTimestamp) {
-            return RedeemResult.EXPIRED_CODE
-        }
-
-        val validityHours = config?.redeemValidityHours ?: 24
-        val validityMs = validityHours * 60 * 60 * 1000L
-        var unlockUntil = System.currentTimeMillis() + validityMs
-        if (expiryTimestamp > 0L) {
-            unlockUntil = unlockUntil.coerceAtMost(expiryTimestamp)
-        }
-
-        sharedPrefs.edit()
-            .putLong("redeem_unlocked_until", unlockUntil)
-            .putString("redeem_unlocked_user", cleanEmail)
-            .putString("redeem_unlocked_code", entered)
-            .apply()
-
-        return RedeemResult.SUCCESS
     }
 
     fun isUserPremium(userEmail: String?): Boolean {
@@ -508,10 +492,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 .build()
 
             val controlUrls = listOf(
-                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl.json",
-                "https://homeairtv.vercel.app/appControl.json",
-                "https://www.hmair.xyz/appControl.json",
-                "https://homeairtv-server.onrender.com/appControl.json"
+                "https://homeairtv-server.onrender.com/api/appControl",
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl.json"
             )
             var configLoaded = false
             for (urlStr in controlUrls) {
@@ -536,6 +518,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 .ifBlank { json.optString("fancode", "") }
                                 .ifBlank { json.optString("fan_code", "") }
                             val isFanCodeLocked = json.optBoolean("isFanCodeLocked", false) || json.optBoolean("isFanCodeRequired", false)
+                            val isLiveTvLockEnabled = json.optBoolean("isLiveTvLockEnabled", false)
 
                             val lockedTabs = mutableListOf<String>()
                             val jsonLockedTabs = json.optJSONArray("lockedTabs")
@@ -660,7 +643,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 redeemValidityHours = redeemValidityHours,
                                 redeemExpiryTimestamp = redeemExpiryTimestamp,
                                 premiumLiveTvIds = premiumLiveTvIds,
-                                premiumLiveTvCategories = premiumLiveTvCategories
+                                premiumLiveTvCategories = premiumLiveTvCategories,
+                                isLiveTvLockEnabled = isLiveTvLockEnabled
                             )
 
                             // Synchronize SubscriptionManager with remote config
@@ -2784,18 +2768,20 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val cleanGroup = channel.group.trim().lowercase()
         val cleanTvgId = channel.tvgId.trim()
         
-        // 1. Check if group/category is in specific Live TV premium categories (completely separate from movie/anime categories)
-        if (cleanGroup.isNotBlank() && config.premiumLiveTvCategories.any { cleanGroup.contains(it.lowercase()) }) {
-            return true
-        }
-        
-        // 2. Check if channel name, URL, or tvgId matches any specific Live TV premium channel IDs/names
-        if (config.premiumLiveTvIds.any {
-            cleanName.contains(it, ignoreCase = true) ||
-            cleanUrl.contains(it, ignoreCase = true) ||
-            (cleanTvgId.isNotBlank() && cleanTvgId.equals(it.trim(), ignoreCase = true))
-        }) {
-            return true
+        if (config.isLiveTvLockEnabled) {
+            // 1. Check if group/category is in specific Live TV premium categories (completely separate from movie/anime categories)
+            if (cleanGroup.isNotBlank() && config.premiumLiveTvCategories.any { cleanGroup.contains(it.lowercase()) }) {
+                return true
+            }
+            
+            // 2. Check if channel name, URL, or tvgId matches any specific Live TV premium channel IDs/names
+            if (config.premiumLiveTvIds.any {
+                cleanName.contains(it, ignoreCase = true) ||
+                cleanUrl.contains(it, ignoreCase = true) ||
+                (cleanTvgId.isNotBlank() && cleanTvgId.equals(it.trim(), ignoreCase = true))
+            }) {
+                return true
+            }
         }
 
         // 3. Fallback to standard admin panel lock fields (premiumCategories, lockedTabs, premiumMediaIds)

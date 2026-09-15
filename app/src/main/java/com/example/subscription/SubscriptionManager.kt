@@ -87,8 +87,13 @@ object SubscriptionManager {
         scope.launch {
             try {
                 val response = VipApiClient.apiService.getVipConfig()
-                if (response.success && response.pricingPlans.isNotEmpty()) {
+                if (response.success) {
                     _vipConfig.value = response
+                    if (response.premiumUsers.isNotEmpty()) {
+                        synchronized(remotePremiumEmails) {
+                            remotePremiumEmails.addAll(response.premiumUsers.map { it.trim().lowercase() }.filter { it.isNotBlank() })
+                        }
+                    }
                     Log.d(TAG, "Fetched ${response.pricingPlans.size} VIP plans successfully")
                 }
             } catch (e: Exception) {

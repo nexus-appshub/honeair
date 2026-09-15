@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -796,6 +797,8 @@ fun RedeemCodeSection(
     var codeText by remember { mutableStateOf("") }
     var redeemMessage by remember { mutableStateOf("") }
     var redeemSuccess by remember { mutableStateOf<Boolean?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     val isUserLoggedIn = userProfile != null
     val userEmail = userProfile?.email
@@ -872,28 +875,16 @@ fun RedeemCodeSection(
 
                     Button(
                         onClick = {
-                            if (codeText.isNotBlank()) {
-                                val result = viewModel.applyRedeemCode(codeText, userEmail)
-                                when (result) {
-                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.SUCCESS -> {
-                                        redeemSuccess = true
-                                        val exp = viewModel.getRedeemUnlockExpiry()
-                                        val dateStr = java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(exp))
-                                        redeemMessage = "Successfully Activated! VIP Premium is unlocked until: $dateStr"
+                            if (codeText.isNotBlank() && !isSubmitting) {
+                                isSubmitting = true
+                                scope.launch {
+                                    val (success, message) = viewModel.applyRedeemCode(codeText, userEmail)
+                                    redeemSuccess = success
+                                    redeemMessage = message
+                                    if (success) {
                                         codeText = ""
                                     }
-                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.INVALID_CODE -> {
-                                        redeemSuccess = false
-                                        redeemMessage = "Invalid code! Please check and try again."
-                                    }
-                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.EXPIRED_CODE -> {
-                                        redeemSuccess = false
-                                        redeemMessage = "This redeem code has expired."
-                                    }
-                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.NOT_LOGGED_IN -> {
-                                        redeemSuccess = false
-                                        redeemMessage = "Please login first."
-                                    }
+                                    isSubmitting = false
                                 }
                             }
                         },
@@ -904,7 +895,15 @@ fun RedeemCodeSection(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                     ) {
-                        Text("Apply", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        if (isSubmitting) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Apply", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
                     }
                 }
             }

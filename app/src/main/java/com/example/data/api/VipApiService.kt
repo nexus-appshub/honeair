@@ -15,7 +15,17 @@ data class VipConfigResponse(
     val version: String? = "2.0",
     val pricingPlans: List<VipPlan> = emptyList(),
     val paymentGateways: PaymentGateways? = null,
-    val modalNotice: ModalNotice? = null
+    val modalNotice: ModalNotice? = null,
+    val premiumUsers: List<String> = emptyList(),
+    val redeemCodes: List<RedeemCode> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class RedeemCode(
+    val code: String = "",
+    val planName: String? = null,
+    val maxUses: Int = 1,
+    val isActive: Boolean = true
 )
 
 @JsonClass(generateAdapter = true)
@@ -67,10 +77,27 @@ interface VipApiService {
 
     @GET("api/vip/status")
     suspend fun getVipStatus(@Query("email") email: String): VipStatusResponse
+
+    @retrofit2.http.POST("api/vip/redeem")
+    suspend fun redeemCode(@retrofit2.http.Body request: RedeemRequest): RedeemResponse
 }
 
+@JsonClass(generateAdapter = true)
+data class RedeemRequest(
+    val code: String,
+    val email: String,
+    val platform: String = "android"
+)
+
+@JsonClass(generateAdapter = true)
+data class RedeemResponse(
+    val success: Boolean,
+    val message: String? = null,
+    val planName: String? = null
+)
+
 object VipApiClient {
-    private const val BASE_URL = "https://ais-pre-nuksdkebkdtr6vurgwnjt6-78196958187.asia-east1.run.app/"
+    private const val BASE_URL = "https://homeairtv-server.onrender.com/"
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
