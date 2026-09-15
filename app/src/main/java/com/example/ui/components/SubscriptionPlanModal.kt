@@ -89,34 +89,50 @@ fun SubscriptionPlanModal(
 
     val context = LocalContext.current
     val isPremium by SubscriptionManager.isPremium.collectAsState()
+    val isExpired by SubscriptionManager.isExpired.collectAsState()
     val currentPlan by SubscriptionManager.subscriptionPlan.collectAsState()
+    val liveVipConfig by SubscriptionManager.vipConfig.collectAsState()
 
-    val plans = listOf(
+    // Default static fallback plans
+    val defaultPlans = listOf(
         PlanOption(
-            id = "monthly",
-            title = "1 Month VIP",
+            id = "vip_1m",
+            title = "1 Month VIP Pass",
             duration = "30 Days Access",
-            price = "$3.99 / ৳399",
-            tag = "Standard"
+            price = "৳50",
+            tag = "STARTER"
         ),
         PlanOption(
-            id = "half_year",
-            title = "6 Months VIP",
-            duration = "180 Days Access",
-            price = "$14.99 / ৳1499",
-            tag = "MOST POPULAR",
+            id = "vip_3m",
+            title = "3 Months VIP Pass",
+            duration = "90 Days Access",
+            price = "৳120",
+            tag = "POPULAR",
             isPopular = true
         ),
         PlanOption(
-            id = "yearly",
+            id = "vip_1y",
             title = "1 Year VIP Access",
             duration = "365 Days Access",
-            price = "$24.99 / ৳2499",
+            price = "৳350",
             tag = "BEST VALUE (SAVE 50%)"
         )
     )
 
-    var selectedPlanIndex by remember { mutableIntStateOf(1) } // Default to 6 months
+    // Merge live plans from website API
+    val dynamicPlans = liveVipConfig?.pricingPlans?.map { plan ->
+        PlanOption(
+            id = plan.id,
+            title = plan.name,
+            duration = plan.duration,
+            price = "৳${plan.priceBDT}",
+            tag = plan.badge,
+            isPopular = plan.isPopular
+        )
+    }
+
+    val plans = if (!dynamicPlans.isNullOrEmpty()) dynamicPlans else defaultPlans
+    var selectedPlanIndex by remember { mutableIntStateOf(if (plans.size > 1) 1 else 0) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -215,12 +231,20 @@ fun SubscriptionPlanModal(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(
-                                if (isPremium) Color(0xFF1B3828) else Color(0xFF2C1A30),
+                                when {
+                                    isPremium -> Color(0xFF1B3828)
+                                    isExpired -> Color(0xFF3B1818)
+                                    else -> Color(0xFF2C1A30)
+                                },
                                 RoundedCornerShape(12.dp)
                             )
                             .border(
                                 1.dp,
-                                if (isPremium) Color(0xFF4CAF50) else Color(0xFFFFB300).copy(alpha = 0.5f),
+                                when {
+                                    isPremium -> Color(0xFF4CAF50)
+                                    isExpired -> Color(0xFFFF4444).copy(alpha = 0.8f)
+                                    else -> Color(0xFFFFB300).copy(alpha = 0.5f)
+                                },
                                 RoundedCornerShape(12.dp)
                             )
                             .padding(12.dp)
@@ -232,9 +256,17 @@ fun SubscriptionPlanModal(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = if (isPremium) Icons.Default.Verified else Icons.Default.Star,
+                                    imageVector = when {
+                                        isPremium -> Icons.Default.Verified
+                                        isExpired -> Icons.Default.Star
+                                        else -> Icons.Default.Star
+                                    },
                                     contentDescription = null,
-                                    tint = if (isPremium) Color(0xFF4CAF50) else Color(0xFFFFD700),
+                                    tint = when {
+                                        isPremium -> Color(0xFF4CAF50)
+                                        isExpired -> Color(0xFFFF5252)
+                                        else -> Color(0xFFFFD700)
+                                    },
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -245,10 +277,18 @@ fun SubscriptionPlanModal(
                                         color = TextSecondary
                                     )
                                     Text(
-                                        text = if (isPremium) "VIP Premium Active ($currentPlan)" else "Free Member (Episode 1 Only)",
+                                        text = when {
+                                            isPremium -> "VIP Premium Active ($currentPlan)"
+                                            isExpired -> "Subscription Expired - Please Renew"
+                                            else -> "Free Member (Episode 1 Only)"
+                                        },
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isPremium) Color(0xFF4CAF50) else Color(0xFFFFD700)
+                                        color = when {
+                                            isPremium -> Color(0xFF4CAF50)
+                                            isExpired -> Color(0xFFFF5252)
+                                            else -> Color(0xFFFFD700)
+                                        }
                                     )
                                 }
                             }
@@ -268,8 +308,9 @@ fun SubscriptionPlanModal(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // Plan selection cards
+                    val safeIndex = selectedPlanIndex.coerceIn(0, (plans.size - 1).coerceAtLeast(0))
                     plans.forEachIndexed { index, plan ->
-                        val isSelected = selectedPlanIndex == index
+                        val isSelected = safeIndex == index
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -327,7 +368,7 @@ fun SubscriptionPlanModal(
                                                 Box(
                                                     modifier = Modifier
                                                         .background(
-                                                            if (plan.isPopular) Color(0xFFFF8C00) else Color(0xFF3B82F6),
+                                                             if (plan.isPopular) Color(0xFFFF8C00) else Color(0xFF3B82F6),
                                                             RoundedCornerShape(4.dp)
                                                         )
                                                         .padding(horizontal = 5.dp, vertical = 2.dp)
@@ -397,12 +438,48 @@ fun SubscriptionPlanModal(
                         }
                     }
 
+                    // Live Payment Gateways display if available
+                    val paymentGateways = liveVipConfig?.paymentGateways
+                    if (paymentGateways != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF141923),
+                            border = BorderStroke(1.dp, Color(0xFF242E42)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "Supported Payment Methods:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFFB300)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    paymentGateways.bkash?.let {
+                                        Text("bKash: ${it.number}", fontSize = 10.sp, color = Color.White)
+                                    }
+                                    paymentGateways.nagad?.let {
+                                        Text("Nagad: ${it.number}", fontSize = 10.sp, color = Color.White)
+                                    }
+                                    paymentGateways.rocket?.let {
+                                        Text("Rocket: ${it.number}", fontSize = 10.sp, color = Color.White)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(18.dp))
 
                     // Action Button
+                    val chosenPlan = plans[safeIndex]
                     Button(
                         onClick = {
-                            val selectedPlan = plans[selectedPlanIndex]
                             val urlToOpen = if (checkoutUrl.isNotBlank()) checkoutUrl else "https://xubilasappshub.xubilaswebdevcorp.shop/pricing"
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
                             try {
@@ -428,7 +505,7 @@ fun SubscriptionPlanModal(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Subscribe Now (${plans[selectedPlanIndex].price})",
+                            text = if (isExpired) "Renew Now (${chosenPlan.price})" else "Subscribe Now (${chosenPlan.price})",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
@@ -437,7 +514,7 @@ fun SubscriptionPlanModal(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Instant activation via Email or Telegram. Support available 24/7.",
+                        text = "Instant activation via Website Admin Panel. Support available 24/7.",
                         fontSize = 10.sp,
                         color = TextSecondary,
                         textAlign = TextAlign.Center

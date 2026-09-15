@@ -1,12 +1,19 @@
 package com.example.subscription
 
 import android.util.Log
+import com.example.data.api.PaymentGateways
+import com.example.data.api.VipApiClient
+import com.example.data.api.VipConfigResponse
+import com.example.data.api.VipPlan
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -16,7 +23,7 @@ import java.util.Locale
 
 /**
  * SubscriptionManager manages VIP / Premium membership status using Firebase Auth & Firestore,
- * with full date-based expiry checks (7 days, 30 days, 1 year, Lifetime) and fallback support.
+ * with full date-based expiry checks (7 days, 30 days, 1 year, Lifetime) and live API sync.
  */
 object SubscriptionManager {
     private const val TAG = "SubscriptionManager"
@@ -39,10 +46,21 @@ object SubscriptionManager {
     private val _isExpired = MutableStateFlow(false)
     val isExpired: StateFlow<Boolean> = _isExpired.asStateFlow()
 
+    // Event triggered when user subscription has expired
+    private val _subscriptionExpiredEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val subscriptionExpiredEvent: SharedFlow<String> = _subscriptionExpiredEvent.asSharedFlow()
+
+    // Live Web VIP Config State
+    private val _vipConfig = MutableStateFlow<VipConfigResponse?>(null)
+    val vipConfig: StateFlow<VipConfigResponse?> = _vipConfig.asStateFlow()
+
     private val remotePremiumEmails = mutableSetOf<String>()
     private var freeEpisodeLimit: Int = 1
 
     init {
+        // Fetch live VIP plans and payment configuration on startup
+        fetchLiveVipConfig()
+
         try {
             val auth = FirebaseAuth.getInstance()
             auth.addAuthStateListener { firebaseAuth ->
@@ -60,6 +78,23 @@ object SubscriptionManager {
     }
 
     /**
+     * Fetches live VIP pricing plans and payment gateways from the server API
+     */
+    fun fetchLiveVipConfig() {
+        scope.launch {
+            try {
+                val response = VipApiClient.apiService.getVipConfig()
+                if (response.success && response.pricingPlans.isNotEmpty()) {
+                    _vipConfig.value = response
+                    Log.d(TAG, "Fetched ${response.pricingPlans.size} VIP plans successfully")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to fetch live VIP config: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Synchronize with remote admin panel configuration (e.g. premiumEmails list and free episode limits)
      */
     fun syncWithRemoteConfig(emails: List<String>, episodeLimit: Int = 1) {
@@ -70,6 +105,14 @@ object SubscriptionManager {
         }
         val currentUser = try { FirebaseAuth.getInstance().currentUser } catch (e: Throwable) { null }
         checkUserSubscription(currentUser?.email, currentUser?.uid)
+    }
+
+    /**
+     * Checks if current time is past the expiry date.
+     * Returns true if expired, false if still valid.
+     */
+    fun isPastExpiryDate(dateStr: String?, timestamp: Long? = null): Boolean {
+        return isDateExpired(dateStr, timestamp)
     }
 
     /**
@@ -116,7 +159,8 @@ object SubscriptionManager {
     }
 
     /**
-     * Checks if a given user email or UID exists in Firestore 'premium_users' collection or remote whitelist
+     * Checks if a given user email or UID exists in Firestore 'premium_users' collection,
+     * evaluates the 'expiryDate' / 'expiresAt' field, and triggers subscription_expired if past due.
      */
     fun checkUserSubscription(email: String?, uid: String?) {
         val cleanEmail = email?.trim()?.lowercase()
@@ -147,20 +191,22 @@ object SubscriptionManager {
                     val active = doc.getBoolean("isPremium") ?: doc.getBoolean("active") ?: true
                     planTitle = doc.getString("plan") ?: doc.getString("planName") ?: "VIP Premium Plan"
                     
-                    // Duration / Expiry dates: can be string or timestamp
-                    validUntil = doc.getString("expiresAt") 
+                    // Duration / Expiry dates: supports 'expiryDate', 'expiresAt', 'validUntil', etc.
+                    validUntil = doc.getString("expiryDate")
+                        ?: doc.getString("expiresAt") 
                         ?: doc.getString("validUntil") 
-                        ?: doc.getString("expiryDate")
                         ?: doc.getString("endDate")
 
-                    val expiresTimestamp = doc.getLong("expiresAtTimestamp") 
-                        ?: doc.getLong("expiryTimestamp")
+                    val expiresTimestamp = doc.getLong("expiryTimestamp")
+                        ?: doc.getLong("expiresAtTimestamp") 
+                        ?: doc.getTimestamp("expiryDate")?.toDate()?.time
                         ?: doc.getTimestamp("expiresAt")?.toDate()?.time
                         ?: doc.getTimestamp("validUntil")?.toDate()?.time
 
-                    val expired = isDateExpired(validUntil, expiresTimestamp)
+                    val expired = isPastExpiryDate(validUntil, expiresTimestamp)
                     if (expired) {
                         hasExpiredFlag = true
+                        _subscriptionExpiredEvent.tryEmit(validUntil ?: "Expired")
                         return false // Subscription has expired
                     }
 
@@ -259,3 +305,4 @@ object SubscriptionManager {
         return _isPremium.value
     }
 }
+
