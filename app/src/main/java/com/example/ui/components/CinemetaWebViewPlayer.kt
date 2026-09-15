@@ -1289,10 +1289,9 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                             isLoading = false
                                             hasError = false
                                         } else {
-                                            // If all direct stream extractions fail, gracefully switch to web embed Sr-1
-                                            currentServerIndex = 1
-                                            isLoading = true
-                                            hasError = false
+                                            // Do NOT auto-fallback to next server automatically. Show error on Server 0.
+                                            isLoading = false
+                                            hasError = true
                                         }
                                     }
                                 }

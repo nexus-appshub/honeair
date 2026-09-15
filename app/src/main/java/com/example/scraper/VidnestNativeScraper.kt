@@ -271,7 +271,7 @@ object VidnestNativeScraper {
 
             var best: ScrapedStreamResult? = null
             try {
-                best = kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                best = kotlinx.coroutines.withTimeoutOrNull(9000L) {
                     channel.receive()
                 }
             } catch (_: Exception) {}
