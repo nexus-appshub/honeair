@@ -1,15 +1,14 @@
-import sys
+import re
 
-filepath = "app/src/main/java/com/example/ui/components/DownloaderModal.kt"
-with open(filepath, "r", encoding="utf-8") as f:
+with open("app/src/main/java/com/example/ui/screens/UserProfileBottomSheet.kt", "r") as f:
     content = f.read()
 
-# Fix the regex escapes
-content = content.replace('Regex("(?i)^(tt\d+|\d+)$")', 'Regex("(?i)^(tt\\\\d+|\\\\d+)$")')
-content = content.replace('Regex("[\-_]")', 'Regex("[\\\\-_]")')
-content = content.replace('Regex("(?i)\b(watch|online|free|download|full|hd|mp4|stream|streaming|1080p|720p|4k)\b")', 'Regex("(?i)\\\\b(watch|online|free|download|full|hd|mp4|stream|streaming|1080p|720p|4k)\\\\b")')
-content = content.replace('Regex("\s+")', 'Regex("\\\\s+")')
+content = content.replace('isRedeemActive -> "VIP Active (Promo Unlock)"', 'isRedeemActive -> "VIP Active ($redeemPlanName)"')
+content = content.replace('val dateSubText = if (isRedeemActive) {', 'val dateSubText = if (isRedeemActive) {\n                                        val fmt = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())\n                                        "Plan: $redeemPlanName • Expires on: ${fmt.format(java.util.Date(redeemExpiry))}"')
 
-with open(filepath, "w", encoding="utf-8") as f:
+# Also fix the duplicate format block
+content = re.sub(r'val dateSubText = if \(isRedeemActive\) \{\s*val fmt = java\.text\.SimpleDateFormat\("dd MMM yyyy, HH:mm", java\.util\.Locale\.getDefault\(\)\)\s*"Plan: \$redeemPlanName • Expires on: \$\{fmt\.format\(java\.util\.Date\(redeemExpiry\)\)\}"\s*val fmt = java\.text\.SimpleDateFormat\("dd MMM yyyy, HH:mm", java\.util\.Locale\.getDefault\(\)\)\s*"Expires on: \$\{fmt\.format\(java\.util\.Date\(redeemExpiry\)\)\}"', 'val dateSubText = if (isRedeemActive) {\n                                        val fmt = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())\n                                        "Plan: $redeemPlanName • Expires on: ${fmt.format(java.util.Date(redeemExpiry))}"', content)
+
+
+with open("app/src/main/java/com/example/ui/screens/UserProfileBottomSheet.kt", "w") as f:
     f.write(content)
-print("Escapes fixed")

@@ -1065,7 +1065,8 @@ fun SportsChannelsTab(
                                         name = ch.name,
                                         url = ch.url,
                                         logo = ch.logo ?: "",
-                                        group = ch.group ?: "Sports"
+                                        group = ch.group ?: "Sports",
+                                        isPremium = ch.isPremium
                                     )
                                     viewModel.setActiveChannel(targetChannel)
                                     onNavigateToPlayer()

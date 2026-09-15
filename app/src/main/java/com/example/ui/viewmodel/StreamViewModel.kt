@@ -398,6 +398,24 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             if (response.success) {
                 // If successful, refresh the VIP config so the local app knows they are premium
                 com.example.subscription.SubscriptionManager.fetchLiveVipConfig()
+
+                // Save locally to display the "Time Left" duration in the profile tab
+                val config = _appControlConfig.value
+                val expiryTimestamp = config?.redeemExpiryTimestamp ?: 0L
+                val validityHours = config?.redeemValidityHours ?: 24
+                val validityMs = validityHours * 60 * 60 * 1000L
+                var unlockUntil = System.currentTimeMillis() + validityMs
+                if (expiryTimestamp > 0L) {
+                    unlockUntil = unlockUntil.coerceAtMost(expiryTimestamp)
+                }
+                
+                sharedPrefs.edit()
+                    .putLong("redeem_unlocked_until", unlockUntil)
+                    .putString("redeem_unlocked_user", cleanEmail)
+                    .putString("redeem_unlocked_code", entered)
+                    .putString("redeem_plan_name", response.planName ?: "VIP Promo Pass")
+                    .apply()
+
                 Pair(true, response.message ?: "Congratulations! VIP has been activated.")
             } else {
                 Pair(false, response.message ?: "Invalid or expired code.")
@@ -406,6 +424,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             e.printStackTrace()
             Pair(false, "Network error while applying redeem code. Please try again.")
         }
+    }
+
+    fun getRedeemPlanName(): String {
+        return sharedPrefs.getString("redeem_plan_name", "VIP Promo Pass") ?: "VIP Promo Pass"
     }
 
     fun isUserPremium(userEmail: String?): Boolean {
@@ -857,7 +879,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             // 2. Fetch Sports Channels
             try {
                 val req = okhttp3.Request.Builder()
-                    .url("https://hmair.xyz/api/channels?category=sports")
+                    .url("https://homeairtv-server.onrender.com/api/channels?category=sports")
                     .header("Accept", "application/json")
                     .build()
                 client.newCall(req).execute().use { response ->
@@ -874,7 +896,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     name = obj.optString("name"),
                                     url = obj.optString("url"),
                                     logo = obj.optString("logo", null),
-                                    group = obj.optString("group", null)
+                                    group = obj.optString("group", null),
+                                    isPremium = obj.optBoolean("isPremium", false)
                                 )
                             )
                         }
@@ -2769,6 +2792,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val cleanTvgId = channel.tvgId.trim()
         
         if (config.isLiveTvLockEnabled) {
+            // Check individual channel flag from API
+            if (channel.isPremium) return true
+
             // 1. Check if group/category is in specific Live TV premium categories (completely separate from movie/anime categories)
             if (cleanGroup.isNotBlank() && config.premiumLiveTvCategories.any { cleanGroup.contains(it.lowercase()) }) {
                 return true
@@ -2783,7 +2809,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 return true
             }
         }
-
         // 3. Fallback to standard admin panel lock fields (premiumCategories, lockedTabs, premiumMediaIds)
         if (cleanGroup.isNotBlank() && config.premiumCategories.any { cleanGroup.contains(it.lowercase()) }) {
             return true

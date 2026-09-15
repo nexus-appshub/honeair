@@ -12,7 +12,8 @@ data class IptvChannel(
     val url: String,
     val logo: String = "",
     val group: String = "",
-    val tvgId: String = ""
+    val tvgId: String = "",
+    val isPremium: Boolean = false
 )
 
 // ১. স্পোর্টস ইভেন্ট রেসপন্স
@@ -53,7 +54,8 @@ data class SportChannel(
     val name: String,
     val url: String, // লাইভ টিভি স্ট্রিমিং লিঙ্ক
     val logo: String?,
-    val group: String?
+    val group: String?,
+    val isPremium: Boolean = false
 )
 
 data class FloatingPlayerInstance(

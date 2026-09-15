@@ -77,6 +77,7 @@ fun UserProfileBottomSheet(
     val viewModel: StreamViewModel = viewModel()
     val isRedeemActive = viewModel.isRedeemCodeActive(profile?.email)
     val redeemExpiry = if (isRedeemActive) viewModel.getRedeemUnlockExpiry() else 0L
+    val redeemPlanName = if (isRedeemActive) viewModel.getRedeemPlanName() else ""
     val effectiveIsPremium = isPremium || isRedeemActive
     var showPlanModal by remember { mutableStateOf(false) }
 
@@ -205,7 +206,7 @@ fun UserProfileBottomSheet(
                                 )
                                 Text(
                                     text = when {
-                                        isRedeemActive -> "VIP Active (Promo Unlock)"
+                                        isRedeemActive -> "VIP Active ($redeemPlanName)"
                                         isPremium -> "VIP Premium Active"
                                         isExpired -> "Subscription Expired"
                                         else -> "Free Plan"
@@ -286,7 +287,7 @@ fun UserProfileBottomSheet(
                                     )
                                     val dateSubText = if (isRedeemActive) {
                                         val fmt = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())
-                                        "Expires on: ${fmt.format(java.util.Date(redeemExpiry))}"
+                                        "Plan: $redeemPlanName • Expires on: ${fmt.format(java.util.Date(redeemExpiry))}"
                                     } else {
                                         expiryText ?: "Active Subscription"
                                     }
