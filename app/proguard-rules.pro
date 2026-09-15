@@ -74,6 +74,19 @@
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# High-Security Code Obfuscation & Anti-Decompilation Rules
+-repackageclasses 'a'
+-allowaccessmodification
+-renamesourcefileattribute SourceFile
+
+# Protect Security Guard module from reflection breaking while obfuscating implementation
+-keep class com.example.security.SecurityGuard {
+    public static *** isDeviceRooted(...);
+    public static *** isProxyOrVpnActive(...);
+    public static *** isInsecureEnvironment(...);
+    public static *** applyScreenProtection(...);
+    public static *** decryptSecureUrl(...);
+}
+
+# Protect Security Violation Screen
+-keep class com.example.ui.screens.SecurityViolationScreenKt { *; }

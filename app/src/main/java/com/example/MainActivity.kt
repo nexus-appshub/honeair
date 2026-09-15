@@ -142,6 +142,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         try {
             enableEdgeToEdge()
+            com.example.security.SecurityGuard.applyScreenProtection(this)
         } catch (e: Throwable) {
             e.printStackTrace()
         }
@@ -240,6 +241,20 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
         viewModel.adminNotifications.collectLatest { notificationMessage ->
             Toast.makeText(context, notificationMessage, Toast.LENGTH_LONG).show()
         }
+    }
+
+    // Security Integrity Guard: Check for rooted device or active network packet sniffer / proxy
+    val isRooted = remember { com.example.security.SecurityGuard.isDeviceRooted(context) }
+    val isProxyActive = remember { com.example.security.SecurityGuard.isProxyOrVpnActive(context) }
+
+    if (isRooted || isProxyActive) {
+        val violationReason = if (isRooted) "Rooted device / Magisk binary detected." else "Active proxy or network packet sniffer detected."
+        com.example.ui.screens.SecurityViolationScreen(
+            title = "Security Check Failed",
+            message = "Access is blocked due to high-security protection ($violationReason). Please disable root, Magisk, or packet inspection proxies to continue.",
+            onExitApp = { (context as? android.app.Activity)?.finish() }
+        )
+        return
     }
 
     // Display AppsHub Update Dialog if an update is available
