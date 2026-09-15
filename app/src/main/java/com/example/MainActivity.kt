@@ -1,5 +1,6 @@
 package com.example
 
+import androidx.compose.foundation.clickable
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -628,11 +629,7 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                                 onNavigateToAirTab = { viewModel.setSelectedTabIndex(0) },
                                 isHeaderVisible = isNavBarVisible
                             )
-                            2 -> PlayerScreen(
-                                viewModel = viewModel,
-                                isInPipMode = isInPipMode,
-                                onBackPress = performBackNavigation
-                            )
+                            2 -> Box(Modifier.fillMaxSize()) // Player rendered above
                             3 -> DownloadLibraryScreen(
                                 viewModel = viewModel,
                                 onBack = performBackNavigation
@@ -647,6 +644,69 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                                     AdminScreen(viewModel = viewModel)
                                 } else {
                                     Box(modifier = Modifier.fillMaxSize())
+                                }
+                            }
+                        }
+                    }
+
+                    // Floating In-App Player Overlay
+                    val isMiniPlayerMode by viewModel.isMiniPlayerMode.collectAsState()
+                    val isPlayerTab = selectedTabIndex == 2
+                    val shouldShowPlayer = isPlayerTab || isMiniPlayerMode
+
+                    if (shouldShowPlayer) {
+                        Box(
+                            modifier = if (isMiniPlayerMode && !isPlayerTab) {
+                                Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(bottom = 120.dp, end = 16.dp)
+                                    .size(width = 240.dp, height = 135.dp) // 16:9 ratio mini player
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.Black)
+                            } else {
+                                Modifier.fillMaxSize()
+                            }
+                        ) {
+                            PlayerScreen(
+                                viewModel = viewModel,
+                                isMiniPlayer = isMiniPlayerMode && !isPlayerTab,
+                                onMiniPlayerToggle = {
+                                    if (isMiniPlayerMode && !isPlayerTab) {
+                                        viewModel.setMiniPlayerMode(false)
+                                        viewModel.setSelectedTabIndex(2)
+                                    } else {
+                                        viewModel.setMiniPlayerMode(true)
+                                        viewModel.setSelectedTabIndex(0)
+                                    }
+                                },
+                                isInPipMode = isInPipMode,
+                                onBackPress = performBackNavigation
+                            )
+                            
+                            if (isMiniPlayerMode && !isPlayerTab) {
+                                // Invisible clickable overlay to expand back to player tab
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clickable {
+                                            viewModel.setMiniPlayerMode(false)
+                                            viewModel.setSelectedTabIndex(2)
+                                        }
+                                )
+                                
+                                // Close button for the mini player
+                                IconButton(
+                                    onClick = {
+                                        viewModel.setMiniPlayerMode(false)
+                                        viewModel.clearActivePlayer()
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(4.dp)
+                                        .size(24.dp)
+                                        .background(Color.Black.copy(alpha=0.5f), CircleShape)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription="Close", tint=Color.White, modifier=Modifier.size(14.dp))
                                 }
                             }
                         }

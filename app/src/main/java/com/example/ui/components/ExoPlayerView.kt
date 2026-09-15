@@ -108,7 +108,7 @@ fun FluidIconButton(
 
 @OptIn(UnstableApi::class)
 @Composable
-fun ExoPlayerView(
+fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit = {}, 
     streamUrl: String,
     modifier: Modifier = Modifier,
     channelName: String = "Live Feed",
@@ -838,14 +838,7 @@ fun ExoPlayerView(
                         // Floating Player PiP Button
                         FluidIconButton(
                             onClick = {
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                    val activity = context as? android.app.Activity
-                                    activity?.enterPictureInPictureMode(
-                                        android.app.PictureInPictureParams.Builder().build()
-                                    )
-                                } else {
-                                    Toast.makeText(context, "Floating mode requires Android 8.0+", Toast.LENGTH_SHORT).show()
-                                }
+                                onMiniPlayerToggle()
                             },
                             modifier = Modifier
                                 .size(28.dp)

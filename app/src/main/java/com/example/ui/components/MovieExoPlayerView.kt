@@ -73,7 +73,7 @@ import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
 @Composable
-fun MovieExoPlayerView(
+fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit = {}, 
     streamUrl: String,
     modifier: Modifier = Modifier,
     channelName: String = "Movie Stream",
@@ -999,13 +999,7 @@ fun MovieExoPlayerView(
                         // Floating Player PiP Button
                         IconButton(
                             onClick = {
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                    activity?.enterPictureInPictureMode(
-                                        android.app.PictureInPictureParams.Builder().build()
-                                    )
-                                } else {
-                                    Toast.makeText(context, "Floating mode requires Android 8.0+", Toast.LENGTH_SHORT).show()
-                                }
+                                onMiniPlayerToggle()
                             },
                             modifier = Modifier
                                 .size(if (isFullScreen) 32.dp else 28.dp)
@@ -1262,13 +1256,7 @@ fun MovieExoPlayerView(
                                         .background(Color.White.copy(alpha = 0.06f))
                                         .clickable {
                                             showSettingsMenu = false
-                                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                                activity?.enterPictureInPictureMode(
-                                                    android.app.PictureInPictureParams.Builder().build()
-                                                )
-                                            } else {
-                                                Toast.makeText(context, "Floating mode requires Android 8.0+", Toast.LENGTH_SHORT).show()
-                                            }
+                                            onMiniPlayerToggle()
                                         }
                                         .padding(horizontal = 14.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically,

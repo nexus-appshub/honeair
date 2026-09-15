@@ -820,8 +820,15 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _isInPipMode = MutableStateFlow(false)
     val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
 
+    private val _isMiniPlayerMode = MutableStateFlow(false)
+    val isMiniPlayerMode: StateFlow<Boolean> = _isMiniPlayerMode.asStateFlow()
+
     fun setInPipMode(value: Boolean) {
         _isInPipMode.value = value
+    }
+
+    fun setMiniPlayerMode(value: Boolean) {
+        _isMiniPlayerMode.value = value
     }
 
     private val _isMediaPlaying = MutableStateFlow(false)

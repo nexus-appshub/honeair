@@ -3617,7 +3617,7 @@ fun ChannelListRow(
 // 3. THEATRE PLAYER SCREEN
 // ==========================================
 @Composable
-fun PlayerScreen(
+fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit = {}, 
     viewModel: StreamViewModel,
     modifier: Modifier = Modifier,
     isInPipMode: Boolean = false,
@@ -3788,8 +3788,9 @@ fun PlayerScreen(
                     viewModel.setFullScreen(isFull)
                 },
                 modifier = Modifier.fillMaxSize(),
-                isInPipMode = isInPipMode,
+                isInPipMode = isInPipMode || isMiniPlayer,
                 isFullScreen = isFullScreen,
+                onMiniPlayerToggle = onMiniPlayerToggle,
                 onPlayingStateChanged = { playing ->
                     viewModel.setMediaPlaying(playing)
                 },
@@ -3813,7 +3814,7 @@ fun PlayerScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(if (!isFullScreen && !isInPipMode) Modifier.statusBarsPadding() else Modifier)
+                    .then(if (!isFullScreen && !isInPipMode && !isMiniPlayer) Modifier.statusBarsPadding() else Modifier)
             ) {
                 // 1. Embed Media3 player view directly at top of screen
                 val isBatterySaverMode by viewModel.batterySaverMode.collectAsState()
@@ -3821,7 +3822,8 @@ fun PlayerScreen(
                     streamUrl = channel.url,
                     channelName = channel.name,
                     isFullScreen = isFullScreen,
-                    isInPipMode = isInPipMode,
+                    isInPipMode = isInPipMode || isMiniPlayer,
+                    onMiniPlayerToggle = onMiniPlayerToggle,
                     fallbackUrl = fallbackUrl,
                     onFullScreenToggle = { viewModel.setFullScreen(!isFullScreen) },
                     onPlaybackError = { err ->
@@ -3846,7 +3848,7 @@ fun PlayerScreen(
                     }
                 )
 
-                if (!isFullScreen && !isInPipMode) {
+                if (!isFullScreen && !isInPipMode && !isMiniPlayer) {
                     // Portrait contents under the player
                     Column(
                         modifier = Modifier

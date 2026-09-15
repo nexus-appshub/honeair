@@ -221,7 +221,7 @@ object AnikotoScraper {
     /**
      * 2. Fetch Seasons for an anime from API
      */
-    suspend fun fetchSeasons(watchUrlOrSlug: String, animeTitle: String? = null): List<AnikotoSeason> = withContext(Dispatchers.IO) {
+    suspend fun fetchSeasons(watchUrlOrSlug: String, animeTitle: String? = null, episode: Int = 1): List<AnikotoSeason> = withContext(Dispatchers.IO) {
         val seasons = mutableListOf<AnikotoSeason>()
         try {
             val queryParams = mutableListOf<String>()
@@ -232,7 +232,7 @@ object AnikotoScraper {
             } else {
                 queryParams.add("keyword=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
             }
-            queryParams.add("ep=1")
+            queryParams.add("ep=$episode")
 
             val url = "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
             Log.d(TAG, "Fetching Seasons from API: $url")
@@ -283,7 +283,7 @@ object AnikotoScraper {
     /**
      * 3. Fetch Anime Details from API
      */
-    suspend fun fetchAnimeDetails(watchUrlOrSlug: String): AnikotoDetails? = withContext(Dispatchers.IO) {
+    suspend fun fetchAnimeDetails(watchUrlOrSlug: String, episode: Int = 1): AnikotoDetails? = withContext(Dispatchers.IO) {
         try {
             val queryParams = mutableListOf<String>()
             if (watchUrlOrSlug.startsWith("http") || watchUrlOrSlug.contains("/watch/")) {
@@ -291,7 +291,7 @@ object AnikotoScraper {
             } else {
                 queryParams.add("keyword=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
             }
-            queryParams.add("ep=1")
+            queryParams.add("ep=$episode")
 
             val url = "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
             val json = fetchJson(url) ?: return@withContext null
@@ -324,7 +324,7 @@ object AnikotoScraper {
     /**
      * 4. Fetch Episode List for a given anime / season from API
      */
-    suspend fun fetchEpisodes(watchUrlOrSlug: String): List<AnikotoEpisode> = withContext(Dispatchers.IO) {
+    suspend fun fetchEpisodes(watchUrlOrSlug: String, episode: Int = 1): List<AnikotoEpisode> = withContext(Dispatchers.IO) {
         val episodes = mutableListOf<AnikotoEpisode>()
         try {
             // First check direct episodes endpoint if slug/id is provided
@@ -359,7 +359,7 @@ object AnikotoScraper {
                 } else {
                     queryParams.add("keyword=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
                 }
-                queryParams.add("ep=1")
+                queryParams.add("ep=$episode")
 
                 val url = "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
                 Log.d(TAG, "Fetching Episodes from API: $url")

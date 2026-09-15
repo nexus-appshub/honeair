@@ -178,7 +178,7 @@ data class CastMember(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CinemetaWebViewPlayer(
+fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit = {}, 
     imdbId: String,
     title: String,
     type: String = "movie", // "movie" or "series"
@@ -1150,11 +1150,7 @@ fun CinemetaWebViewPlayer(
                                 IconButton(
                                     onClick = {
                                         try {
-                                            activity?.enterPictureInPictureMode(
-                                                android.app.PictureInPictureParams.Builder()
-                                                    .setAspectRatio(android.util.Rational(16, 9))
-                                                    .build()
-                                            )
+                                            onMiniPlayerToggle()
                                         } catch (e: Exception) {
                                             e.printStackTrace()
                                         }
