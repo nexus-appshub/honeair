@@ -90,6 +90,7 @@ fun DownloaderModal(
             isAnimeScrapingQualities = true
             try {
                 val info = com.example.download.AnimeDownloader.resolveAnimeDownloadOptions(
+                    context = context,
                     title = title,
                     season = season,
                     episode = episode,
@@ -909,6 +910,7 @@ fun DownloaderModal(
                                 coroutineScope.launch {
                                     try {
                                         animeDownloadInfo = com.example.download.AnimeDownloader.resolveAnimeDownloadOptions(
+                                            context = context,
                                             title = title,
                                             season = season,
                                             episode = episode,

@@ -141,9 +141,55 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private val _appControlConfig = MutableStateFlow<AppControlConfig?>(
+        if (application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE).contains("isAppSuspended")) {
+            val p = application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
+            AppControlConfig(
+                isAppSuspended = p.getBoolean("isAppSuspended", false),
+                suspensionTitle = p.getString("suspensionTitle", "App Under Maintenance") ?: "App Under Maintenance",
+                suspensionMessage = p.getString("suspensionMessage", "App access is temporarily suspended by administrator. Please check back later.") ?: "App access is temporarily suspended by administrator. Please check back later.",
+                isSportsTabLocked = p.getBoolean("isSportsTabLocked", false),
+                sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
+                sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
+                fancodeCode = p.getString("fancodeCode", "") ?: "",
+                isFanCodeLocked = p.getBoolean("isFanCodeLocked", false)
+            )
+        } else null
+    )
+    val appControlConfig: StateFlow<AppControlConfig?> = _appControlConfig.asStateFlow()
+
     // Media Hub State (Movies, Anime, K-Dramas, TV Shows, Short TV, Hindi Dubbed)
     private val _mediaState = MutableStateFlow<UiState<List<MediaItem>>>(UiState.Loading)
-    val mediaState: StateFlow<UiState<List<MediaItem>>> = _mediaState.asStateFlow()
+    val mediaState: StateFlow<UiState<List<MediaItem>>> = combine(_mediaState, premiumMedia, _appControlConfig) { state, premiumList, config ->
+        when (state) {
+            is UiState.Success -> {
+                val premiumIdsFromDb = premiumList.map { it.id }.toSet()
+                val configPremiumIds = config?.premiumMediaIds ?: emptyList()
+                val configPremiumCats = config?.premiumCategories ?: emptyList()
+                val configLockedTabs = config?.lockedTabs ?: emptyList()
+                
+                val mappedData = state.data.map { item ->
+                    val cleanId = item.id.trim()
+                    val cleanTitle = item.title.trim()
+                    val cleanCategory = item.category.trim().lowercase()
+                    
+                    val isPrem = item.isPremium || 
+                                 premiumIdsFromDb.contains(cleanId) ||
+                                 (cleanId.isNotBlank() && configPremiumIds.contains(cleanId)) ||
+                                 (cleanTitle.isNotBlank() && configPremiumIds.any { cleanTitle.contains(it, ignoreCase = true) }) ||
+                                 (cleanCategory.isNotBlank() && (configPremiumCats.contains(cleanCategory) || configLockedTabs.contains(cleanCategory)))
+                                 
+                    if (isPrem) {
+                        item.copy(isPremium = true)
+                    } else {
+                        item
+                    }
+                }
+                UiState.Success(mappedData)
+            }
+            else -> state
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, UiState.Loading)
 
     private val loadedCategories = java.util.concurrent.ConcurrentHashMap.newKeySet<String>().apply {
         add("All")
@@ -172,7 +218,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _mediaSearchQuery = MutableStateFlow("")
     val mediaSearchQuery: StateFlow<String> = _mediaSearchQuery.asStateFlow()
 
-    val latestReleases: StateFlow<List<MediaItem>> = _mediaState.map { state ->
+    val latestReleases: StateFlow<List<MediaItem>> = mediaState.map { state ->
         if (state is UiState.Success) {
             val list = state.data
             
@@ -288,23 +334,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _isInitialControlChecked = MutableStateFlow(false)
     val isInitialControlChecked: StateFlow<Boolean> = _isInitialControlChecked.asStateFlow()
-
-    private val _appControlConfig = MutableStateFlow<AppControlConfig?>(
-        if (application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE).contains("isAppSuspended")) {
-            val p = application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
-            AppControlConfig(
-                isAppSuspended = p.getBoolean("isAppSuspended", false),
-                suspensionTitle = p.getString("suspensionTitle", "App Under Maintenance") ?: "App Under Maintenance",
-                suspensionMessage = p.getString("suspensionMessage", "App access is temporarily suspended by administrator. Please check back later.") ?: "App access is temporarily suspended by administrator. Please check back later.",
-                isSportsTabLocked = p.getBoolean("isSportsTabLocked", false),
-                sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
-                sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
-                fancodeCode = p.getString("fancodeCode", "") ?: "",
-                isFanCodeLocked = p.getBoolean("isFanCodeLocked", false)
-            )
-        } else null
-    )
-    val appControlConfig: StateFlow<AppControlConfig?> = _appControlConfig.asStateFlow()
 
     private val _isSportsUnlockedLocally = MutableStateFlow(false)
     val isSportsUnlockedLocally: StateFlow<Boolean> = _isSportsUnlockedLocally.asStateFlow()
@@ -1239,7 +1268,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         sharedPrefs.edit().putBoolean("setting_battery_saver_mode", value).apply()
     }
 
-    private val _maxFloatingPlayers = MutableStateFlow(sharedPrefs.getInt("setting_max_floating_players", 2))
+    private val _maxFloatingPlayers = MutableStateFlow(sharedPrefs.getInt("setting_max_floating_players", 6))
     val maxFloatingPlayers: StateFlow<Int> = _maxFloatingPlayers.asStateFlow()
     fun setMaxFloatingPlayers(count: Int) {
         val clamped = count.coerceIn(2, 6)
@@ -1536,7 +1565,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val filteredMediaItems: StateFlow<List<MediaItem>> = combine(_mediaState, _selectedMediaCategory, _mediaSearchQuery) { state, category, query ->
+    val filteredMediaItems: StateFlow<List<MediaItem>> = combine(mediaState, _selectedMediaCategory, _mediaSearchQuery) { state, category, query ->
         if (state is UiState.Success) {
             var list = state.data
             val q = query.trim().lowercase()
@@ -2630,6 +2659,31 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     fun isFavoriteStream(url: String): Flow<Boolean> {
         return repository.isFavorite(url)
+    }
+
+    fun isChannelPremium(channel: IptvChannel): Boolean {
+        val config = _appControlConfig.value ?: return false
+        val cleanName = channel.name.trim()
+        val cleanUrl = channel.url.trim()
+        val cleanGroup = channel.group.trim().lowercase()
+        
+        // 1. Check if group is in premium categories or locked tabs
+        if (cleanGroup.isNotBlank() && (config.premiumCategories.contains(cleanGroup) || config.lockedTabs.contains(cleanGroup))) {
+            return true
+        }
+        
+        // 2. Check if name or URL matches any premium media id
+        if (config.premiumMediaIds.any { cleanName.contains(it, ignoreCase = true) || cleanUrl.contains(it, ignoreCase = true) }) {
+            return true
+        }
+        
+        // 3. Check if name or URL is in local DB premiumMedia list
+        val premiumDbIds = premiumMedia.value.map { it.id }.toSet()
+        if (premiumDbIds.any { cleanName.contains(it, ignoreCase = true) || cleanUrl.contains(it, ignoreCase = true) }) {
+            return true
+        }
+        
+        return false
     }
 
     fun toggleMediaFavorite(item: com.example.data.model.MediaItem, isFav: Boolean) {

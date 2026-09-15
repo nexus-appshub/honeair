@@ -65,6 +65,7 @@ object AnimeDownloader {
      * Resolves all available download qualities and subtitles for an anime episode by doing live scraping.
      */
     suspend fun resolveAnimeDownloadOptions(
+        context: Context,
         title: String,
         season: Int = 1,
         episode: Int = 1,
@@ -159,6 +160,52 @@ object AnimeDownloader {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Fallback stream error: ${e.message}")
+            }
+        }
+
+        // Fallback 5: If still empty, query the high-power UnifiedStreamManager concurrent racing engine!
+        if (allQualities.isEmpty()) {
+            try {
+                Log.d(TAG, "Fallback Tier 5: Querying UnifiedStreamManager for $title (S$season Ep$episode)...")
+                val unifiedStream = kotlinx.coroutines.runBlocking {
+                    com.example.scraper.UnifiedStreamManager.getStream(
+                        context = context,
+                        title = title,
+                        tmdbId = "anikoto_${title.replace(" ", "-").lowercase()}",
+                        isTv = true,
+                        season = season,
+                        episode = episode,
+                        isAnime = true
+                    )
+                }
+                if (unifiedStream != null && unifiedStream.streamUrl.isNotBlank()) {
+                    val streamRes = AnikotoStreamResult(
+                        streamUrl = unifiedStream.streamUrl,
+                        headers = unifiedStream.headers,
+                        referer = unifiedStream.referer,
+                        subtitles = emptyList()
+                    )
+                    val parsed = parseHlsMasterQualities(streamRes)
+                    if (parsed.isNotEmpty()) {
+                        allQualities.addAll(parsed)
+                    } else {
+                        allQualities.add(
+                            AnimeQualityOption(
+                                resolution = "720p",
+                                title = "720p HD",
+                                badge = "UNIFIED HD",
+                                estimatedSize = "~180 MB",
+                                streamUrl = unifiedStream.streamUrl,
+                                headers = unifiedStream.headers,
+                                referer = unifiedStream.referer,
+                                serverName = "Unified Engine",
+                                subtitles = emptyList()
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "UnifiedStreamManager fallback error: ${e.message}")
             }
         }
 
@@ -334,7 +381,19 @@ object AnimeDownloader {
         // If it's a master playlist, select the best variant stream
         if (playlistText.contains("#EXT-X-STREAM-INF")) {
             val lines = playlistText.lines().map { it.trim() }
-            val variantLine = lines.firstOrNull { !it.startsWith("#") && (it.contains(".m3u8") || it.contains("index")) }
+            var variantLine: String? = null
+            for (idxLine in lines.indices) {
+                if (lines[idxLine].startsWith("#EXT-X-STREAM-INF")) {
+                    for (nextIdx in idxLine + 1 until lines.size) {
+                        val candidate = lines[nextIdx]
+                        if (candidate.isNotBlank() && !candidate.startsWith("#")) {
+                            variantLine = candidate
+                            break
+                        }
+                    }
+                    if (variantLine != null) break
+                }
+            }
             if (variantLine != null) {
                 currentPlaylistUrl = resolveAbsoluteUrl(currentPlaylistUrl, variantLine)
                 playlistText = fetchTextWithHeaders(currentPlaylistUrl, effectiveHeaders, effectiveReferer)
@@ -505,39 +564,50 @@ object AnimeDownloader {
         val host = uri?.host ?: "anikoto.cz"
         val origin = "${uri?.scheme ?: "https"}://$host"
 
+        val systemCookies = try {
+            android.webkit.CookieManager.getInstance().getCookie(url)
+        } catch (_: Exception) {
+            null
+        }
+
         // 1. Primary request with custom headers & host origin
         val b1 = Request.Builder().url(url)
         b1.header("User-Agent", customHeaders["User-Agent"] ?: DEFAULT_UA)
         b1.header("Accept", "*/*")
         b1.header("Referer", referer.ifEmpty { "$origin/" })
         b1.header("Origin", origin)
+        if (!systemCookies.isNullOrBlank()) {
+            b1.header("Cookie", systemCookies)
+        }
         for ((k, v) in customHeaders) {
-            if (k !in listOf("User-Agent", "Accept", "Referer", "Origin")) {
+            if (k !in listOf("User-Agent", "Accept", "Referer", "Origin", "Cookie")) {
                 b1.header(k, v)
             }
         }
         list.add(b1.build())
 
         // 2. Direct host Referer
-        list.add(
-            Request.Builder()
-                .url(url)
-                .header("User-Agent", DEFAULT_UA)
-                .header("Accept", "*/*")
-                .header("Referer", "$origin/")
-                .header("Origin", origin)
-                .build()
-        )
+        val b2 = Request.Builder()
+            .url(url)
+            .header("User-Agent", DEFAULT_UA)
+            .header("Accept", "*/*")
+            .header("Referer", "$origin/")
+            .header("Origin", origin)
+        if (!systemCookies.isNullOrBlank()) {
+            b2.header("Cookie", systemCookies)
+        }
+        list.add(b2.build())
 
         // 3. Megacloud / Anikoto fallback Referer
-        list.add(
-            Request.Builder()
-                .url(url)
-                .header("User-Agent", DEFAULT_UA)
-                .header("Accept", "*/*")
-                .header("Referer", "https://anikoto.cz/")
-                .build()
-        )
+        val b3 = Request.Builder()
+            .url(url)
+            .header("User-Agent", DEFAULT_UA)
+            .header("Accept", "*/*")
+            .header("Referer", "https://anikoto.cz/")
+        if (!systemCookies.isNullOrBlank()) {
+            b3.header("Cookie", systemCookies)
+        }
+        list.add(b3.build())
 
         return list
     }
@@ -584,21 +654,23 @@ object AnimeDownloader {
     }
 
     private fun resolveAbsoluteUrl(baseUrl: String, relativeUrl: String): String {
-        if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
-            return relativeUrl
+        val normalizedRelative = relativeUrl.replace("\\", "/")
+        val cleanRelative = if (normalizedRelative.startsWith("./")) normalizedRelative.substring(2) else normalizedRelative
+        if (cleanRelative.startsWith("http://") || cleanRelative.startsWith("https://")) {
+            return cleanRelative
         }
         return try {
             val baseUri = Uri.parse(baseUrl)
-            if (relativeUrl.startsWith("/")) {
-                "${baseUri.scheme}://${baseUri.authority}$relativeUrl"
+            if (cleanRelative.startsWith("/")) {
+                "${baseUri.scheme}://${baseUri.authority}$cleanRelative"
             } else {
                 val path = baseUri.path ?: ""
                 val lastSlash = path.lastIndexOf('/')
                 val basePath = if (lastSlash >= 0) path.substring(0, lastSlash + 1) else "/"
-                "${baseUri.scheme}://${baseUri.authority}$basePath$relativeUrl"
+                "${baseUri.scheme}://${baseUri.authority}$basePath$cleanRelative"
             }
         } catch (_: Exception) {
-            relativeUrl
+            cleanRelative
         }
     }
 }

@@ -3499,7 +3499,8 @@ fun ChannelListRow(
     onClick: () -> Unit,
     onFloatClick: (() -> Unit)? = null,
     isSelected: Boolean = false,
-    hasError: Boolean = false
+    hasError: Boolean = false,
+    isPremium: Boolean = false
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -3577,14 +3578,35 @@ fun ChannelListRow(
 
             // Info
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = channel.name,
-                    color = highlightColor ?: TextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = channel.name,
+                        color = highlightColor ?: TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (isPremium) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                    RoundedCornerShape(4.dp)
+                                )
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "VIP",
+                                color = Color.Black,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
                 Text(
                     text = channel.group.ifBlank { "Live TV" },
                     color = TextSecondary,
@@ -4328,6 +4350,28 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                                         modifier = Modifier.size(22.dp)
                                                     )
                                                 }
+
+                                                // VIP overlay for premium channels
+                                                if (viewModel.isChannelPremium(vertChannel)) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .padding(1.dp)
+                                                            .align(Alignment.TopEnd)
+                                                            .background(
+                                                                Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                                                CircleShape
+                                                            )
+                                                            .size(14.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Star,
+                                                            contentDescription = "VIP",
+                                                            tint = Color.Black,
+                                                            modifier = Modifier.size(9.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
 
                                             Spacer(modifier = Modifier.height(6.dp))
@@ -4413,14 +4457,35 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                                 }
                                                 Spacer(modifier = Modifier.width(14.dp))
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = vertChannel.name,
-                                                        color = if (isSelected && playbackErrorChannelUrl == vertChannel.url) Color(0xFFFF0000) else playerTextColor,
-                                                        fontSize = 14.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(
+                                                            text = vertChannel.name,
+                                                            color = if (isSelected && playbackErrorChannelUrl == vertChannel.url) Color(0xFFFF0000) else playerTextColor,
+                                                            fontSize = 14.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier.weight(1f, fill = false)
+                                                        )
+                                                        if (viewModel.isChannelPremium(vertChannel)) {
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .background(
+                                                                        Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                                                        RoundedCornerShape(4.dp)
+                                                                    )
+                                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = "VIP",
+                                                                    color = Color.Black,
+                                                                    fontSize = 7.sp,
+                                                                    fontWeight = FontWeight.ExtraBold
+                                                                )
+                                                            }
+                                                        }
+                                                    }
                                                     Text(
                                                         text = vertChannel.group.ifBlank { "Live TV" },
                                                         color = playerSubTextColor,
@@ -4600,7 +4665,8 @@ fun FavoritesScreen(
                             },
                             onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                             isSelected = isSelected,
-                            hasError = hasError
+                            hasError = hasError,
+                            isPremium = viewModel.isChannelPremium(channel)
                         )
                     }
                 }
@@ -4634,7 +4700,8 @@ fun FavoritesScreen(
                             },
                             onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                             isSelected = isSelected,
-                            hasError = hasError
+                            hasError = hasError,
+                            isPremium = viewModel.isChannelPremium(channel)
                         )
                     }
                 }
@@ -4866,7 +4933,8 @@ fun WatchHistorySheet(
                                     },
                                     onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                     isSelected = channel.url == activeCh?.url,
-                                    hasError = channel.url == activeCh?.url && errUrl == channel.url
+                                    hasError = channel.url == activeCh?.url && errUrl == channel.url,
+                                    isPremium = viewModel.isChannelPremium(channel)
                                 )
                             }
                         }
