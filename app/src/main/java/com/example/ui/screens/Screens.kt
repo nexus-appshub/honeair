@@ -3050,8 +3050,6 @@ fun HomeScreen(
         UserProfileBottomSheet(
             profile = userProfile,
             selectedAudioIndex = selectedAudioIndex,
-            isPremiumUser = viewModel.isUserPremium(userProfile?.email),
-            onBuySubscription = { viewModel.triggerPremiumPaywall(true) },
             onDismiss = { showProfileSheet = false },
             onShowWatchHistory = {
                 showProfileSheet = false
@@ -7098,8 +7096,6 @@ fun SettingsScreen(
         UserProfileBottomSheet(
             profile = profile,
             selectedAudioIndex = selectedAudioIndex,
-            isPremiumUser = viewModel.isUserPremium(profile?.email),
-            onBuySubscription = { viewModel.triggerPremiumPaywall(true) },
             onDismiss = { showProfileSheet = false },
             onShowWatchHistory = {
                 showProfileSheet = false
@@ -10279,6 +10275,36 @@ fun CompactMediaCard(
                     }
                 }
 
+                // Premium VIP Badge Overlay Top Left
+                if (item.isPremium) {
+                    Box(
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .align(Alignment.TopStart)
+                            .background(
+                                Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.WorkspacePremium,
+                                contentDescription = "VIP",
+                                tint = Color.Black,
+                                modifier = Modifier.size(9.dp)
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "VIP",
+                                color = Color.Black,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+
                 // IMDb Rating Badge
                 Box(
                     modifier = Modifier
@@ -10443,6 +10469,36 @@ fun MediaCard(
                                 textAlign = TextAlign.Center,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                // Premium VIP Badge Overlay
+                if (item.isPremium) {
+                    Box(
+                        modifier = Modifier
+                            .padding(6.dp)
+                            .align(Alignment.TopEnd)
+                            .background(
+                                Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.WorkspacePremium,
+                                contentDescription = "VIP",
+                                tint = Color.Black,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "VIP",
+                                color = Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
                     }

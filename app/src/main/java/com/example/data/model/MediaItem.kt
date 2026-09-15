@@ -12,5 +12,6 @@ data class MediaItem(
     val episodes: String = "",
     val isStreamable: Boolean = true,
     val imdbId: String? = null,
-    val type: String = "movie" // "movie" or "series"
+    val type: String = "movie", // "movie" or "series"
+    val isPremium: Boolean = false
 )

@@ -319,11 +319,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun isUserPremium(userEmail: String?): Boolean {
-        val config = _appControlConfig.value ?: return false
+        if (com.example.subscription.SubscriptionManager.isVipUser()) return true
+        val config = _appControlConfig.value
         val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
         if (cleanEmail.isBlank()) return false
         if (cleanEmail.contains("admin") || cleanEmail == "xubilas.era@gmail.com") return true
-        return config.premiumEmails.any { it.trim().equals(cleanEmail, ignoreCase = true) }
+        return config?.premiumEmails?.any { it.trim().equals(cleanEmail, ignoreCase = true) } == true
     }
 
     fun checkContentAccess(
@@ -522,6 +523,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 adBannerUrl = adBannerUrl,
                                 adClickUrl = adClickUrl,
                                 adTitle = adTitle
+                            )
+
+                            // Synchronize SubscriptionManager with remote config
+                            com.example.subscription.SubscriptionManager.syncWithRemoteConfig(
+                                emails = premiumEmails,
+                                episodeLimit = freeEpisodeLimit
                             )
 
                             // If app was suspended while user is streaming or watching, immediately kill playback
@@ -1360,6 +1367,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 isSuperAdmin = isAdmin,
                 userId = fbUser.uid
             )
+            com.example.subscription.SubscriptionManager.checkUserSubscription(email, fbUser.uid)
         } else {
             // If Firebase Auth has no active user, clear any old local cached session to prevent
             // a false logged-in state that would fail Firestore Security Rules.

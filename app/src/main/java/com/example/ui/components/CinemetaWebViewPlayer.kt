@@ -3,6 +3,7 @@ import android.annotation.SuppressLint
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
@@ -259,6 +260,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     val anikotoSeasons by viewModel.anikotoSeasons.collectAsState()
     val anikotoEpisodes by viewModel.anikotoEpisodes.collectAsState()
     val isAnimeLoading by viewModel.isAnimeLoading.collectAsState()
+    val isVipUser by com.example.subscription.SubscriptionManager.isPremium.collectAsState()
+    var showSubscriptionPlanModal by remember { mutableStateOf(false) }
 
     val currentMediaItem = remember(imdbId, title, mediaItem, allMediaItems) {
         mediaItem
@@ -1805,6 +1808,83 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
                         ) {
                             Text("Switch Embed Source (Servers)", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // VIP Paywall Overlay inside player frame (If episode index > 0 and user is not premium)
+            val isEpisodeLocked = remember(isSeries, currentEpisode, isVipUser, currentMediaItem) {
+                if (isVipUser) {
+                    false
+                } else if (currentMediaItem?.isPremium == true) {
+                    true
+                } else if (isSeries && currentEpisode > 1) {
+                    true
+                } else {
+                    false
+                }
+            }
+
+            if (isEpisodeLocked) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF0F0B18).copy(alpha = 0.98f))
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(20.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .background(
+                                    Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Locked",
+                                tint = Color.Black,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = if (isSeries) "Episode $currentEpisode is VIP Locked" else "VIP Premium Content",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (isSeries) "Episode 1 was free to preview. Upgrade to VIP to unlock all remaining episodes and enjoy 4K streaming without ads!"
+                            else "This content is reserved for VIP Premium members. Upgrade now to stream instantly!",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Button(
+                            onClick = { showSubscriptionPlanModal = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(42.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WorkspacePremium,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Upgrade to VIP ($3.99 / ৳399)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -3400,10 +3480,13 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     items(visibleEpisodes) { ep ->
+                                        val isEpLocked = !isVipUser && isSeries && ep > 1
                                         val epTitle = if (isAnime && anikotoEpisodes.isNotEmpty()) {
                                             anikotoEpisodes.find { it.number == ep }?.title
                                         } else null
-                                        val labelText = if (!epTitle.isNullOrBlank() && !epTitle.equals("Episode $ep", ignoreCase = true) && epTitle.length <= 16) {
+                                        val labelText = if (isEpLocked) {
+                                            "🔒 Ep $ep"
+                                        } else if (!epTitle.isNullOrBlank() && !epTitle.equals("Episode $ep", ignoreCase = true) && epTitle.length <= 16) {
                                             "Ep $ep: $epTitle"
                                         } else {
                                             "Ep $ep"
@@ -3412,33 +3495,55 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                             selected = currentEpisode == ep,
                                             onClick = {
                                                 currentEpisode = ep
-                                                isLoading = true
-                                                hasError = false
-                                                if (isAnime) {
-                                                    val tempItem = currentMediaItem ?: MediaItem(
-                                                        id = imdbId,
-                                                        imdbId = imdbId,
-                                                        title = title,
-                                                        category = "Anime",
-                                                        imageUrl = "",
-                                                        type = type,
-                                                        year = "2024"
-                                                    )
-                                                    viewModel.fetchAnikotoServers(tempItem, currentSeason, ep)
+                                                if (isEpLocked) {
+                                                    showSubscriptionPlanModal = true
+                                                } else {
+                                                    isLoading = true
+                                                    hasError = false
+                                                    if (isAnime) {
+                                                        val tempItem = currentMediaItem ?: MediaItem(
+                                                            id = imdbId,
+                                                            imdbId = imdbId,
+                                                            title = title,
+                                                            category = "Anime",
+                                                            imageUrl = "",
+                                                            type = type,
+                                                            year = "2024"
+                                                        )
+                                                        viewModel.fetchAnikotoServers(tempItem, currentSeason, ep)
+                                                    }
                                                 }
                                             },
-                                            label = { Text(labelText, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                                            label = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    if (isEpLocked) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Lock,
+                                                            contentDescription = "VIP Locked",
+                                                            tint = if (currentEpisode == ep) Color.Black else Color(0xFFFFD700),
+                                                            modifier = Modifier.size(12.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(3.dp))
+                                                    }
+                                                    Text(
+                                                        text = if (isEpLocked) "Ep $ep" else labelText,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (currentEpisode == ep) Color.Black else if (isEpLocked) Color(0xFFFFD700) else TextPrimary
+                                                    )
+                                                }
+                                            },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = NeonCyan,
+                                                selectedContainerColor = if (isEpLocked) Color(0xFFFFD700) else NeonCyan,
                                                 selectedLabelColor = Color.Black,
-                                                containerColor = SpaceBlack,
-                                                labelColor = TextPrimary
+                                                containerColor = if (isEpLocked) Color(0xFF2C1A30) else SpaceBlack,
+                                                labelColor = if (isEpLocked) Color(0xFFFFD700) else TextPrimary
                                             ),
                                             border = FilterChipDefaults.filterChipBorder(
                                                 enabled = true,
                                                 selected = currentEpisode == ep,
-                                                borderColor = BorderColor,
-                                                selectedBorderColor = NeonCyan
+                                                borderColor = if (isEpLocked) Color(0xFFFFD700).copy(alpha = 0.5f) else BorderColor,
+                                                selectedBorderColor = if (isEpLocked) Color(0xFFFFD700) else NeonCyan
                                             )
                                         )
                                     }
@@ -3874,6 +3979,12 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 viewModel = viewModel
             )
         }
+
+        // Subscription Plan Selection Modal
+        SubscriptionPlanModal(
+            isVisible = showSubscriptionPlanModal,
+            onDismiss = { showSubscriptionPlanModal = false }
+        )
   }
 }
 
@@ -3907,6 +4018,36 @@ fun RelatedMediaCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
+
+                // Premium VIP Badge Overlay Top Left
+                if (item.isPremium) {
+                    Box(
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .align(Alignment.TopStart)
+                            .background(
+                                Brush.linearGradient(listOf(Color(0xFFFFD700), Color(0xFFFF8C00))),
+                                RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.WorkspacePremium,
+                                contentDescription = "VIP",
+                                tint = Color.Black,
+                                modifier = Modifier.size(9.dp)
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "VIP",
+                                color = Color.Black,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
 
                 // IMDb Rating Overlay Top Right
                 Box(

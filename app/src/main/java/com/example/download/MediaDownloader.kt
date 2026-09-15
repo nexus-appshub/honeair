@@ -329,15 +329,19 @@ object MediaDownloader {
         builders[downloadId] = builder
         service.startForeground(notificationId, builder.build())
 
+        val cleanFileName = sanitizeFileName(fileName)
+        val cleanUrl = sanitizeUrl(url)
+        val cleanFallbackUrl = fallbackUrl?.let { sanitizeUrl(it) }
+
         val downloadInfo = DownloadInfo(
             id = downloadId,
-            title = fileName,
+            title = cleanFileName,
             progress = 0
         )
         _activeDownloads.value = _activeDownloads.value + downloadInfo
 
         val job = coroutineScope.launch(Dispatchers.IO) {
-            var activeUrl = url
+            var activeUrl = cleanUrl
             var downloadSuccess = false
             var finalFile: File? = null
             var errorToThrow: Exception? = null
@@ -356,7 +360,7 @@ object MediaDownloader {
                             AnimeDownloader.downloadAnimeHlsStream(
                                 context = context,
                                 playlistUrl = activeUrl,
-                                fileName = fileName,
+                                fileName = cleanFileName,
                                 notificationId = notificationId,
                                 builder = builder,
                                 notificationManager = notificationManager,
@@ -368,7 +372,7 @@ object MediaDownloader {
                             downloadHls(
                                 context = context,
                                 m3u8Url = activeUrl,
-                                fileName = fileName,
+                                fileName = cleanFileName,
                                 notificationId = notificationId,
                                 builder = builder,
                                 notificationManager = notificationManager,
@@ -382,7 +386,7 @@ object MediaDownloader {
                         downloadHls(
                             context = context,
                             m3u8Url = activeUrl,
-                            fileName = fileName,
+                            fileName = cleanFileName,
                             notificationId = notificationId,
                             builder = builder,
                             notificationManager = notificationManager,
@@ -395,7 +399,7 @@ object MediaDownloader {
                         downloadStandardFile(
                             context = context,
                             fileUrl = activeUrl,
-                            fileName = fileName,
+                            fileName = cleanFileName,
                             notificationId = notificationId,
                             builder = builder,
                             notificationManager = notificationManager,
@@ -421,11 +425,11 @@ object MediaDownloader {
                 }
 
                 // Auto fallback retry if primary stream fails
-                if (!downloadSuccess && !fallbackUrl.isNullOrBlank() && fallbackUrl != activeUrl) {
+                if (!downloadSuccess && !cleanFallbackUrl.isNullOrBlank() && cleanFallbackUrl != activeUrl) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, "Selected quality link failed. Retrying with default stream...", Toast.LENGTH_SHORT).show()
                     }
-                    activeUrl = fallbackUrl
+                    activeUrl = cleanFallbackUrl
                     builder.setContentTitle("Retrying Download with Fallback...")
                     notificationManager.notify(notificationId, builder.build())
 
@@ -434,7 +438,7 @@ object MediaDownloader {
                             downloadHls(
                                 context = context,
                                 m3u8Url = activeUrl,
-                                fileName = fileName,
+                                fileName = cleanFileName,
                                 notificationId = notificationId,
                                 builder = builder,
                                 notificationManager = notificationManager,
@@ -447,7 +451,7 @@ object MediaDownloader {
                             downloadStandardFile(
                                 context = context,
                                 fileUrl = activeUrl,
-                                fileName = fileName,
+                                fileName = cleanFileName,
                                 notificationId = notificationId,
                                 builder = builder,
                                 notificationManager = notificationManager,
@@ -1052,11 +1056,57 @@ object MediaDownloader {
         return targetFile
     }
 
+    fun sanitizeUrl(url: String): String {
+        return url.trim()
+            .replace("\"", "")
+            .replace("'", "")
+            .replace("\r", "")
+            .replace("\n", "")
+            .replace(" ", "%20")
+    }
+
+    fun sanitizeFileName(fileName: String): String {
+        val cleaned = fileName.trim()
+            .replace("\"", "")
+            .replace("'", "")
+            .replace("[\\\\/:*?\"<>|]".toRegex(), "_")
+            .replace("^_+".toRegex(), "")
+            .replace("\r", "")
+            .replace("\n", "")
+            .trim()
+        return if (cleaned.isBlank()) "media_download_${System.currentTimeMillis()}.mp4" else cleaned
+    }
+
     private fun resolveAbsoluteUrl(baseUrl: String, relativeUrl: String): String {
-        if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
-            return relativeUrl
+        val cleanRel = relativeUrl.trim()
+            .replace("\"", "")
+            .replace("'", "")
+            .replace("\r", "")
+            .replace("\n", "")
+        if (cleanRel.startsWith("http://") || cleanRel.startsWith("https://")) {
+            return cleanRel
         }
-        val baseUri = URI(baseUrl)
-        return baseUri.resolve(relativeUrl).toString()
+        val cleanBase = baseUrl.trim()
+            .replace("\"", "")
+            .replace("'", "")
+            .replace("\r", "")
+            .replace("\n", "")
+        return try {
+            val baseUri = Uri.parse(cleanBase)
+            if (cleanRel.startsWith("/")) {
+                val scheme = baseUri.scheme ?: "https"
+                val authority = baseUri.authority ?: ""
+                "$scheme://$authority$cleanRel"
+            } else {
+                val scheme = baseUri.scheme ?: "https"
+                val authority = baseUri.authority ?: ""
+                val path = baseUri.path ?: ""
+                val lastSlash = path.lastIndexOf('/')
+                val basePath = if (lastSlash >= 0) path.substring(0, lastSlash + 1) else "/"
+                "$scheme://$authority$basePath$cleanRel"
+            }
+        } catch (_: Exception) {
+            cleanRel
+        }
     }
 }

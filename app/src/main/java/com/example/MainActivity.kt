@@ -825,6 +825,19 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             }
         )
     }
+
+    var showSubscriptionPlanGlobal by remember { mutableStateOf(false) }
+
+    // Global Interstitial Ad Overlay (only triggers for non-premium users)
+    com.example.ui.components.InterstitialAdOverlay(
+        onOpenSubscriptionPlan = { showSubscriptionPlanGlobal = true }
+    )
+
+    // Global Subscription Plan Modal
+    com.example.ui.components.SubscriptionPlanModal(
+        isVisible = showSubscriptionPlanGlobal,
+        onDismiss = { showSubscriptionPlanGlobal = false }
+    )
 }
 
 @Composable
@@ -833,97 +846,142 @@ fun AppSuspendedScreen(
     isChecking: Boolean = false,
     onRetry: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF09090B)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF1E0A0A),
+                        Color(0xFF0F0505),
+                        Color(0xFF000000)
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
     ) {
-        Column(
+        // Decorative glowing circle background
+        Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .size(320.dp)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0xFFFF3B30).copy(alpha = 0.12f), Color.Transparent)
+                    ),
+                    CircleShape
+                )
+        )
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(16.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF140D0D).copy(alpha = 0.95f)),
+            border = BorderStroke(1.5.dp, Brush.linearGradient(listOf(Color(0xFFFF3B30).copy(alpha = 0.6f), Color(0xFFFF6B00).copy(alpha = 0.3f))))
         ) {
-            Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .background(Color(0xFFFF3B30).copy(alpha = 0.15f), CircleShape)
-                    .border(2.dp, Color(0xFFFF3B30), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Block,
-                    contentDescription = "Access Blocked",
-                    tint = Color(0xFFFF3B30),
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0x33FF3B30),
-                border = BorderStroke(1.dp, Color(0x66FF3B30))
-            ) {
-                Text(
-                    text = "MAINTENANCE MODE",
-                    color = Color(0xFFFF453A),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                    letterSpacing = 1.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = config.suspensionTitle,
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = config.suspensionMessage,
-                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
-                color = Color(0xFFA1A1AA),
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Button(
-                onClick = onRetry,
-                enabled = !isChecking,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFFF6B00),
-                    disabledContainerColor = Color(0x80FF6B00)
-                ),
-                shape = RoundedCornerShape(12.dp),
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (isChecking) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Checking Server Status...", color = Color.White, fontWeight = FontWeight.Bold)
-                } else {
+                // Icon Header with pulse aura
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .background(
+                            Brush.linearGradient(listOf(Color(0xFFFF3B30).copy(alpha = 0.25f), Color(0xFFFF5252).copy(alpha = 0.1f))),
+                            CircleShape
+                        )
+                        .border(1.5.dp, Color(0xFFFF3B30), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh",
-                        tint = Color.White
+                        imageVector = Icons.Default.Block,
+                        contentDescription = "Service Suspended",
+                        tint = Color(0xFFFF5252),
+                        modifier = Modifier.size(40.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Refresh & Check Again", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0x33FF3B30),
+                    border = BorderStroke(1.dp, Color(0x66FF3B30))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(Color(0xFFFF453A), CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "MAINTENANCE / SUSPENDED",
+                            color = Color(0xFFFF5252),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 1.2.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = config.suspensionTitle.ifBlank { "Service Temporarily Unavailable" },
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = config.suspensionMessage.ifBlank { "The application is currently undergoing critical maintenance. Please check back later." },
+                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                    color = Color(0xFFB0B0B8),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(28.dp))
+
+                Button(
+                    onClick = onRetry,
+                    enabled = !isChecking,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFF453A),
+                        disabledContainerColor = Color(0x80FF453A)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    if (isChecking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Checking Status...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Refresh Status", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
                 }
             }
         }
@@ -940,63 +998,111 @@ fun AppNoticeDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
-            border = BorderStroke(1.dp, Color(0xFF27272A))
+                .padding(horizontal = 8.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF13111C)),
+            border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(Color(0xFFFF6B00).copy(alpha = 0.6f), Color(0xFF8B5CF6).copy(alpha = 0.4f))))
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Header badge
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFFF6B00).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Campaign,
+                                contentDescription = "Announcement",
+                                tint = Color(0xFFFF6B00),
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "SPECIAL ANNOUNCEMENT",
+                                color = Color(0xFFFF8800),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.8.sp
+                            )
+                        }
+                    }
+
+                    if (notice.isDismissible) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.Gray,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
                 if (!notice.imageUrl.isNullOrBlank()) {
                     coil.compose.AsyncImage(
                         model = notice.imageUrl,
                         contentDescription = "Notice Image",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(140.dp)
-                            .clip(RoundedCornerShape(12.dp)),
+                            .height(130.dp)
+                            .clip(RoundedCornerShape(14.dp)),
                         contentScale = ContentScale.Crop
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Campaign,
-                        contentDescription = "Announcement",
-                        tint = Color(0xFFFF6B00),
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = notice.title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = notice.message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFA1A1AA),
+                    text = notice.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = notice.message,
+                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
+                    color = Color(0xFFB4B4C0),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    if (notice.isDismissible) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            border = BorderStroke(1.dp, Color(0xFF3B3B48)),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                            modifier = Modifier.weight(1f).height(42.dp)
+                        ) {
+                            Text("Dismiss", fontSize = 13.sp)
+                        }
+                    }
+
                     if (!notice.buttonUrl.isNullOrBlank() && !notice.buttonText.isNullOrBlank()) {
                         Button(
                             onClick = {
@@ -1011,19 +1117,10 @@ fun AppNoticeDialog(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
-                            modifier = Modifier.weight(1f)
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(if (notice.isDismissible) 1.2f else 1f).height(42.dp)
                         ) {
-                            Text(notice.buttonText, color = Color.White)
-                        }
-                    }
-
-                    if (notice.isDismissible) {
-                        OutlinedButton(
-                            onClick = onDismiss,
-                            border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Dismiss", color = Color.White)
+                            Text(notice.buttonText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -1043,14 +1140,23 @@ fun GlobalFanCodeLockScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF09090B))
-            .padding(24.dp),
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF090B14),
+                        Color(0xFF0D0B1A),
+                        Color(0xFF000000)
+                    )
+                )
+            )
+            .padding(20.dp),
         contentAlignment = Alignment.Center
     ) {
         Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.fillMaxWidth()
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF141420)),
+            shape = RoundedCornerShape(26.dp),
+            border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(Color(0xFFFF6B00).copy(alpha = 0.5f), Color(0xFF7C3AED).copy(alpha = 0.3f)))),
+            modifier = Modifier.fillMaxWidth(0.95f)
         ) {
             Column(
                 modifier = Modifier
@@ -1060,13 +1166,17 @@ fun GlobalFanCodeLockScreen(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(64.dp)
-                        .background(Color(0xFFFF6B00).copy(alpha = 0.15f), CircleShape),
+                        .size(68.dp)
+                        .background(
+                            Brush.linearGradient(listOf(Color(0xFFFF6B00).copy(alpha = 0.2f), Color(0xFFFF8800).copy(alpha = 0.1f))),
+                            CircleShape
+                        )
+                        .border(1.5.dp, Color(0xFFFF6B00), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Lock,
-                        contentDescription = "Passcode Required",
+                        contentDescription = "Fan Code Lock",
                         tint = Color(0xFFFF6B00),
                         modifier = Modifier.size(32.dp)
                     )
@@ -1075,18 +1185,18 @@ fun GlobalFanCodeLockScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Fan Code Required",
+                    text = "Fan Code Access",
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     color = Color.White
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Please enter the secret Fan Code from the Admin Panel to access the app.",
+                    text = "Enter the security Fan Code from the Admin Panel to unlock access.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray,
+                    color = Color(0xFFA1A1AA),
                     textAlign = TextAlign.Center
                 )
 
@@ -1098,16 +1208,20 @@ fun GlobalFanCodeLockScreen(
                         enteredPasscode = it
                         passcodeError = false
                     },
-                    label = { Text("Enter Fan Code") },
+                    label = { Text("Security Fan Code") },
+                    placeholder = { Text("Enter code...", color = Color.DarkGray) },
                     isError = passcodeError,
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFFFF6B00),
-                        unfocusedBorderColor = Color(0xFF3F3F46),
+                        unfocusedBorderColor = Color(0xFF2E2E3A),
                         focusedLabelColor = Color(0xFFFF6B00),
                         unfocusedLabelColor = Color.Gray,
                         focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        unfocusedTextColor = Color.White,
+                        focusedContainerColor = Color(0xFF1B1B28),
+                        unfocusedContainerColor = Color(0xFF1B1B28)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1115,9 +1229,10 @@ fun GlobalFanCodeLockScreen(
                 if (passcodeError) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Incorrect Fan Code! Please try again.",
-                        color = Color.Red,
-                        style = MaterialTheme.typography.bodySmall
+                        text = "Incorrect Fan Code! Please check and try again.",
+                        color = Color(0xFFFF4D4D),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
@@ -1131,11 +1246,19 @@ fun GlobalFanCodeLockScreen(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
                 ) {
-                    Text("Unlock App", color = Color.White, fontWeight = FontWeight.Bold)
+                    Icon(
+                        imageVector = Icons.Default.Key,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Unlock App", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
         }

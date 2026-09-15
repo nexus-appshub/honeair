@@ -187,62 +187,86 @@ fun SportsHubScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(20.dp),
+                    .padding(16.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = cardBgColor),
-                    border = BorderStroke(1.dp, Color(0xFFFF3B30).copy(alpha = 0.5f))
+                    modifier = Modifier.fillMaxWidth(0.94f),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF16101E) else Color.White),
+                    border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(Color(0xFFFF3B30).copy(alpha = 0.6f), Color(0xFFFF6B00).copy(alpha = 0.3f))))
                 ) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        modifier = Modifier.padding(22.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(64.dp)
-                                .background(Color(0xFFFF3B30).copy(alpha = 0.15f), CircleShape),
+                                .size(60.dp)
+                                .background(
+                                    Brush.linearGradient(listOf(Color(0xFFFF3B30).copy(alpha = 0.2f), Color(0xFFFF6B00).copy(alpha = 0.1f))),
+                                    CircleShape
+                                )
+                                .border(1.2.dp, Color(0xFFFF3B30), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = "Locked",
                                 tint = Color(0xFFFF3B30),
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(28.dp)
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFFF3B30).copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color(0xFFFF3B30).copy(alpha = 0.3f))
+                        ) {
+                            Text(
+                                text = "RESTRICTED ACCESS",
+                                color = Color(0xFFFF453A),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                letterSpacing = 1.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
-                            text = "Sports Hub Disabled",
+                            text = "Sports & Live Hub Locked",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = textColor,
                             textAlign = TextAlign.Center
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = appControlConfig?.sportsLockReason ?: "Access is currently restricted by the server administrator.",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = appControlConfig?.sportsLockReason?.ifBlank { "Live cricket, football and premium streams are locked by admin." }
+                                ?: "Live cricket, football and premium streams are locked by admin.",
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 18.sp),
                             color = subTextColor,
                             textAlign = TextAlign.Center
                         )
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(18.dp))
 
                         Button(
                             onClick = { showUnlockDialog = true },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.Key, contentDescription = "Passcode", tint = Color.White)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Enter Access Passcode", color = Color.White, fontWeight = FontWeight.Bold)
+                            Icon(imageVector = Icons.Default.Key, contentDescription = "Passcode", tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Enter Access Passcode", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -283,27 +307,45 @@ fun SportsHubScreen(
     if (showUnlockDialog) {
         Dialog(onDismissRequest = { showUnlockDialog = false }) {
             Card(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF131D2D)),
-                border = BorderStroke(1.dp, Color(0xFF1E293B))
+                modifier = Modifier.fillMaxWidth(0.96f).padding(8.dp),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF151422)),
+                border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(Color(0xFFFF6B00).copy(alpha = 0.6f), Color(0xFF8B5CF6).copy(alpha = 0.4f))))
             ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(Color(0xFFFF6B00).copy(alpha = 0.15f), CircleShape)
+                            .border(1.2.dp, Color(0xFFFF6B00).copy(alpha = 0.5f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = null,
+                            tint = Color(0xFFFF6B00),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     Text(
                         text = "Unlock Sports Hub",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color.White
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "Enter Fancode code or admin access key",
+                        text = "Enter FanCode pass or admin passcode to unlock",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFA1A1AA)
+                        color = Color(0xFFA1A1AA),
+                        textAlign = TextAlign.Center
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -314,30 +356,34 @@ fun SportsHubScreen(
                             enteredPasscode = it
                             passcodeError = false
                         },
-                        label = { Text("Access Code") },
+                        label = { Text("Passcode / FanCode") },
+                        placeholder = { Text("Enter code...", color = Color.DarkGray) },
                         isError = passcodeError,
                         singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFFFF6B00),
-                            unfocusedBorderColor = Color(0xFF3F3F46),
+                            unfocusedBorderColor = Color(0xFF2C2C3A),
                             focusedLabelColor = Color(0xFFFF6B00),
                             unfocusedLabelColor = Color(0xFFA1A1AA),
                             focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+                            unfocusedTextColor = Color.White,
+                            focusedContainerColor = Color(0xFF1B1B2A),
+                            unfocusedContainerColor = Color(0xFF1B1B2A)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     if (passcodeError) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Invalid Passcode!",
+                            text = "Invalid Passcode! Please verify the code.",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.Red
+                            color = Color(0xFFFF4D4D)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -345,10 +391,11 @@ fun SportsHubScreen(
                     ) {
                         OutlinedButton(
                             onClick = { showUnlockDialog = false },
-                            border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                            modifier = Modifier.weight(1f)
+                            border = BorderStroke(1.dp, Color(0xFF383848)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
                         ) {
-                            Text("Cancel", color = Color.White)
+                            Text("Cancel", color = Color.White, fontSize = 13.sp)
                         }
 
                         Button(
@@ -361,9 +408,10 @@ fun SportsHubScreen(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
-                            modifier = Modifier.weight(1f)
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(42.dp)
                         ) {
-                            Text("Unlock", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Unlock", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }

@@ -32,7 +32,18 @@ import androidx.compose.ui.unit.sp
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Brush
 import coil.compose.AsyncImage
+import com.example.subscription.SubscriptionManager
+import com.example.ui.components.SubscriptionPlanModal
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,9 +57,7 @@ fun UserProfileBottomSheet(
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit,
     onShowCopyrightAlert: () -> Unit = {},
-    onShowFloatingPlayerLimit: () -> Unit = {},
-    isPremiumUser: Boolean = false,
-    onBuySubscription: () -> Unit = {}
+    onShowFloatingPlayerLimit: () -> Unit = {}
 ) {
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val bgColor = if (isDark) Color(0xFF141416) else Color(0xFFF9F9FA)
@@ -56,6 +65,12 @@ fun UserProfileBottomSheet(
     val textColor = if (isDark) Color.White else Color(0xFF1C1C1E)
     val subTextColor = if (isDark) Color(0xFFA1A1A6) else Color(0xFF636366)
     val borderColor = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
+
+    val isPremium by SubscriptionManager.isPremium.collectAsState()
+    val isExpired by SubscriptionManager.isExpired.collectAsState()
+    val planName by SubscriptionManager.subscriptionPlan.collectAsState()
+    val expiryText by SubscriptionManager.expiryDate.collectAsState()
+    var showPlanModal by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -75,7 +90,7 @@ fun UserProfileBottomSheet(
                 fontWeight = FontWeight.ExtraBold,
                 color = textColor
             )
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             if (profile != null) {
                 Box(
@@ -101,59 +116,155 @@ fun UserProfileBottomSheet(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = profile.name,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = textColor
-                    )
-                    Surface(
-                        color = if (isPremiumUser) Color(0xFFFFD700) else Color(0xFF3F3F46),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = if (isPremiumUser) "VIP PREMIUM" else "FREE MEMBER",
-                            color = if (isPremiumUser) Color.Black else Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = profile.name,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor
+                )
                 Text(
                     text = profile.email,
                     fontSize = 14.sp,
                     color = subTextColor
                 )
-
                 Spacer(modifier = Modifier.height(16.dp))
+            }
 
-                // Buy Subscription Banner
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onBuySubscription()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isPremiumUser) Color(0xFF10B981) else Color(0xFFFFD700)
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+            // Subscription Status Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        isPremium -> Color(0xFF1B3828)
+                        isExpired -> Color(0xFF351C1C)
+                        else -> Color(0xFF241C35)
+                    }
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    when {
+                        isPremium -> Color(0xFF4CAF50)
+                        isExpired -> Color(0xFFFF4444).copy(alpha = 0.6f)
+                        else -> Color(0xFFFFD700).copy(alpha = 0.5f)
+                    }
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
                 ) {
-                    Text(
-                        text = if (isPremiumUser) "⭐ VIP Member Active" else "👑 Upgrade to VIP Subscription",
-                        color = Color.Black,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 15.sp
-                    )
-                }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(
+                                        when {
+                                            isPremium -> Color(0xFF4CAF50)
+                                            isExpired -> Color(0xFFFF4444)
+                                            else -> Color(0xFFFFD700)
+                                        },
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = when {
+                                        isPremium -> Icons.Filled.Verified
+                                        isExpired -> Icons.Filled.Star
+                                        else -> Icons.Filled.WorkspacePremium
+                                    },
+                                    contentDescription = null,
+                                    tint = if (isExpired) Color.White else Color.Black,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Subscription Status",
+                                    fontSize = 11.sp,
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = when {
+                                        isPremium -> "VIP Premium Active"
+                                        isExpired -> "Subscription Expired"
+                                        else -> "Free Plan"
+                                    },
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = when {
+                                        isPremium -> Color(0xFF81C784)
+                                        isExpired -> Color(0xFFFF6B6B)
+                                        else -> Color(0xFFFFD700)
+                                    }
+                                )
+                            }
+                        }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                        Button(
+                            onClick = { showPlanModal = true },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = when {
+                                    isPremium -> Color(0xFF2E7D32)
+                                    isExpired -> Color(0xFFFF4444)
+                                    else -> Color(0xFFFFD700)
+                                },
+                                contentColor = when {
+                                    isPremium -> Color.White
+                                    isExpired -> Color.White
+                                    else -> Color.Black
+                                }
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Text(
+                                text = when {
+                                    isPremium -> "Manage"
+                                    isExpired -> "Renew Now"
+                                    else -> "Upgrade Now"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (isExpired) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Your VIP subscription period has ended ($expiryText). Renew now to restore ad-free viewing and episode unlocks.",
+                            fontSize = 11.sp,
+                            color = Color(0xFFFFCDD2)
+                        )
+                    } else if (!isPremium) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Upgrade to unlock all series episodes & remove 100% of ads.",
+                            fontSize = 11.sp,
+                            color = Color.LightGray.copy(alpha = 0.8f)
+                        )
+                    } else if (expiryText != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Plan: $planName • $expiryText",
+                            fontSize = 11.sp,
+                            color = Color(0xFFA5D6A7)
+                        )
+                    }
+                }
             }
 
             // Actions
@@ -224,6 +335,11 @@ fun UserProfileBottomSheet(
                 )
             }
         }
+
+        SubscriptionPlanModal(
+            isVisible = showPlanModal,
+            onDismiss = { showPlanModal = false }
+        )
     }
 }
 
