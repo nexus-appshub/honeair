@@ -276,6 +276,7 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
 
     val appControlConfig by viewModel.appControlConfig.collectAsState()
     val isCheckingSuspension by viewModel.isCheckingSuspension.collectAsState()
+    val isAppUnlockedWithFanCode by viewModel.isAppUnlockedWithFanCode.collectAsState()
 
     // Full screen kill-switch / suspension screen if enabled remotely
     appControlConfig?.let { config ->
@@ -283,6 +284,15 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             AppSuspendedScreen(
                 config = config,
                 isChecking = isCheckingSuspension,
+                onRetry = { viewModel.fetchAppControlConfig() }
+            )
+            return
+        }
+
+        // Global Fan Code Lock check from Admin Panel
+        if (config.isFanCodeLocked && config.fancodeCode.isNotBlank() && !isAppUnlockedWithFanCode) {
+            GlobalFanCodeLockScreen(
+                viewModel = viewModel,
                 onRetry = { viewModel.fetchAppControlConfig() }
             )
             return
@@ -296,13 +306,42 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
         }
     }
 
+    val showPremiumPaywall by viewModel.showPremiumPaywall.collectAsState()
+    if (showPremiumPaywall) {
+        val config = appControlConfig
+        PremiumPaywallDialog(
+            title = config?.premiumPaywallTitle ?: "VIP Premium Subscription Required",
+            message = config?.premiumPaywallMessage ?: "This content or tab is reserved for Premium Subscribers. Please purchase a subscription to continue.",
+            buttonText = config?.premiumPaywallButtonText ?: "Buy Subscription Now",
+            buttonUrl = config?.premiumPaywallButtonUrl ?: "",
+            onDismiss = { viewModel.triggerPremiumPaywall(false) }
+        )
+    }
+
     // Logged In/Guest Portal - Main Stream Layout
     val selectedTabIndex by viewModel.selectedTabIndex.collectAsState()
     val tabBackStack = remember { mutableStateListOf<Int>() }
     var lastBackPressTime by remember { mutableStateOf(0L) }
 
     val navigateToTab: (Int) -> Unit = { targetIndex ->
-        if (selectedTabIndex != targetIndex) {
+        val tabNames = mapOf(
+            0 to "home",
+            1 to "movies",
+            2 to "series",
+            3 to "sports",
+            4 to "anime",
+            5 to "livetv",
+            6 to "downloads",
+            7 to "profile"
+        )
+        val targetName = tabNames[targetIndex] ?: ""
+        val lockedTabs = appControlConfig?.lockedTabs ?: emptyList()
+        val premiumCats = appControlConfig?.premiumCategories ?: emptyList()
+        val isUserVip = viewModel.isUserPremium(userProfile?.email)
+
+        if (!isUserVip && (lockedTabs.contains(targetName) || lockedTabs.contains(targetIndex.toString()) || premiumCats.contains(targetName))) {
+            viewModel.triggerPremiumPaywall(true)
+        } else if (selectedTabIndex != targetIndex) {
             if (tabBackStack.isEmpty() || tabBackStack.last() != selectedTabIndex) {
                 tabBackStack.add(selectedTabIndex)
             }
@@ -510,6 +549,15 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        val isUserVip = viewModel.isUserPremium(userProfile?.email)
+                        if (appControlConfig?.isAdsEnabled == true && !isUserVip) {
+                            NonPremiumAdBanner(
+                                title = appControlConfig?.adTitle ?: "Sponsored: Upgrade to VIP to Remove Ads",
+                                clickUrl = appControlConfig?.adClickUrl ?: "",
+                                onRemoveAdsClick = { viewModel.triggerPremiumPaywall(true) }
+                            )
+                        }
+
                         GlowCapsuleNavigationBar(
                             selectedIndex = selectedTabIndex,
                             items = navItems,
@@ -980,6 +1028,273 @@ fun AppNoticeDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun GlobalFanCodeLockScreen(
+    viewModel: com.example.ui.viewmodel.StreamViewModel,
+    onRetry: () -> Unit
+) {
+    var enteredPasscode by remember { mutableStateOf("") }
+    var passcodeError by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF09090B))
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(Color(0xFFFF6B00).copy(alpha = 0.15f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Passcode Required",
+                        tint = Color(0xFFFF6B00),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Fan Code Required",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Please enter the secret Fan Code from the Admin Panel to access the app.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedTextField(
+                    value = enteredPasscode,
+                    onValueChange = {
+                        enteredPasscode = it
+                        passcodeError = false
+                    },
+                    label = { Text("Enter Fan Code") },
+                    isError = passcodeError,
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFFFF6B00),
+                        unfocusedBorderColor = Color(0xFF3F3F46),
+                        focusedLabelColor = Color(0xFFFF6B00),
+                        unfocusedLabelColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (passcodeError) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Incorrect Fan Code! Please try again.",
+                        color = Color.Red,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        val success = viewModel.unlockAppWithFanCode(enteredPasscode)
+                        if (!success) {
+                            passcodeError = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Text("Unlock App", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PremiumPaywallDialog(
+    title: String,
+    message: String,
+    buttonText: String,
+    buttonUrl: String,
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(Color(0xFFFFD700).copy(alpha = 0.2f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = "Premium VIP",
+                        tint = Color(0xFFFFD700),
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.LightGray,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close", color = Color.White)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (buttonUrl.isNotBlank()) {
+                                try {
+                                    val intent = android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(buttonUrl)
+                                    )
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }
+                            onDismiss()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
+                        modifier = Modifier.weight(1.5f)
+                    ) {
+                        Text(buttonText, color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NonPremiumAdBanner(
+    title: String,
+    clickUrl: String,
+    onRemoveAdsClick: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Surface(
+        color = Color(0xFF18181B),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF27272A)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clickable {
+                if (clickUrl.isNotBlank()) {
+                    try {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(clickUrl))
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = Color(0xFFFF6B00),
+                shape = RoundedCornerShape(4.dp)
+            ) {
+                Text(
+                    text = "SPONSORED",
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = title.ifBlank { "Sponsored: Upgrade to VIP to Remove Ads" },
+                color = Color.LightGray,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Remove Ads",
+                color = Color(0xFFFFD700),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { onRemoveAdsClick() }
+            )
         }
     }
 }

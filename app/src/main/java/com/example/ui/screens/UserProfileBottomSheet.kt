@@ -46,7 +46,9 @@ fun UserProfileBottomSheet(
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit,
     onShowCopyrightAlert: () -> Unit = {},
-    onShowFloatingPlayerLimit: () -> Unit = {}
+    onShowFloatingPlayerLimit: () -> Unit = {},
+    isPremiumUser: Boolean = false,
+    onBuySubscription: () -> Unit = {}
 ) {
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val bgColor = if (isDark) Color(0xFF141416) else Color(0xFFF9F9FA)
@@ -73,7 +75,7 @@ fun UserProfileBottomSheet(
                 fontWeight = FontWeight.ExtraBold,
                 color = textColor
             )
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             if (profile != null) {
                 Box(
@@ -99,19 +101,59 @@ fun UserProfileBottomSheet(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = profile.name,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = textColor
-                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = profile.name,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor
+                    )
+                    Surface(
+                        color = if (isPremiumUser) Color(0xFFFFD700) else Color(0xFF3F3F46),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = if (isPremiumUser) "VIP PREMIUM" else "FREE MEMBER",
+                            color = if (isPremiumUser) Color.Black else Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 Text(
                     text = profile.email,
                     fontSize = 14.sp,
                     color = subTextColor
                 )
-                Spacer(modifier = Modifier.height(24.dp))
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Buy Subscription Banner
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onBuySubscription()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPremiumUser) Color(0xFF10B981) else Color(0xFFFFD700)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text(
+                        text = if (isPremiumUser) "⭐ VIP Member Active" else "👑 Upgrade to VIP Subscription",
+                        color = Color.Black,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
             }
 
             // Actions

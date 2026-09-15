@@ -75,7 +75,22 @@ data class AppControlConfig(
     val isSportsTabLocked: Boolean = false,
     val sportsTabStatusText: String = "Live",
     val sportsLockReason: String = "Sports hub is currently locked by administrator.",
-    val fancodeCode: String = ""
+    val fancodeCode: String = "",
+    val isFanCodeLocked: Boolean = false,
+    val lockedTabs: List<String> = emptyList(),
+    val premiumCategories: List<String> = emptyList(),
+    val premiumMediaIds: List<String> = emptyList(),
+    val premiumEmails: List<String> = emptyList(),
+    val freeEpisodeLimit: Int = 1,
+    val isPremiumRequired: Boolean = false,
+    val premiumPaywallTitle: String = "VIP Premium Subscription Required",
+    val premiumPaywallMessage: String = "This content or tab is reserved for Premium Subscribers. Please purchase a subscription to continue.",
+    val premiumPaywallButtonText: String = "Buy Subscription Now",
+    val premiumPaywallButtonUrl: String = "",
+    val isAdsEnabled: Boolean = false,
+    val adBannerUrl: String = "",
+    val adClickUrl: String = "",
+    val adTitle: String = "Sponsored: Upgrade to VIP to Remove Ads"
 )
 
 class StreamViewModel(application: Application) : AndroidViewModel(application) {
@@ -283,7 +298,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 isSportsTabLocked = p.getBoolean("isSportsTabLocked", false),
                 sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
                 sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
-                fancodeCode = p.getString("fancodeCode", "") ?: ""
+                fancodeCode = p.getString("fancodeCode", "") ?: "",
+                isFanCodeLocked = p.getBoolean("isFanCodeLocked", false)
             )
         } else null
     )
@@ -292,6 +308,60 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _isSportsUnlockedLocally = MutableStateFlow(false)
     val isSportsUnlockedLocally: StateFlow<Boolean> = _isSportsUnlockedLocally.asStateFlow()
 
+    private val _isAppUnlockedWithFanCode = MutableStateFlow(false)
+    val isAppUnlockedWithFanCode: StateFlow<Boolean> = _isAppUnlockedWithFanCode.asStateFlow()
+
+    private val _showPremiumPaywall = MutableStateFlow(false)
+    val showPremiumPaywall: StateFlow<Boolean> = _showPremiumPaywall.asStateFlow()
+
+    fun triggerPremiumPaywall(show: Boolean = true) {
+        _showPremiumPaywall.value = show
+    }
+
+    fun isUserPremium(userEmail: String?): Boolean {
+        val config = _appControlConfig.value ?: return false
+        val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
+        if (cleanEmail.isBlank()) return false
+        if (cleanEmail.contains("admin") || cleanEmail == "xubilas.era@gmail.com") return true
+        return config.premiumEmails.any { it.trim().equals(cleanEmail, ignoreCase = true) }
+    }
+
+    fun checkContentAccess(
+        mediaId: String?,
+        title: String?,
+        category: String?,
+        episodeNum: Int = 1,
+        userEmail: String?
+    ): Boolean {
+        if (isUserPremium(userEmail)) return true
+
+        val config = _appControlConfig.value ?: return true
+
+        val cleanMediaId = mediaId?.trim() ?: ""
+        val cleanTitle = title?.trim() ?: ""
+        val cleanCategory = category?.trim()?.lowercase() ?: ""
+
+        val isMediaLocked = (cleanMediaId.isNotBlank() && config.premiumMediaIds.contains(cleanMediaId)) ||
+                (cleanTitle.isNotBlank() && config.premiumMediaIds.any { cleanTitle.contains(it, ignoreCase = true) })
+
+        val isCategoryLocked = cleanCategory.isNotBlank() && 
+                (config.premiumCategories.contains(cleanCategory) || config.lockedTabs.contains(cleanCategory))
+
+        if (episodeNum > config.freeEpisodeLimit) {
+            if (isMediaLocked || isCategoryLocked || config.isPremiumRequired) {
+                triggerPremiumPaywall(true)
+                return false
+            }
+        }
+
+        if (isMediaLocked || (isCategoryLocked && config.isPremiumRequired)) {
+            triggerPremiumPaywall(true)
+            return false
+        }
+
+        return true
+    }
+
     fun unlockSportsTabWithCode(enteredCode: String): Boolean {
         val requiredCode = _appControlConfig.value?.fancodeCode ?: ""
         if (requiredCode.isNotBlank() && enteredCode.trim() == requiredCode.trim()) {
@@ -299,6 +369,15 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             return true
         } else if (requiredCode.isBlank()) {
             _isSportsUnlockedLocally.value = true
+            return true
+        }
+        return false
+    }
+
+    fun unlockAppWithFanCode(enteredCode: String): Boolean {
+        val requiredCode = _appControlConfig.value?.fancodeCode ?: ""
+        if (requiredCode.isBlank() || enteredCode.trim() == requiredCode.trim()) {
+            _isAppUnlockedWithFanCode.value = true
             return true
         }
         return false
@@ -344,7 +423,52 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val isSportsLocked = json.optBoolean("isSportsTabLocked", false)
                             val sportsStatus = json.optString("sportsTabStatusText", "Live")
                             val sportsReason = json.optString("sportsLockReason", "Sports hub is currently locked by administrator.")
-                            val fancodeCode = json.optString("fancodeCode", "")
+                            val fancodeCode = json.optString("fancodeCode", "").ifBlank { json.optString("fanCode", "") }
+                            val isFanCodeLocked = json.optBoolean("isFanCodeLocked", false) || json.optBoolean("isFanCodeRequired", false)
+
+                            val lockedTabs = mutableListOf<String>()
+                            val jsonLockedTabs = json.optJSONArray("lockedTabs")
+                            if (jsonLockedTabs != null) {
+                                for (i in 0 until jsonLockedTabs.length()) {
+                                    lockedTabs.add(jsonLockedTabs.optString(i))
+                                }
+                            }
+
+                            val premiumCategories = mutableListOf<String>()
+                            val jsonPremCats = json.optJSONArray("premiumCategories")
+                            if (jsonPremCats != null) {
+                                for (i in 0 until jsonPremCats.length()) {
+                                    premiumCategories.add(jsonPremCats.optString(i))
+                                }
+                            }
+
+                            val premiumMediaIds = mutableListOf<String>()
+                            val jsonPremIds = json.optJSONArray("premiumMediaIds")
+                            if (jsonPremIds != null) {
+                                for (i in 0 until jsonPremIds.length()) {
+                                    premiumMediaIds.add(jsonPremIds.optString(i))
+                                }
+                            }
+
+                            val premiumEmails = mutableListOf<String>()
+                            val jsonPremEmails = json.optJSONArray("premiumEmails")
+                            if (jsonPremEmails != null) {
+                                for (i in 0 until jsonPremEmails.length()) {
+                                    premiumEmails.add(jsonPremEmails.optString(i).trim().lowercase())
+                                }
+                            }
+
+                            val freeEpisodeLimit = json.optInt("freeEpisodeLimit", 1)
+                            val isPremiumRequired = json.optBoolean("isPremiumRequired", false)
+                            val premiumPaywallTitle = json.optString("premiumPaywallTitle", "VIP Premium Subscription Required")
+                            val premiumPaywallMessage = json.optString("premiumPaywallMessage", "This content or episode is reserved for Premium Subscribers. Please purchase a subscription to continue.")
+                            val premiumPaywallButtonText = json.optString("premiumPaywallButtonText", "Buy Subscription Now")
+                            val premiumPaywallButtonUrl = json.optString("premiumPaywallButtonUrl", "")
+
+                            val isAdsEnabled = json.optBoolean("isAdsEnabled", false)
+                            val adBannerUrl = json.optString("adBannerUrl", "")
+                            val adClickUrl = json.optString("adClickUrl", "")
+                            val adTitle = json.optString("adTitle", "Sponsored: Upgrade to VIP to Remove Ads")
 
                             val noticeObj = json.optJSONObject("notice")
                             val notice = if (noticeObj != null) {
@@ -368,6 +492,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putString("sportsTabStatusText", sportsStatus)
                                     .putString("sportsLockReason", sportsReason)
                                     .putString("fancodeCode", fancodeCode)
+                                    .putBoolean("isFanCodeLocked", isFanCodeLocked)
                                     .apply()
                             } catch (e: Throwable) {
                                 Log.e("StreamViewModel", "Error saving control preferences", e)
@@ -381,7 +506,22 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 isSportsTabLocked = isSportsLocked,
                                 sportsTabStatusText = sportsStatus,
                                 sportsLockReason = sportsReason,
-                                fancodeCode = fancodeCode
+                                fancodeCode = fancodeCode,
+                                isFanCodeLocked = isFanCodeLocked,
+                                lockedTabs = lockedTabs,
+                                premiumCategories = premiumCategories,
+                                premiumMediaIds = premiumMediaIds,
+                                premiumEmails = premiumEmails,
+                                freeEpisodeLimit = freeEpisodeLimit,
+                                isPremiumRequired = isPremiumRequired,
+                                premiumPaywallTitle = premiumPaywallTitle,
+                                premiumPaywallMessage = premiumPaywallMessage,
+                                premiumPaywallButtonText = premiumPaywallButtonText,
+                                premiumPaywallButtonUrl = premiumPaywallButtonUrl,
+                                isAdsEnabled = isAdsEnabled,
+                                adBannerUrl = adBannerUrl,
+                                adClickUrl = adClickUrl,
+                                adTitle = adTitle
                             )
 
                             // If app was suspended while user is streaming or watching, immediately kill playback
@@ -1726,6 +1866,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        val currentEmail = _userProfile.value?.email
+        if (!checkContentAccess(
+                mediaId = item.imdbId ?: item.id,
+                title = item.title,
+                category = item.category,
+                episodeNum = episode,
+                userEmail = currentEmail
+            )) {
+            return
+        }
+
         val watchProgressKey = if (item.type.lowercase().contains("series") || item.type.lowercase().contains("tv")) {
             "${item.imdbId ?: item.id}_s${season}e${episode}"
         } else {
@@ -2232,6 +2383,20 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     // Video Player Playback Control
     fun setActiveChannel(channel: IptvChannel?) {
         _playbackErrorChannelUrl.value = null
+        if (channel != null) {
+            val currentEmail = _userProfile.value?.email
+            val channelCategory = if (channel.group.isNotBlank()) channel.group else "livetv"
+            val channelId = if (channel.tvgId.isNotBlank()) channel.tvgId else channel.url
+            if (!checkContentAccess(
+                    mediaId = channelId,
+                    title = channel.name,
+                    category = channelCategory,
+                    episodeNum = 1,
+                    userEmail = currentEmail
+                )) {
+                return
+            }
+        }
         viewModelScope.launch {
             _activeMediaItem.value = null
             _activeChannel.value = channel

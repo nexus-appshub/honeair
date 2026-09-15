@@ -3050,6 +3050,8 @@ fun HomeScreen(
         UserProfileBottomSheet(
             profile = userProfile,
             selectedAudioIndex = selectedAudioIndex,
+            isPremiumUser = viewModel.isUserPremium(userProfile?.email),
+            onBuySubscription = { viewModel.triggerPremiumPaywall(true) },
             onDismiss = { showProfileSheet = false },
             onShowWatchHistory = {
                 showProfileSheet = false
@@ -7096,6 +7098,8 @@ fun SettingsScreen(
         UserProfileBottomSheet(
             profile = profile,
             selectedAudioIndex = selectedAudioIndex,
+            isPremiumUser = viewModel.isUserPremium(profile?.email),
+            onBuySubscription = { viewModel.triggerPremiumPaywall(true) },
             onDismiss = { showProfileSheet = false },
             onShowWatchHistory = {
                 showProfileSheet = false
