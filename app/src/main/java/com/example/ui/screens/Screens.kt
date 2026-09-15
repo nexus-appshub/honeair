@@ -925,12 +925,14 @@ fun HomeScreen(
     }
 
     var isLiveTvViewMode by remember { mutableStateOf(false) }
+    var isSportsViewMode by remember { mutableStateOf(false) }
     var showLiveTvBottomSheet by remember { mutableStateOf(false) }
     var isIptvSearchActive by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         viewModel.tabReselectEvent.collect { tabIndex ->
             if (tabIndex == 0) {
                 isLiveTvViewMode = false
+                isSportsViewMode = false
                 isIptvSearchActive = false
             }
         }
@@ -1052,6 +1054,8 @@ fun HomeScreen(
             selectedItemForDetail = null
         } else if (selectedPlaylist != null) {
             viewModel.clearSelectedPlaylist()
+        } else if (isSportsViewMode) {
+            isSportsViewMode = false
         } else if (isLiveTvViewMode) {
             isLiveTvViewMode = false
         } else {
@@ -1809,7 +1813,13 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 // VIEW 1: ADVANCED MAIN DASHBOARD HUB
-                if (!isLiveTvViewMode && selectedPlaylist == null) {
+                if (isSportsViewMode) {
+                    SportsHubScreen(
+                        viewModel = viewModel,
+                        onNavigateToPlayer = onNavigateToPlayer,
+                        onBack = { isSportsViewMode = false }
+                    )
+                } else if (!isLiveTvViewMode && selectedPlaylist == null) {
             var isHomeRefreshing by remember { mutableStateOf(false) }
             val homeScope = rememberCoroutineScope()
             @OptIn(ExperimentalMaterial3Api::class)
@@ -3149,6 +3159,43 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             text = "Live",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = homeTextColor
+                        )
+                    }
+
+                    // Sports option circular button
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable {
+                            showLiveTvBottomSheet = false
+                            isSportsViewMode = true
+                        }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .background(
+                                    color = Color(0xFFFF6B00).copy(alpha = 0.15f),
+                                    shape = CircleShape
+                                )
+                                .border(
+                                    width = 1.5.dp,
+                                    color = Color(0xFFFF6B00),
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SportsSoccer,
+                                contentDescription = "Sports",
+                                tint = Color(0xFFFF6B00),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Sports",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = homeTextColor
                         )

@@ -242,6 +242,149 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _useCircularChannelsLayout.value = !_useCircularChannelsLayout.value
     }
 
+    // Sports state variables
+    private val _sportsEventsState = MutableStateFlow<UiState<List<com.example.data.model.LiveMatch>>>(UiState.Loading)
+    val sportsEventsState: StateFlow<UiState<List<com.example.data.model.LiveMatch>>> = _sportsEventsState.asStateFlow()
+
+    private val _sportsChannelsState = MutableStateFlow<UiState<List<com.example.data.model.SportChannel>>>(UiState.Loading)
+    val sportsChannelsState: StateFlow<UiState<List<com.example.data.model.SportChannel>>> = _sportsChannelsState.asStateFlow()
+
+    fun fetchSportsData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _sportsEventsState.value = UiState.Loading
+            _sportsChannelsState.value = UiState.Loading
+            
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+
+            // 1. Fetch Sports Events
+            try {
+                val req = okhttp3.Request.Builder()
+                    .url("https://hmair.xyz/api/sports-events")
+                    .header("Accept", "application/json")
+                    .build()
+                client.newCall(req).execute().use { response ->
+                    val body = response.body?.string()
+                    if (response.isSuccessful && body != null) {
+                        val json = org.json.JSONObject(body)
+                        if (json.optBoolean("ok")) {
+                            val dataArr = json.optJSONArray("data")
+                            val list = mutableListOf<com.example.data.model.LiveMatch>()
+                            if (dataArr != null) {
+                                for (i in 0 until dataArr.length()) {
+                                    val obj = dataArr.optJSONObject(i) ?: continue
+                                    val id = obj.optString("id")
+                                    val title = obj.optString("title")
+                                    val sportCategory = obj.optString("sportCategory")
+                                    val tournament = obj.optString("tournament", null)
+                                    val bannerUrl = obj.optString("bannerUrl", null)
+                                    val status = obj.optString("status")
+                                    val startTime = obj.optString("startTime", null)
+                                    val badgeText = obj.optString("badgeText", null)
+
+                                    val teamAObj = obj.optJSONObject("teamA")
+                                    val teamA = if (teamAObj != null) {
+                                        com.example.data.model.Team(
+                                            name = teamAObj.optString("name"),
+                                            logo = teamAObj.optString("logo", null),
+                                            score = teamAObj.optString("score", null)
+                                        )
+                                    } else {
+                                        com.example.data.model.Team("Team A", null, null)
+                                    }
+
+                                    val teamBObj = obj.optJSONObject("teamB")
+                                    val teamB = if (teamBObj != null) {
+                                        com.example.data.model.Team(
+                                            name = teamBObj.optString("name"),
+                                            logo = teamBObj.optString("logo", null),
+                                            score = teamBObj.optString("score", null)
+                                        )
+                                    } else {
+                                        com.example.data.model.Team("Team B", null, null)
+                                    }
+
+                                    val serversArr = obj.optJSONArray("servers")
+                                    val servers = mutableListOf<com.example.data.model.StreamServer>()
+                                    if (serversArr != null) {
+                                        for (j in 0 until serversArr.length()) {
+                                            val sObj = serversArr.optJSONObject(j) ?: continue
+                                            servers.add(
+                                                com.example.data.model.StreamServer(
+                                                    name = sObj.optString("name"),
+                                                    url = sObj.optString("url")
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    list.add(
+                                        com.example.data.model.LiveMatch(
+                                            id = id,
+                                            title = title,
+                                            sportCategory = sportCategory,
+                                            tournament = tournament,
+                                            teamA = teamA,
+                                            teamB = teamB,
+                                            bannerUrl = bannerUrl,
+                                            status = status,
+                                            startTime = startTime,
+                                            badgeText = badgeText,
+                                            servers = servers
+                                        )
+                                    )
+                                }
+                            }
+                            _sportsEventsState.value = UiState.Success(list)
+                        } else {
+                            _sportsEventsState.value = UiState.Error("Server returned ok=false")
+                        }
+                    } else {
+                        _sportsEventsState.value = UiState.Error("Failed to fetch sports events: code ${response.code}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("StreamViewModel", "Error fetching sports events", e)
+                _sportsEventsState.value = UiState.Error(e.localizedMessage ?: "Unknown network error")
+            }
+
+            // 2. Fetch Sports Channels
+            try {
+                val req = okhttp3.Request.Builder()
+                    .url("https://hmair.xyz/api/channels?category=sports")
+                    .header("Accept", "application/json")
+                    .build()
+                client.newCall(req).execute().use { response ->
+                    val body = response.body?.string()
+                    if (response.isSuccessful && body != null) {
+                        val arr = org.json.JSONArray(body)
+                        val list = mutableListOf<com.example.data.model.SportChannel>()
+                        for (i in 0 until arr.length()) {
+                            val obj = arr.optJSONObject(i) ?: continue
+                            list.add(
+                                com.example.data.model.SportChannel(
+                                    id = obj.optString("id"),
+                                    name = obj.optString("name"),
+                                    url = obj.optString("url"),
+                                    logo = obj.optString("logo", null),
+                                    group = obj.optString("group", null)
+                                )
+                            )
+                        }
+                        _sportsChannelsState.value = UiState.Success(list)
+                    } else {
+                        _sportsChannelsState.value = UiState.Error("Failed to fetch sports channels: code ${response.code}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("StreamViewModel", "Error fetching sports channels", e)
+                _sportsChannelsState.value = UiState.Error(e.localizedMessage ?: "Unknown network error")
+            }
+        }
+    }
+
     private val _activeMediaItem = MutableStateFlow<MediaItem?>(null)
     val activeMediaItem: StateFlow<MediaItem?> = _activeMediaItem.asStateFlow()
     
