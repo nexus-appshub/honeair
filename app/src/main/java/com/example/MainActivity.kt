@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -246,6 +248,26 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             updateInfo = info,
             onDismiss = { viewModel.dismissUpdateDialog() }
         )
+    }
+
+    val appControlConfig by viewModel.appControlConfig.collectAsState()
+
+    // Full screen kill-switch / suspension screen if enabled remotely
+    appControlConfig?.let { config ->
+        if (config.isAppSuspended) {
+            AppSuspendedScreen(
+                config = config,
+                onRetry = { viewModel.fetchSportsData() }
+            )
+            return
+        }
+
+        config.notice?.let { notice ->
+            AppNoticeDialog(
+                notice = notice,
+                onDismiss = { viewModel.dismissAppNotice() }
+            )
+        }
     }
 
     // Logged In/Guest Portal - Main Stream Layout
@@ -643,6 +665,179 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                 navigateToTab(2)
             }
         )
+    }
+}
+
+@Composable
+fun AppSuspendedScreen(
+    config: com.example.ui.viewmodel.AppControlConfig,
+    onRetry: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color(0xFF09090B)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .background(Color(0xFFFF3B30).copy(alpha = 0.15f), CircleShape)
+                    .border(2.dp, Color(0xFFFF3B30), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Block,
+                    contentDescription = "Access Blocked",
+                    tint = Color(0xFFFF3B30),
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = config.suspensionTitle,
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = config.suspensionMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFA1A1AA),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = onRetry,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    tint = Color.White
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Check Status Again", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun AppNoticeDialog(
+    notice: com.example.ui.viewmodel.AppNotice,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    Dialog(onDismissRequest = { if (notice.isDismissible) onDismiss() }) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
+            border = BorderStroke(1.dp, Color(0xFF27272A))
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (!notice.imageUrl.isNullOrBlank()) {
+                    coil.compose.AsyncImage(
+                        model = notice.imageUrl,
+                        contentDescription = "Notice Image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Campaign,
+                        contentDescription = "Announcement",
+                        tint = Color(0xFFFF6B00),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = notice.title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = notice.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFA1A1AA),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (!notice.buttonUrl.isNullOrBlank() && !notice.buttonText.isNullOrBlank()) {
+                        Button(
+                            onClick = {
+                                try {
+                                    val intent = android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(notice.buttonUrl)
+                                    )
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(notice.buttonText, color = Color.White)
+                        }
+                    }
+
+                    if (notice.isDismissible) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Dismiss", color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

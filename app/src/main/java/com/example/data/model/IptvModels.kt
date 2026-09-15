@@ -43,7 +43,8 @@ data class Team(
 
 data class StreamServer(
     val name: String,
-    val url: String // ExoPlayer-এ সরাসরি প্লে করার জন্য .m3u8 লিঙ্ক
+    val url: String, // ExoPlayer-এ সরাসরি প্লে করার জন্য .m3u8 লিঙ্ক
+    val quality: String? = "FHD"
 )
 
 // ২. স্পোর্টস লাইভ টিভি চ্যানেল রেসপন্স

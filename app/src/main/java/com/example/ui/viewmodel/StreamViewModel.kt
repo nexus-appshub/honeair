@@ -58,6 +58,26 @@ data class TelemetryStats(
     val unauthorizedAccessAttempts: Int = 0
 )
 
+data class AppNotice(
+    val title: String = "",
+    val message: String = "",
+    val imageUrl: String? = null,
+    val buttonText: String? = null,
+    val buttonUrl: String? = null,
+    val isDismissible: Boolean = true
+)
+
+data class AppControlConfig(
+    val isAppSuspended: Boolean = false,
+    val suspensionTitle: String = "App Under Maintenance",
+    val suspensionMessage: String = "App access is temporarily suspended by administrator. Please check back later.",
+    val notice: AppNotice? = null,
+    val isSportsTabLocked: Boolean = false,
+    val sportsTabStatusText: String = "Live",
+    val sportsLockReason: String = "Sports hub is currently locked by administrator.",
+    val fancodeCode: String = ""
+)
+
 class StreamViewModel(application: Application) : AndroidViewModel(application) {
 
     private lateinit var repository: StreamRepository
@@ -243,6 +263,29 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Sports state variables
+    private val _appControlConfig = MutableStateFlow<AppControlConfig?>(null)
+    val appControlConfig: StateFlow<AppControlConfig?> = _appControlConfig.asStateFlow()
+
+    private val _isSportsUnlockedLocally = MutableStateFlow(false)
+    val isSportsUnlockedLocally: StateFlow<Boolean> = _isSportsUnlockedLocally.asStateFlow()
+
+    fun unlockSportsTabWithCode(enteredCode: String): Boolean {
+        val requiredCode = _appControlConfig.value?.fancodeCode ?: ""
+        if (requiredCode.isNotBlank() && enteredCode.trim() == requiredCode.trim()) {
+            _isSportsUnlockedLocally.value = true
+            return true
+        } else if (requiredCode.isBlank()) {
+            _isSportsUnlockedLocally.value = true
+            return true
+        }
+        return false
+    }
+
+    fun dismissAppNotice() {
+        val current = _appControlConfig.value ?: return
+        _appControlConfig.value = current.copy(notice = null)
+    }
+
     private val _sportsEventsState = MutableStateFlow<UiState<List<com.example.data.model.LiveMatch>>>(UiState.Loading)
     val sportsEventsState: StateFlow<UiState<List<com.example.data.model.LiveMatch>>> = _sportsEventsState.asStateFlow()
 
@@ -259,88 +302,211 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                 .build()
 
-            // 1. Fetch Sports Events
+            // 0. Fetch App Remote Control Config / Kill Switch / Notice / Lock (Serverless direct Firebase RTDB prioritized)
+            val controlUrls = listOf(
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl.json",
+                "https://homeairtv.vercel.app/appControl.json",
+                "https://www.hmair.xyz/appControl.json",
+                "https://homeairtv-server.onrender.com/appControl.json"
+            )
+            var configLoaded = false
+            for (urlStr in controlUrls) {
+                if (configLoaded) break
+                try {
+                    val req = okhttp3.Request.Builder()
+                        .url(urlStr)
+                        .header("Accept", "application/json")
+                        .build()
+                    client.newCall(req).execute().use { response ->
+                        val body = response.body?.string()
+                        if (response.isSuccessful && body != null && body.trim() != "null" && body.trim().startsWith("{")) {
+                            val json = org.json.JSONObject(body)
+                            val isSuspended = json.optBoolean("isAppSuspended", false)
+                            val suspensionTitle = json.optString("suspensionTitle", "App Under Maintenance")
+                            val suspensionMessage = json.optString("suspensionMessage", "App access is temporarily suspended by administrator.")
+                            val isSportsLocked = json.optBoolean("isSportsTabLocked", false)
+                            val sportsStatus = json.optString("sportsTabStatusText", "Live")
+                            val sportsReason = json.optString("sportsLockReason", "Sports hub is currently locked by administrator.")
+                            val fancodeCode = json.optString("fancodeCode", "")
+
+                            val noticeObj = json.optJSONObject("notice")
+                            val notice = if (noticeObj != null) {
+                                AppNotice(
+                                    title = noticeObj.optString("title", ""),
+                                    message = noticeObj.optString("message", ""),
+                                    imageUrl = noticeObj.optString("imageUrl", null),
+                                    buttonText = noticeObj.optString("buttonText", null),
+                                    buttonUrl = noticeObj.optString("buttonUrl", null),
+                                    isDismissible = noticeObj.optBoolean("isDismissible", true)
+                                )
+                            } else null
+
+                            _appControlConfig.value = AppControlConfig(
+                                isAppSuspended = isSuspended,
+                                suspensionTitle = suspensionTitle,
+                                suspensionMessage = suspensionMessage,
+                                notice = notice,
+                                isSportsTabLocked = isSportsLocked,
+                                sportsTabStatusText = sportsStatus,
+                                sportsLockReason = sportsReason,
+                                fancodeCode = fancodeCode
+                            )
+                            configLoaded = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("StreamViewModel", "Error fetching app control config from $urlStr", e)
+                }
+            }
+
+            // 1. Fetch Sports Events (using Firebase Realtime Database)
             try {
                 val req = okhttp3.Request.Builder()
-                    .url("https://hmair.xyz/api/sports-events")
+                    .url("https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/sportsEvents.json")
                     .header("Accept", "application/json")
                     .build()
                 client.newCall(req).execute().use { response ->
                     val body = response.body?.string()
                     if (response.isSuccessful && body != null) {
-                        val json = org.json.JSONObject(body)
-                        if (json.optBoolean("ok")) {
-                            val dataArr = json.optJSONArray("data")
-                            val list = mutableListOf<com.example.data.model.LiveMatch>()
-                            if (dataArr != null) {
-                                for (i in 0 until dataArr.length()) {
-                                    val obj = dataArr.optJSONObject(i) ?: continue
-                                    val id = obj.optString("id")
-                                    val title = obj.optString("title")
-                                    val sportCategory = obj.optString("sportCategory")
-                                    val tournament = obj.optString("tournament", null)
-                                    val bannerUrl = obj.optString("bannerUrl", null)
-                                    val status = obj.optString("status")
-                                    val startTime = obj.optString("startTime", null)
-                                    val badgeText = obj.optString("badgeText", null)
+                        val list = mutableListOf<com.example.data.model.LiveMatch>()
+                        if (body.trim().startsWith("[")) {
+                            val arr = org.json.JSONArray(body)
+                            for (i in 0 until arr.length()) {
+                                val obj = arr.optJSONObject(i) ?: continue
+                                if (!obj.optBoolean("isActive", true)) continue
+                                
+                                val id = obj.optString("id", i.toString())
+                                val title = obj.optString("title")
+                                val sportCategory = obj.optString("sportCategory")
+                                val tournament = obj.optString("tournament", null)
+                                val bannerUrl = obj.optString("bannerUrl", null)
+                                val status = obj.optString("status")
+                                val startTime = obj.optString("startTime", null)
+                                val badgeText = obj.optString("badgeText", null)
 
-                                    val teamAObj = obj.optJSONObject("teamA")
-                                    val teamA = if (teamAObj != null) {
-                                        com.example.data.model.Team(
-                                            name = teamAObj.optString("name"),
-                                            logo = teamAObj.optString("logo", null),
-                                            score = teamAObj.optString("score", null)
-                                        )
-                                    } else {
-                                        com.example.data.model.Team("Team A", null, null)
-                                    }
-
-                                    val teamBObj = obj.optJSONObject("teamB")
-                                    val teamB = if (teamBObj != null) {
-                                        com.example.data.model.Team(
-                                            name = teamBObj.optString("name"),
-                                            logo = teamBObj.optString("logo", null),
-                                            score = teamBObj.optString("score", null)
-                                        )
-                                    } else {
-                                        com.example.data.model.Team("Team B", null, null)
-                                    }
-
-                                    val serversArr = obj.optJSONArray("servers")
-                                    val servers = mutableListOf<com.example.data.model.StreamServer>()
-                                    if (serversArr != null) {
-                                        for (j in 0 until serversArr.length()) {
-                                            val sObj = serversArr.optJSONObject(j) ?: continue
-                                            servers.add(
-                                                com.example.data.model.StreamServer(
-                                                    name = sObj.optString("name"),
-                                                    url = sObj.optString("url")
-                                                )
-                                            )
-                                        }
-                                    }
-
-                                    list.add(
-                                        com.example.data.model.LiveMatch(
-                                            id = id,
-                                            title = title,
-                                            sportCategory = sportCategory,
-                                            tournament = tournament,
-                                            teamA = teamA,
-                                            teamB = teamB,
-                                            bannerUrl = bannerUrl,
-                                            status = status,
-                                            startTime = startTime,
-                                            badgeText = badgeText,
-                                            servers = servers
-                                        )
+                                val teamAObj = obj.optJSONObject("teamA")
+                                val teamA = if (teamAObj != null) {
+                                    com.example.data.model.Team(
+                                        name = teamAObj.optString("name"),
+                                        logo = teamAObj.optString("logo", null),
+                                        score = teamAObj.optString("score", null)
                                     )
+                                } else {
+                                    com.example.data.model.Team("Team A", null, null)
                                 }
+
+                                val teamBObj = obj.optJSONObject("teamB")
+                                val teamB = if (teamBObj != null) {
+                                    com.example.data.model.Team(
+                                        name = teamBObj.optString("name"),
+                                        logo = teamBObj.optString("logo", null),
+                                        score = teamBObj.optString("score", null)
+                                    )
+                                } else {
+                                    com.example.data.model.Team("Team B", null, null)
+                                }
+
+                                val serversArr = obj.optJSONArray("servers")
+                                val servers = mutableListOf<com.example.data.model.StreamServer>()
+                                if (serversArr != null) {
+                                    for (j in 0 until serversArr.length()) {
+                                        val sObj = serversArr.optJSONObject(j) ?: continue
+                                        servers.add(
+                                            com.example.data.model.StreamServer(
+                                                name = sObj.optString("name"),
+                                                url = sObj.optString("url")
+                                            )
+                                        )
+                                    }
+                                }
+
+                                list.add(
+                                    com.example.data.model.LiveMatch(
+                                        id = id,
+                                        title = title,
+                                        sportCategory = sportCategory,
+                                        tournament = tournament,
+                                        teamA = teamA,
+                                        teamB = teamB,
+                                        bannerUrl = bannerUrl,
+                                        status = status,
+                                        startTime = startTime,
+                                        badgeText = badgeText,
+                                        servers = servers
+                                    )
+                                )
                             }
-                            _sportsEventsState.value = UiState.Success(list)
                         } else {
-                            _sportsEventsState.value = UiState.Error("Server returned ok=false")
+                            val json = org.json.JSONObject(body)
+                            val keys = json.keys()
+                            while (keys.hasNext()) {
+                                val key = keys.next()
+                                val obj = json.optJSONObject(key) ?: continue
+                                if (!obj.optBoolean("isActive", true)) continue
+
+                                val id = obj.optString("id", key)
+                                val title = obj.optString("title")
+                                val sportCategory = obj.optString("sportCategory")
+                                val tournament = obj.optString("tournament", null)
+                                val bannerUrl = obj.optString("bannerUrl", null)
+                                val status = obj.optString("status")
+                                val startTime = obj.optString("startTime", null)
+                                val badgeText = obj.optString("badgeText", null)
+
+                                val teamAObj = obj.optJSONObject("teamA")
+                                val teamA = if (teamAObj != null) {
+                                    com.example.data.model.Team(
+                                        name = teamAObj.optString("name"),
+                                        logo = teamAObj.optString("logo", null),
+                                        score = teamAObj.optString("score", null)
+                                    )
+                                } else {
+                                    com.example.data.model.Team("Team A", null, null)
+                                }
+
+                                val teamBObj = obj.optJSONObject("teamB")
+                                val teamB = if (teamBObj != null) {
+                                    com.example.data.model.Team(
+                                        name = teamBObj.optString("name"),
+                                        logo = teamBObj.optString("logo", null),
+                                        score = teamBObj.optString("score", null)
+                                    )
+                                } else {
+                                    com.example.data.model.Team("Team B", null, null)
+                                }
+
+                                val serversArr = obj.optJSONArray("servers")
+                                val servers = mutableListOf<com.example.data.model.StreamServer>()
+                                if (serversArr != null) {
+                                    for (j in 0 until serversArr.length()) {
+                                        val sObj = serversArr.optJSONObject(j) ?: continue
+                                        servers.add(
+                                            com.example.data.model.StreamServer(
+                                                name = sObj.optString("name"),
+                                                url = sObj.optString("url")
+                                            )
+                                        )
+                                    }
+                                }
+
+                                list.add(
+                                    com.example.data.model.LiveMatch(
+                                        id = id,
+                                        title = title,
+                                        sportCategory = sportCategory,
+                                        tournament = tournament,
+                                        teamA = teamA,
+                                        teamB = teamB,
+                                        bannerUrl = bannerUrl,
+                                        status = status,
+                                        startTime = startTime,
+                                        badgeText = badgeText,
+                                        servers = servers
+                                    )
+                                )
+                            }
                         }
+                        _sportsEventsState.value = UiState.Success(list)
                     } else {
                         _sportsEventsState.value = UiState.Error("Failed to fetch sports events: code ${response.code}")
                     }
@@ -359,7 +525,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 client.newCall(req).execute().use { response ->
                     val body = response.body?.string()
                     if (response.isSuccessful && body != null) {
-                        val arr = org.json.JSONArray(body)
+                        val json = org.json.JSONObject(body)
+                        val arr = json.optJSONArray("channels") ?: org.json.JSONArray()
                         val list = mutableListOf<com.example.data.model.SportChannel>()
                         for (i in 0 until arr.length()) {
                             val obj = arr.optJSONObject(i) ?: continue

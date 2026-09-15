@@ -1200,17 +1200,37 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        HomeAirTvBrandingHeader(
-                            selectedPlaylistName = selectedPlaylist?.name,
-                            modifier = Modifier.weight(1f, fill = false),
-                            clickTrigger = screenClickCount
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            HomeAirTvBrandingHeader(
+                                selectedPlaylistName = if (isSportsViewMode) "Sports Zone" else selectedPlaylist?.name,
+                                modifier = Modifier,
+                                clickTrigger = screenClickCount
+                            )
+                        }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             val isIptvView = isLiveTvViewMode || selectedPlaylist != null
+
+                            if (isSportsViewMode) {
+                                IconButton(
+                                    onClick = { viewModel.fetchSportsData() },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Refresh",
+                                        tint = homeIconTint,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
 
         // Universal Fuzzy Search Results Overlay
         AnimatedVisibility(
