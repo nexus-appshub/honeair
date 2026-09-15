@@ -569,23 +569,39 @@ object AnikotoScraper {
         preferDub: Boolean = false
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
+            val effectiveEp = if (episode <= 0) 1 else episode
             val audioType = if (preferDub) "dub" else "sub"
             val cleanTitle = sanitizeSearchTitle(title)
-            Log.d(TAG, "Initiating Anime API stream fetch for: $cleanTitle (S$season Ep $episode, audio: $audioType)")
+            Log.d(TAG, "Initiating Anime API stream fetch for: $cleanTitle (S$season Ep $effectiveEp, audio: $audioType)")
 
             // Call primary API stream endpoint
-            val apiUrl = buildStreamGetUrl(title = cleanTitle, episode = episode, type = audioType)
+            val apiUrl = buildStreamGetUrl(title = cleanTitle, episode = effectiveEp, type = audioType)
             var json = fetchJson(apiUrl)
 
-            // If exact query returned no stream, try fallback with clean base title
+            // Fallback 1: If exact query returned no stream, try fallback with clean base title
             if (json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) {
                 val fallbackWords = cleanTitle.split(" ").filter { it.isNotBlank() }
                 if (fallbackWords.size > 2) {
                     val fallbackTitle = fallbackWords.take(2).joinToString(" ")
                     Log.d(TAG, "Attempting Fallback Anime API stream fetch: $fallbackTitle")
-                    val fallbackUrl = buildStreamGetUrl(title = fallbackTitle, episode = episode, type = audioType)
+                    val fallbackUrl = buildStreamGetUrl(title = fallbackTitle, episode = effectiveEp, type = audioType)
                     json = fetchJson(fallbackUrl)
                 }
+            }
+
+            // Fallback 2: Try raw uncleaned title if cleanTitle failed
+            if (json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) {
+                if (title != cleanTitle) {
+                    val rawUrl = buildStreamGetUrl(title = title, episode = effectiveEp, type = audioType)
+                    json = fetchJson(rawUrl)
+                }
+            }
+
+            // Fallback 3: For Episode 1, if preferred audio type returned null, try alternate audio type (sub/dub)
+            if ((json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) && effectiveEp == 1) {
+                val altType = if (audioType == "sub") "dub" else "sub"
+                val altUrl = buildStreamGetUrl(title = cleanTitle, episode = 1, type = altType)
+                json = fetchJson(altUrl)
             }
 
             if (json != null && json.optBoolean("success") == true) {
@@ -609,6 +625,25 @@ object AnikotoScraper {
                         )
                     }
                 }
+            }
+
+            // Fallback 4: Extract from available servers directly if API endpoint returned no stream
+            try {
+                val serverGroup = fetchAvailableServers(title = cleanTitle, season = season, episode = effectiveEp)
+                val firstServer = serverGroup.subServers.firstOrNull() ?: serverGroup.dubServers.firstOrNull()
+                if (firstServer != null) {
+                    val serverStream = extractStreamFromServer(firstServer)
+                    if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
+                        return@withContext ScrapedStreamResult(
+                            streamUrl = serverStream.streamUrl,
+                            headers = serverStream.headers,
+                            referer = serverStream.referer,
+                            subtitles = serverStream.subtitles
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Available servers extraction error: ${e.message}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "getStreamByTitle error: ${e.message}", e)

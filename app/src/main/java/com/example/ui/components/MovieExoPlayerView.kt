@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import android.app.Activity
 import android.content.Context
+import android.widget.Toast
 import android.media.AudioManager
 import android.net.Uri
 import android.view.ViewGroup
@@ -995,6 +996,29 @@ fun MovieExoPlayerView(
                             )
                         }
 
+                        // Floating Player PiP Button
+                        IconButton(
+                            onClick = {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    activity?.enterPictureInPictureMode(
+                                        android.app.PictureInPictureParams.Builder().build()
+                                    )
+                                } else {
+                                    Toast.makeText(context, "Floating mode requires Android 8.0+", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier
+                                .size(if (isFullScreen) 32.dp else 28.dp)
+                                .testTag("floating_pip_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PictureInPictureAlt,
+                                contentDescription = "Floating Player Mode",
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(if (isFullScreen) 20.dp else 18.dp)
+                            )
+                        }
+
                         // Fullscreen Toggle
                         IconButton(
                             onClick = onFullScreenToggle,
@@ -1225,6 +1249,60 @@ fun MovieExoPlayerView(
                                         contentDescription = "Open Servers",
                                         tint = Color.Gray,
                                         modifier = Modifier.size(14.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Option 3: Floating Player Mode
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.06f))
+                                        .clickable {
+                                            showSettingsMenu = false
+                                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                                activity?.enterPictureInPictureMode(
+                                                    android.app.PictureInPictureParams.Builder().build()
+                                                )
+                                            } else {
+                                                Toast.makeText(context, "Floating mode requires Android 8.0+", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PictureInPictureAlt,
+                                            contentDescription = "Floating Player Mode",
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "Floating Player Mode",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = "Pop out into floating window player",
+                                                color = Color.Gray,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.PictureInPictureAlt,
+                                        contentDescription = "PiP",
+                                        tint = Color(0xFF00E5FF),
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }

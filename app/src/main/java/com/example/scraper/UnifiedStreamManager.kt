@@ -29,7 +29,8 @@ object UnifiedStreamManager {
         episode: Int = 1,
         isAnime: Boolean = false
     ): ScrapedStreamResult? {
-        val cacheKey = "$tmdbId-$season-$episode"
+        val effectiveEpisode = if (episode <= 0) 1 else episode
+        val cacheKey = "$tmdbId-$season-$effectiveEpisode"
         streamCache[cacheKey]?.let {
             if (it.streamUrl.isNotBlank()) return it
         }
@@ -73,11 +74,11 @@ object UnifiedStreamManager {
                 } else {
                     title
                 }
-                Log.d(TAG, "Tier 0: Querying Anime API Resolver for $lookupKey (S$season Ep$episode)...")
+                Log.d(TAG, "Tier 0: Querying Anime API Resolver for $lookupKey (S$season Ep$effectiveEpisode)...")
                 val animeStream = AnikotoScraper.getStreamByTitle(
                     title = lookupKey,
                     season = season,
-                    episode = episode
+                    episode = effectiveEpisode
                 )
                 if (animeStream != null && animeStream.streamUrl.isNotEmpty()) {
                     Log.d(TAG, "Tier 0: Anime stream resolved successfully via API: ${animeStream.streamUrl}")
@@ -91,7 +92,7 @@ object UnifiedStreamManager {
         }
 
         var finalTmdbId = tmdbId.trim()
-        var effectiveIsTv = isTv
+        var effectiveIsTv = if (isAnime && !cleanTitle.lowercase().contains("movie")) true else isTv
         var resolvedImdbId: String? = if (finalTmdbId.startsWith("tt")) finalTmdbId else null
 
         if (finalTmdbId.startsWith("movie_")) {

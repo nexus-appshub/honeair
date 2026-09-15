@@ -835,6 +835,29 @@ fun ExoPlayerView(
                             )
                         }
 
+                        // Floating Player PiP Button
+                        FluidIconButton(
+                            onClick = {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    val activity = context as? android.app.Activity
+                                    activity?.enterPictureInPictureMode(
+                                        android.app.PictureInPictureParams.Builder().build()
+                                    )
+                                } else {
+                                    Toast.makeText(context, "Floating mode requires Android 8.0+", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier
+                                .size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PictureInPictureAlt,
+                                contentDescription = "Floating Player Mode",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
 
 
                         // Aspect Ratio Switcher

@@ -304,7 +304,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         return false
     }
 
+    private var hasDismissedAppNoticeInSession = false
+
     fun dismissAppNotice() {
+        hasDismissedAppNoticeInSession = true
         val current = _appControlConfig.value ?: return
         _appControlConfig.value = current.copy(notice = null)
     }
@@ -374,7 +377,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 isAppSuspended = isSuspended,
                                 suspensionTitle = suspensionTitle,
                                 suspensionMessage = suspensionMessage,
-                                notice = notice,
+                                notice = if (hasDismissedAppNoticeInSession) null else notice,
                                 isSportsTabLocked = isSportsLocked,
                                 sportsTabStatusText = sportsStatus,
                                 sportsLockReason = sportsReason,
