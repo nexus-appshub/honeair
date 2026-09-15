@@ -91,7 +91,12 @@ data class AppControlConfig(
     val isAdsEnabled: Boolean = false,
     val adBannerUrl: String = "",
     val adClickUrl: String = "",
-    val adTitle: String = "Sponsored: Upgrade to VIP to Remove Ads"
+    val adTitle: String = "Sponsored: Upgrade to VIP to Remove Ads",
+    val redeemCode: String = "",
+    val redeemValidityHours: Int = 24,
+    val redeemExpiryTimestamp: Long = 0L,
+    val premiumLiveTvIds: List<String> = emptyList(),
+    val premiumLiveTvCategories: List<String> = emptyList()
 )
 
 class StreamViewModel(application: Application) : AndroidViewModel(application) {
@@ -152,7 +157,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
                 sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
                 fancodeCode = p.getString("fancodeCode", "") ?: "",
-                isFanCodeLocked = p.getBoolean("isFanCodeLocked", false)
+                isFanCodeLocked = p.getBoolean("isFanCodeLocked", false),
+                redeemCode = p.getString("redeemCode", "") ?: "",
+                redeemValidityHours = p.getInt("redeemValidityHours", 24),
+                redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L)
             )
         } else null
     )
@@ -348,8 +356,77 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _showPremiumPaywall.value = show
     }
 
+    fun getRedeemUnlockExpiry(): Long {
+        return sharedPrefs.getLong("redeem_unlocked_until", 0L)
+    }
+
+    fun isRedeemCodeActive(userEmail: String?): Boolean {
+        val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
+        if (cleanEmail.isBlank()) return false
+        
+        val unlockedUntil = sharedPrefs.getLong("redeem_unlocked_until", 0L)
+        val unlockedUser = sharedPrefs.getString("redeem_unlocked_user", "") ?: ""
+        
+        if (unlockedUser.trim().lowercase() != cleanEmail) {
+            return false
+        }
+        
+        return System.currentTimeMillis() < unlockedUntil
+    }
+
+    enum class RedeemResult {
+        SUCCESS,
+        NOT_LOGGED_IN,
+        INVALID_CODE,
+        EXPIRED_CODE
+    }
+
+    fun applyRedeemCode(code: String, userEmail: String?): RedeemResult {
+        val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
+        if (cleanEmail.isBlank()) {
+            return RedeemResult.NOT_LOGGED_IN
+        }
+
+        val config = _appControlConfig.value
+        val websiteRedeemCode = config?.redeemCode ?: ""
+        val websiteFanCode = config?.fancodeCode ?: ""
+
+        val entered = code.trim()
+        if (entered.isBlank()) {
+            return RedeemResult.INVALID_CODE
+        }
+
+        val isMatch = (websiteRedeemCode.isNotBlank() && entered.equals(websiteRedeemCode, ignoreCase = true)) ||
+                      (websiteFanCode.isNotBlank() && entered.equals(websiteFanCode, ignoreCase = true))
+
+        if (!isMatch) {
+            return RedeemResult.INVALID_CODE
+        }
+
+        val expiryTimestamp = config?.redeemExpiryTimestamp ?: 0L
+        if (expiryTimestamp > 0L && System.currentTimeMillis() > expiryTimestamp) {
+            return RedeemResult.EXPIRED_CODE
+        }
+
+        val validityHours = config?.redeemValidityHours ?: 24
+        val validityMs = validityHours * 60 * 60 * 1000L
+        var unlockUntil = System.currentTimeMillis() + validityMs
+        if (expiryTimestamp > 0L) {
+            unlockUntil = unlockUntil.coerceAtMost(expiryTimestamp)
+        }
+
+        sharedPrefs.edit()
+            .putLong("redeem_unlocked_until", unlockUntil)
+            .putString("redeem_unlocked_user", cleanEmail)
+            .putString("redeem_unlocked_code", entered)
+            .apply()
+
+        return RedeemResult.SUCCESS
+    }
+
     fun isUserPremium(userEmail: String?): Boolean {
         if (com.example.subscription.SubscriptionManager.isVipUser()) return true
+        if (isRedeemCodeActive(userEmail)) return true
         val config = _appControlConfig.value
         val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
         if (cleanEmail.isBlank()) return false
@@ -501,6 +578,26 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val adClickUrl = json.optString("adClickUrl", "")
                             val adTitle = json.optString("adTitle", "Sponsored: Upgrade to VIP to Remove Ads")
 
+                            val redeemCode = json.optString("redeemCode", "").ifBlank { json.optString("redeem_code", "") }
+                            val redeemValidityHours = json.optInt("redeemValidityHours", 24)
+                            val redeemExpiryTimestamp = json.optLong("redeemExpiryTimestamp", 0L)
+
+                            val premiumLiveTvIds = mutableListOf<String>()
+                            val jsonLiveTvIds = json.optJSONArray("premiumLiveTvIds")
+                            if (jsonLiveTvIds != null) {
+                                for (i in 0 until jsonLiveTvIds.length()) {
+                                    premiumLiveTvIds.add(jsonLiveTvIds.optString(i))
+                                }
+                            }
+
+                            val premiumLiveTvCategories = mutableListOf<String>()
+                            val jsonLiveTvCats = json.optJSONArray("premiumLiveTvCategories")
+                            if (jsonLiveTvCats != null) {
+                                for (i in 0 until jsonLiveTvCats.length()) {
+                                    premiumLiveTvCategories.add(jsonLiveTvCats.optString(i))
+                                }
+                            }
+
                             val noticeObj = json.optJSONObject("notice")
                             val notice = if (noticeObj != null) {
                                 AppNotice(
@@ -524,6 +621,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putString("sportsLockReason", sportsReason)
                                     .putString("fancodeCode", fancodeCode)
                                     .putBoolean("isFanCodeLocked", isFanCodeLocked)
+                                    .putString("redeemCode", redeemCode)
+                                    .putInt("redeemValidityHours", redeemValidityHours)
+                                    .putLong("redeemExpiryTimestamp", redeemExpiryTimestamp)
                                     .apply()
                             } catch (e: Throwable) {
                                 Log.e("StreamViewModel", "Error saving control preferences", e)
@@ -552,7 +652,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 isAdsEnabled = isAdsEnabled,
                                 adBannerUrl = adBannerUrl,
                                 adClickUrl = adClickUrl,
-                                adTitle = adTitle
+                                adTitle = adTitle,
+                                redeemCode = redeemCode,
+                                redeemValidityHours = redeemValidityHours,
+                                redeemExpiryTimestamp = redeemExpiryTimestamp,
+                                premiumLiveTvIds = premiumLiveTvIds,
+                                premiumLiveTvCategories = premiumLiveTvCategories
                             )
 
                             // Synchronize SubscriptionManager with remote config
@@ -2667,17 +2772,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val cleanUrl = channel.url.trim()
         val cleanGroup = channel.group.trim().lowercase()
         
-        // 1. Check if group is in premium categories or locked tabs
-        if (cleanGroup.isNotBlank() && (config.premiumCategories.contains(cleanGroup) || config.lockedTabs.contains(cleanGroup))) {
+        // 1. Check if group is in specific live tv premium categories
+        if (cleanGroup.isNotBlank() && config.premiumLiveTvCategories.any { cleanGroup.contains(it.lowercase()) }) {
             return true
         }
         
-        // 2. Check if name or URL matches any premium media id
-        if (config.premiumMediaIds.any { cleanName.contains(it, ignoreCase = true) || cleanUrl.contains(it, ignoreCase = true) }) {
+        // 2. Check if name or URL matches any specific live tv premium IDs/names
+        if (config.premiumLiveTvIds.any { cleanName.contains(it, ignoreCase = true) || cleanUrl.contains(it, ignoreCase = true) }) {
             return true
         }
         
-        // 3. Check if name or URL is in local DB premiumMedia list
+        // 3. Fallback check if name or URL is in local DB premiumMedia list (manual toggle fallback)
         val premiumDbIds = premiumMedia.value.map { it.id }.toSet()
         if (premiumDbIds.any { cleanName.contains(it, ignoreCase = true) || cleanUrl.contains(it, ignoreCase = true) }) {
             return true

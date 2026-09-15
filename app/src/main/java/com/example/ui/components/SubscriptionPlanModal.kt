@@ -76,6 +76,15 @@ import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.SpaceBlack
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.viewmodel.StreamViewModel
+import com.example.ui.viewmodel.UserProfile
 
 data class PlanOption(
     val id: String,
@@ -95,6 +104,8 @@ fun SubscriptionPlanModal(
     if (!isVisible) return
 
     val context = LocalContext.current
+    val viewModel: StreamViewModel = viewModel()
+    val userProfile by viewModel.userProfile.collectAsState()
     val isPremium by SubscriptionManager.isPremium.collectAsState()
     val isExpired by SubscriptionManager.isExpired.collectAsState()
     val currentPlan by SubscriptionManager.subscriptionPlan.collectAsState()
@@ -781,12 +792,14 @@ fun SubscriptionPlanModal(
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                         ) {
                             Text(
-                                text = "Or Pay via Website / Apps Hub",
+                                 text = "Or Pay via Website / Apps Hub",
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 12.sp
                             )
                         }
                     }
+
+                    RedeemCodeSection(viewModel, userProfile)
 
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -797,6 +810,142 @@ fun SubscriptionPlanModal(
                         textAlign = TextAlign.Center
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun RedeemCodeSection(
+    viewModel: com.example.ui.viewmodel.StreamViewModel,
+    userProfile: com.example.ui.viewmodel.UserProfile?
+) {
+    var codeText by remember { mutableStateOf("") }
+    var redeemMessage by remember { mutableStateOf("") }
+    var redeemSuccess by remember { mutableStateOf<Boolean?>(null) }
+
+    val isUserLoggedIn = userProfile != null
+    val userEmail = userProfile?.email
+
+    Spacer(modifier = Modifier.height(18.dp))
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF141923),
+        border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.25f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ConfirmationNumber,
+                    contentDescription = null,
+                    tint = Color(0xFFFFD700),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Apply Promo / Redeem Code",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = Color.White
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (!isUserLoggedIn) {
+                Text(
+                    text = "⚠️ You must login to apply redeem codes.",
+                    fontSize = 11.sp,
+                    color = Color(0xFFFF8C00),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    BasicTextField(
+                        value = codeText,
+                        onValueChange = { codeText = it },
+                        textStyle = LocalTextStyle.current.copy(color = Color.White, fontSize = 13.sp),
+                        cursorBrush = SolidColor(Color(0xFFFFD700)),
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(Color(0xFF1C2434), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0xFF2D3748), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        decorationBox = { innerTextField ->
+                            if (codeText.isEmpty()) {
+                                Text(
+                                    text = "Enter code...",
+                                    color = Color.Gray,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+
+                    Button(
+                        onClick = {
+                            if (codeText.isNotBlank()) {
+                                val result = viewModel.applyRedeemCode(codeText, userEmail)
+                                when (result) {
+                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.SUCCESS -> {
+                                        redeemSuccess = true
+                                        val exp = viewModel.getRedeemUnlockExpiry()
+                                        val dateStr = java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(exp))
+                                        redeemMessage = "Successfully Activated! VIP Premium is unlocked until: $dateStr"
+                                        codeText = ""
+                                    }
+                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.INVALID_CODE -> {
+                                        redeemSuccess = false
+                                        redeemMessage = "Invalid code! Please check and try again."
+                                    }
+                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.EXPIRED_CODE -> {
+                                        redeemSuccess = false
+                                        redeemMessage = "This redeem code has expired."
+                                    }
+                                    com.example.ui.viewmodel.StreamViewModel.RedeemResult.NOT_LOGGED_IN -> {
+                                        redeemSuccess = false
+                                        redeemMessage = "Please login first."
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFFD700),
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text("Apply", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (redeemMessage.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = redeemMessage,
+                    color = if (redeemSuccess == true) Color(0xFF4CAF50) else Color(0xFFF44336),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }

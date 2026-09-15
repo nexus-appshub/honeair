@@ -59,6 +59,7 @@ import com.example.ui.components.FloatingHomaiButton
 import com.example.ui.components.GlowCapsuleNavigationBar
 import com.example.ui.components.HomaiChatSheet
 import com.example.ui.components.MultiFloatingPlayerOverlay
+import com.example.ui.components.RedeemCodeSection
 import com.example.ui.components.NavigationNavItem
 import com.example.ui.screens.*
 import com.example.ui.theme.BorderColor
@@ -1222,6 +1223,8 @@ fun PremiumPaywallDialog(
     message: String,
     buttonText: String,
     buttonUrl: String,
+    viewModel: StreamViewModel,
+    userProfile: com.example.ui.viewmodel.UserProfile?,
     onDismiss: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1270,6 +1273,8 @@ fun PremiumPaywallDialog(
                     color = Color.LightGray,
                     textAlign = TextAlign.Center
                 )
+
+                RedeemCodeSection(viewModel, userProfile)
 
                 Spacer(modifier = Modifier.height(24.dp))
 
