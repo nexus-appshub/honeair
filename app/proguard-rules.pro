@@ -9,6 +9,7 @@
 -keep class com.example.data.network.** { *; }
 -keep class com.example.data.model.** { *; }
 -keep class com.example.data.database.** { *; }
+-keep class com.example.data.api.** { *; }
 -keep class com.example.update.** { *; }
 -keep class com.example.download.** { *; }
 -keep class com.example.network.** { *; }
