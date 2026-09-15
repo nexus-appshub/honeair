@@ -177,7 +177,7 @@ object SubscriptionManager {
 
     private fun recomputeStatus(email: String?, uid: String?) {
         val cleanEmail = email?.trim()?.lowercase()
-        val isPrem = cleanEmail != null && synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
+        val isPrem = cleanEmail != null && cleanEmail != "xubilas.era@gmail.com" && synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
         _isPremium.value = isPrem
         _isExpired.value = false
         _expiryTimestamp.value = null

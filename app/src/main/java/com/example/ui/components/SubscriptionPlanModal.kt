@@ -523,19 +523,15 @@ fun SubscriptionPlanModal(
 
                         Spacer(modifier = Modifier.height(18.dp))
 
-                        // Action Button
+                        // Action Button - Pay via Website
                         Button(
                             onClick = {
-                                if (isMobilePaymentEnabled) {
-                                    showPaymentGuideStep = true
-                                } else {
-                                    val urlToOpen = liveVipConfig?.externalPaymentUrl ?: checkoutUrl
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                    }
+                                val urlToOpen = liveVipConfig?.externalPaymentUrl ?: checkoutUrl
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen))
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
                                 }
                             },
                             modifier = Modifier
@@ -548,18 +544,14 @@ fun SubscriptionPlanModal(
                             )
                         ) {
                             Icon(
-                                imageVector = if (isMobilePaymentEnabled) Icons.Default.WorkspacePremium else Icons.Default.OpenInNew,
+                                imageVector = Icons.Default.OpenInNew,
                                 contentDescription = null,
                                 tint = Color.Black,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isMobilePaymentEnabled) {
-                                    if (isExpired) "Renew Now (${chosenPlan.price})" else "Subscribe Now (${chosenPlan.price})"
-                                } else {
-                                    "Pay on Website"
-                                },
+                                text = "Pay via Website (${chosenPlan.price})",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
                             )

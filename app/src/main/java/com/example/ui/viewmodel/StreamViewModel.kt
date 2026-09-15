@@ -450,7 +450,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val config = _appControlConfig.value
         val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
         if (cleanEmail.isBlank()) return false
-        if (cleanEmail.contains("admin") || cleanEmail == "xubilas.era@gmail.com") return true
+        if (cleanEmail.contains("admin")) return true
         return config?.premiumEmails?.any { it.trim().equals(cleanEmail, ignoreCase = true) } == true
     }
 
