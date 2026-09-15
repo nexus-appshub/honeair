@@ -93,7 +93,12 @@ class MainActivity : ComponentActivity() {
             val splashScreen = installSplashScreen()
             var isSplashKeepOn = true
             lifecycleScope.launch {
-                kotlinx.coroutines.delay(350)
+                val start = System.currentTimeMillis()
+                // Keep splash until initial remote suspension check finishes or max 700ms timeout
+                while (System.currentTimeMillis() - start < 700) {
+                    if (viewModel.isInitialControlChecked.value) break
+                    kotlinx.coroutines.delay(50)
+                }
                 isSplashKeepOn = false
             }
             splashScreen.setKeepOnScreenCondition { isSplashKeepOn }
@@ -266,13 +271,15 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
     }
 
     val appControlConfig by viewModel.appControlConfig.collectAsState()
+    val isCheckingSuspension by viewModel.isCheckingSuspension.collectAsState()
 
     // Full screen kill-switch / suspension screen if enabled remotely
     appControlConfig?.let { config ->
         if (config.isAppSuspended) {
             AppSuspendedScreen(
                 config = config,
-                onRetry = { viewModel.fetchSportsData() }
+                isChecking = isCheckingSuspension,
+                onRetry = { viewModel.fetchAppControlConfig() }
             )
             return
         }
@@ -686,6 +693,7 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
 @Composable
 fun AppSuspendedScreen(
     config: com.example.ui.viewmodel.AppControlConfig,
+    isChecking: Boolean = false,
     onRetry: () -> Unit
 ) {
     Surface(
@@ -716,6 +724,23 @@ fun AppSuspendedScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0x33FF3B30),
+                border = BorderStroke(1.dp, Color(0x66FF3B30))
+            ) {
+                Text(
+                    text = "MAINTENANCE MODE",
+                    color = Color(0xFFFF453A),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                    letterSpacing = 1.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text(
                 text = config.suspensionTitle,
                 style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
@@ -727,7 +752,7 @@ fun AppSuspendedScreen(
 
             Text(
                 text = config.suspensionMessage,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
                 color = Color(0xFFA1A1AA),
                 textAlign = TextAlign.Center
             )
@@ -736,19 +761,33 @@ fun AppSuspendedScreen(
 
             Button(
                 onClick = onRetry,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                enabled = !isChecking,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFF6B00),
+                    disabledContainerColor = Color(0x80FF6B00)
+                ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(50.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh",
-                    tint = Color.White
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Check Status Again", color = Color.White, fontWeight = FontWeight.Bold)
+                if (isChecking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Checking Server Status...", color = Color.White, fontWeight = FontWeight.Bold)
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Refresh & Check Again", color = Color.White, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }

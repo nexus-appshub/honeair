@@ -95,7 +95,7 @@ object AppTranslation {
         "step_4_desc" -> "If an external web ad appears on third-party embed servers, close the player once and re-open to stream smoothly."
         "step_5_title" -> "5. Fast Downloads"
         "step_5_desc" -> "Tap the Download icon in the player bar to initiate direct background video download."
-        "email_support" -> "Email Support: xubilas.era@gmail.com"
+        "email_support" -> "Email Support: hmairtv@gmail.com"
         else -> key
     }
 
@@ -142,7 +142,7 @@ object AppTranslation {
         "step_4_desc" -> "বাহ্যিক ওয়েব সার্ভারে কোনো পপ-আপ বিজ্ঞাপন এলে প্লেয়ারটি একবার ক্লোজ করে পুনরায় ওপেন করলেই ভিডিও স্মুথলি চলবে।"
         "step_5_title" -> "৫. দ্রুত ভিডিও ডাউনলোড"
         "step_5_desc" -> "প্লেয়ারের ডাউনলোড আইকনে ট্যাপ করে যেকোনো সার্ভার থেকে সরাসরি ভিডিও ডাউনলোড করতে পারেন।"
-        "email_support" -> "ইমেইল সাপোর্ট: xubilas.era@gmail.com"
+        "email_support" -> "ইমেইল সাপোর্ট: hmairtv@gmail.com"
         else -> getEnglish(key)
     }
 

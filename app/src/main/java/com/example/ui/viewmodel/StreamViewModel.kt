@@ -262,8 +262,31 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _useCircularChannelsLayout.value = !_useCircularChannelsLayout.value
     }
 
-    // Sports state variables
-    private val _appControlConfig = MutableStateFlow<AppControlConfig?>(null)
+    // Sports & Remote App Control state variables
+    private val controlPrefs by lazy {
+        application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
+    }
+
+    private val _isCheckingSuspension = MutableStateFlow(false)
+    val isCheckingSuspension: StateFlow<Boolean> = _isCheckingSuspension.asStateFlow()
+
+    private val _isInitialControlChecked = MutableStateFlow(false)
+    val isInitialControlChecked: StateFlow<Boolean> = _isInitialControlChecked.asStateFlow()
+
+    private val _appControlConfig = MutableStateFlow<AppControlConfig?>(
+        if (application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE).contains("isAppSuspended")) {
+            val p = application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
+            AppControlConfig(
+                isAppSuspended = p.getBoolean("isAppSuspended", false),
+                suspensionTitle = p.getString("suspensionTitle", "App Under Maintenance") ?: "App Under Maintenance",
+                suspensionMessage = p.getString("suspensionMessage", "App access is temporarily suspended by administrator. Please check back later.") ?: "App access is temporarily suspended by administrator. Please check back later.",
+                isSportsTabLocked = p.getBoolean("isSportsTabLocked", false),
+                sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
+                sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
+                fancodeCode = p.getString("fancodeCode", "") ?: ""
+            )
+        } else null
+    )
     val appControlConfig: StateFlow<AppControlConfig?> = _appControlConfig.asStateFlow()
 
     private val _isSportsUnlockedLocally = MutableStateFlow(false)
@@ -286,23 +309,14 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _appControlConfig.value = current.copy(notice = null)
     }
 
-    private val _sportsEventsState = MutableStateFlow<UiState<List<com.example.data.model.LiveMatch>>>(UiState.Loading)
-    val sportsEventsState: StateFlow<UiState<List<com.example.data.model.LiveMatch>>> = _sportsEventsState.asStateFlow()
-
-    private val _sportsChannelsState = MutableStateFlow<UiState<List<com.example.data.model.SportChannel>>>(UiState.Loading)
-    val sportsChannelsState: StateFlow<UiState<List<com.example.data.model.SportChannel>>> = _sportsChannelsState.asStateFlow()
-
-    fun fetchSportsData() {
+    fun fetchAppControlConfig(onComplete: (() -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
-            _sportsEventsState.value = UiState.Loading
-            _sportsChannelsState.value = UiState.Loading
-            
+            _isCheckingSuspension.value = true
             val client = okhttp3.OkHttpClient.Builder()
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
                 .build()
 
-            // 0. Fetch App Remote Control Config / Kill Switch / Notice / Lock (Serverless direct Firebase RTDB prioritized)
             val controlUrls = listOf(
                 "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl.json",
                 "https://homeairtv.vercel.app/appControl.json",
@@ -323,7 +337,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val json = org.json.JSONObject(body)
                             val isSuspended = json.optBoolean("isAppSuspended", false)
                             val suspensionTitle = json.optString("suspensionTitle", "App Under Maintenance")
-                            val suspensionMessage = json.optString("suspensionMessage", "App access is temporarily suspended by administrator.")
+                            val suspensionMessage = json.optString("suspensionMessage", "App access is temporarily suspended by administrator. Please check back later.")
                             val isSportsLocked = json.optBoolean("isSportsTabLocked", false)
                             val sportsStatus = json.optString("sportsTabStatusText", "Live")
                             val sportsReason = json.optString("sportsLockReason", "Sports hub is currently locked by administrator.")
@@ -341,6 +355,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 )
                             } else null
 
+                            // Cache to SharedPreferences for instant cold-boot enforcement
+                            try {
+                                controlPrefs.edit()
+                                    .putBoolean("isAppSuspended", isSuspended)
+                                    .putString("suspensionTitle", suspensionTitle)
+                                    .putString("suspensionMessage", suspensionMessage)
+                                    .putBoolean("isSportsTabLocked", isSportsLocked)
+                                    .putString("sportsTabStatusText", sportsStatus)
+                                    .putString("sportsLockReason", sportsReason)
+                                    .putString("fancodeCode", fancodeCode)
+                                    .apply()
+                            } catch (e: Throwable) {
+                                Log.e("StreamViewModel", "Error saving control preferences", e)
+                            }
+
                             _appControlConfig.value = AppControlConfig(
                                 isAppSuspended = isSuspended,
                                 suspensionTitle = suspensionTitle,
@@ -351,6 +380,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 sportsLockReason = sportsReason,
                                 fancodeCode = fancodeCode
                             )
+
+                            // If app was suspended while user is streaming or watching, immediately kill playback
+                            if (isSuspended) {
+                                withContext(Dispatchers.Main) {
+                                    setMediaPlaying(false)
+                                    setPlayerPlaying(false)
+                                    _activeChannel.value = null
+                                    _activeMediaItem.value = null
+                                }
+                            }
+
                             configLoaded = true
                         }
                     }
@@ -358,6 +398,32 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     Log.e("StreamViewModel", "Error fetching app control config from $urlStr", e)
                 }
             }
+            _isCheckingSuspension.value = false
+            _isInitialControlChecked.value = true
+            withContext(Dispatchers.Main) {
+                onComplete?.invoke()
+            }
+        }
+    }
+
+    private val _sportsEventsState = MutableStateFlow<UiState<List<com.example.data.model.LiveMatch>>>(UiState.Loading)
+    val sportsEventsState: StateFlow<UiState<List<com.example.data.model.LiveMatch>>> = _sportsEventsState.asStateFlow()
+
+    private val _sportsChannelsState = MutableStateFlow<UiState<List<com.example.data.model.SportChannel>>>(UiState.Loading)
+    val sportsChannelsState: StateFlow<UiState<List<com.example.data.model.SportChannel>>> = _sportsChannelsState.asStateFlow()
+
+    fun fetchSportsData() {
+        // Sync app remote control first
+        fetchAppControlConfig()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _sportsEventsState.value = UiState.Loading
+            _sportsChannelsState.value = UiState.Loading
+            
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
 
             // 1. Fetch Sports Events (using Firebase Realtime Database)
             try {
@@ -1015,6 +1081,14 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         sharedPrefs.edit().putBoolean("setting_battery_saver_mode", value).apply()
     }
 
+    private val _maxFloatingPlayers = MutableStateFlow(sharedPrefs.getInt("setting_max_floating_players", 2))
+    val maxFloatingPlayers: StateFlow<Int> = _maxFloatingPlayers.asStateFlow()
+    fun setMaxFloatingPlayers(count: Int) {
+        val clamped = count.coerceIn(2, 6)
+        _maxFloatingPlayers.value = clamped
+        sharedPrefs.edit().putInt("setting_max_floating_players", clamped).apply()
+    }
+
     init {
         try {
             com.example.ui.theme.currentThemeIndex.value = _themeIndex.value
@@ -1048,8 +1122,23 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
             // Check for AppsHub Store App Updates
             checkForAppUpdates(application)
+
+            // Check App Remote Control & Kill-Switch immediately at app launch
+            fetchAppControlConfig()
         } catch (e: Throwable) {
             Log.e("StreamViewModel", "Error initializing StreamViewModel", e)
+        }
+
+        // Periodic background poll for App Remote Control / Kill Switch (every 15 seconds)
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(15_000)
+                try {
+                    fetchAppControlConfig()
+                } catch (e: Throwable) {
+                    // Ignore transient network errors
+                }
+            }
         }
 
         // Periodic app update checker while app is open
@@ -1100,7 +1189,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             val email = fbUser.email ?: "firebase.user@gmail.com"
             val name = fbUser.displayName ?: email.substringBefore("@").replaceFirstChar { it.uppercase() }
             val photoUrl = fbUser.photoUrl?.toString() ?: "https://api.dicebear.com/7.x/bottts/svg?seed=$email"
-            val isAdmin = email.contains("admin") || email == "xubilas.era@gmail.com"
+            val isAdmin = email.contains("admin") || email == "xubilas.era@gmail.com" || email == "hmairtv@gmail.com"
 
             try {
                 firebaseAnalytics?.setUserId(email)
@@ -1725,7 +1814,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             val formattedEmail = email.trim().lowercase()
             val finalName = if (name.isNotBlank()) name else formattedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
             val finalAvatar = avatarUrl.ifEmpty { "https://api.dicebear.com/7.x/bottts/svg?seed=$formattedEmail" }
-            val isAdmin = formattedEmail.contains("admin") || formattedEmail == "xubilas.era@gmail.com"
+            val isAdmin = formattedEmail.contains("admin") || formattedEmail == "xubilas.era@gmail.com" || formattedEmail == "hmairtv@gmail.com"
             val finalUid = if (uid.isNotBlank()) uid else (firebaseAuth?.currentUser?.uid ?: "")
 
             sharedPrefs.edit()

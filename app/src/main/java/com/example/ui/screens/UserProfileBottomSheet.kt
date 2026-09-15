@@ -1,17 +1,23 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.SwitchAccount
+import androidx.compose.material.icons.outlined.Copyright
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -19,9 +25,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -34,7 +44,9 @@ fun UserProfileBottomSheet(
     onShowWebVersion: () -> Unit,
     onSwitchAccount: () -> Unit,
     onSignOut: () -> Unit,
-    onDeleteAccount: () -> Unit
+    onDeleteAccount: () -> Unit,
+    onShowCopyrightAlert: () -> Unit = {},
+    onShowFloatingPlayerLimit: () -> Unit = {}
 ) {
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val bgColor = if (isDark) Color(0xFF141416) else Color(0xFFF9F9FA)
@@ -125,6 +137,20 @@ fun UserProfileBottomSheet(
                 )
                 HorizontalDivider(color = borderColor)
                 UserProfileMenuItem(
+                    icon = Icons.Outlined.Shield,
+                    text = "Copyright Alert",
+                    onClick = { onDismiss(); onShowCopyrightAlert() },
+                    textColor = Color(0xFFFF6B00)
+                )
+                HorizontalDivider(color = borderColor)
+                UserProfileMenuItem(
+                    icon = Icons.Default.PictureInPictureAlt,
+                    text = "Multiple Floating Player Mode",
+                    onClick = { onDismiss(); onShowFloatingPlayerLimit() },
+                    textColor = Color(0xFF00E5FF)
+                )
+                HorizontalDivider(color = borderColor)
+                UserProfileMenuItem(
                     icon = Icons.Default.SwitchAccount,
                     text = "Switch Account",
                     onClick = { onDismiss(); onSwitchAccount() },
@@ -159,6 +185,168 @@ fun UserProfileBottomSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CopyrightBottomSheet(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1C1C1E)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Shield,
+                    contentDescription = "Copyright Disclaimer",
+                    tint = Color(0xFFFF6B00),
+                    modifier = Modifier.size(26.dp)
+                )
+                Text(
+                    text = "Copyright Disclaimer",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF2C2C2E),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    item {
+                        Text(
+                            text = "Copyright Disclaimer & Intellectual Property Notice",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+
+                    item {
+                        Text(
+                            text = "Home Air functions strictly as an indexing directory and media player utility. Home Air does not host, upload, broadcast, store, or retransmit any audio, video, or media content. All content streams, embedded links, and playlists indexed within this application are hosted by independent third-party servers and are publicly and freely accessible across the internet.",
+                            color = Color(0xFFD1D1D6),
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp
+                        )
+                    }
+
+                    item {
+                        Text(
+                            text = "All trademarks, registered service marks, logos, and copyrighted materials displayed or accessed through this application remain the exclusive property of their respective owners. Home Air claims no ownership, affiliation, or endorsement regarding any third-party content.",
+                            color = Color(0xFFD1D1D6),
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp
+                        )
+                    }
+
+                    item {
+                        HorizontalDivider(color = Color(0xFF3A3A3C))
+                    }
+
+                    item {
+                        Text(
+                            text = "Notice and Takedown Procedure:",
+                            color = Color(0xFFFF9E40),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    item {
+                        Text(
+                            text = "Home Air complies with applicable copyright regulations, including the Digital Millennium Copyright Act (DMCA). If you are a copyright holder or an authorized agent and believe that an indexed link infringes upon your intellectual property rights, please submit a written notice containing proof of ownership and the exact URL/content identifier to:",
+                            color = Color(0xFFD1D1D6),
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp
+                        )
+                    }
+
+                    item {
+                        Surface(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                        data = Uri.parse("mailto:hmairtv@gmail.com")
+                                        putExtra(Intent.EXTRA_SUBJECT, "DMCA / Copyright Infringement Notice")
+                                    }
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Email: hmairtv@gmail.com", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF222224),
+                            border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Email,
+                                    contentDescription = "Email",
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text("Contact Legal Email", color = Color.Gray, fontSize = 11.sp)
+                                    Text("hmairtv@gmail.com", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Text(
+                            text = "Upon receipt of a valid infringement notice, the referenced links will be investigated and removed expeditiously.",
+                            color = Color(0xFFD1D1D6),
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text("I Understand", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+    }
+}
+
 @Composable
 fun UserProfileMenuItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -186,5 +374,116 @@ fun UserProfileMenuItem(
             fontWeight = FontWeight.Medium,
             color = textColor
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FloatingPlayerLimitBottomSheet(
+    currentLimit: Int,
+    onSelectLimit: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1C1C1E)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PictureInPictureAlt,
+                    contentDescription = "Floating Player Mode",
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(26.dp)
+                )
+                Column {
+                    Text(
+                        text = "Multiple Floating Player Mode",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Select max concurrent active floating players (2 to 6 max)",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            val options = listOf(2, 3, 4, 5, 6)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                options.forEach { limit ->
+                    val isSelected = currentLimit == limit
+                    Surface(
+                        onClick = {
+                            onSelectLimit(limit)
+                            onDismiss()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color(0xFF2C2C2E),
+                        border = BorderStroke(1.dp, if (isSelected) Color(0xFF00E5FF) else Color(0xFF3A3A3C)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PictureInPictureAlt,
+                                    contentDescription = null,
+                                    tint = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "$limit Floating Players ${if (limit == 6) "(Max)" else if (limit == 2) "(Standard)" else ""}",
+                                        color = if (isSelected) Color(0xFF00E5FF) else Color.White,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "Allows playing up to $limit floating video players simultaneously",
+                                        color = Color.Gray,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    onSelectLimit(limit)
+                                    onDismiss()
+                                },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = Color(0xFF00E5FF),
+                                    unselectedColor = Color.Gray
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
     }
 }

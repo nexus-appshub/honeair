@@ -893,11 +893,14 @@ fun HomeScreen(
     val userProfile by viewModel.userProfile.collectAsState()
     val updateInfoState by viewModel.updateInfoState.collectAsState()
     val selectedAudioIndex by viewModel.audioIndex.collectAsState()
+    val maxFloatingPlayers by viewModel.maxFloatingPlayers.collectAsState()
     var showSignInSheet by remember { mutableStateOf(false) }
     var showProfileSheet by remember { mutableStateOf(false) }
     var showWatchHistorySheet by remember { mutableStateOf(false) }
     var showWebVersionView by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var showCopyrightSheet by remember { mutableStateOf(false) }
+    var showFloatingPlayerLimitSheet by remember { mutableStateOf(false) }
     var activeWebPlayer by remember { mutableStateOf<WebPlayerState?>(null) }
     var selectedItemForDetail by remember { mutableStateOf<MediaItem?>(null) }
     var showNotificationPopup by remember { mutableStateOf(false) }
@@ -3067,7 +3070,32 @@ fun HomeScreen(
             onDeleteAccount = {
                 showProfileSheet = false
                 showDeleteAccountDialog = true
+            },
+            onShowCopyrightAlert = {
+                showProfileSheet = false
+                showCopyrightSheet = true
+            },
+            onShowFloatingPlayerLimit = {
+                showProfileSheet = false
+                showFloatingPlayerLimitSheet = true
             }
+        )
+    }
+
+    if (showCopyrightSheet) {
+        CopyrightBottomSheet(
+            onDismiss = { showCopyrightSheet = false }
+        )
+    }
+
+    if (showFloatingPlayerLimitSheet) {
+        FloatingPlayerLimitBottomSheet(
+            currentLimit = maxFloatingPlayers,
+            onSelectLimit = { limit ->
+                viewModel.setMaxFloatingPlayers(limit)
+                Toast.makeText(context, "Floating player limit set to $limit", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showFloatingPlayerLimitSheet = false }
         )
     }
 
@@ -6454,6 +6482,9 @@ fun SettingsScreen(
     var showAdvancedSettingsSheet by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     var showPrivacyTermsSheet by remember { mutableStateOf(false) }
+    var showCopyrightSheet by remember { mutableStateOf(false) }
+    var showFloatingPlayerLimitSheet by remember { mutableStateOf(false) }
+    val maxFloatingPlayers by viewModel.maxFloatingPlayers.collectAsState()
     val showDownloadLibrary by viewModel.showDownloadLibraryGlobal.collectAsState()
 
     val currentVersionName = remember { AppUpdateManager.getAppVersionName(context) }
@@ -7023,6 +7054,24 @@ fun SettingsScreen(
 
             item {
                 SecretSettingRow(
+                    title = "Multiple Floating Player Mode",
+                    subtitle = "Active limit: $maxFloatingPlayers Floating Players (Select 2-6 max)",
+                    icon = Icons.Default.PictureInPictureAlt,
+                    onClick = { showFloatingPlayerLimitSheet = true }
+                )
+            }
+
+            item {
+                SecretSettingRow(
+                    title = "Copyright Alert",
+                    subtitle = "Copyright Disclaimer & DMCA Takedown Notice",
+                    icon = Icons.Outlined.Shield,
+                    onClick = { showCopyrightSheet = true }
+                )
+            }
+
+            item {
+                SecretSettingRow(
                     title = "Privacy Policy & Terms of Service",
                     subtitle = "Usage Policy, Safety Guidelines & Data Security",
                     icon = Icons.Outlined.Shield,
@@ -7065,7 +7114,32 @@ fun SettingsScreen(
             onDeleteAccount = {
                 showProfileSheet = false
                 showDeleteAccountDialog = true
+            },
+            onShowCopyrightAlert = {
+                showProfileSheet = false
+                showCopyrightSheet = true
+            },
+            onShowFloatingPlayerLimit = {
+                showProfileSheet = false
+                showFloatingPlayerLimitSheet = true
             }
+        )
+    }
+
+    if (showCopyrightSheet) {
+        CopyrightBottomSheet(
+            onDismiss = { showCopyrightSheet = false }
+        )
+    }
+
+    if (showFloatingPlayerLimitSheet) {
+        FloatingPlayerLimitBottomSheet(
+            currentLimit = maxFloatingPlayers,
+            onSelectLimit = { limit ->
+                viewModel.setMaxFloatingPlayers(limit)
+                Toast.makeText(context, "Floating player limit set to $limit", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showFloatingPlayerLimitSheet = false }
         )
     }
 
