@@ -6557,7 +6557,7 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
 
     val isPremium by SubscriptionManager.isPremium.collectAsState()
-    val isRedeemActive = viewModel.isRedeemCodeActive(profile?.email)
+    val isRedeemActive by viewModel.isRedeemActive.collectAsState()
     val effectiveIsPremium = isPremium || isRedeemActive
     val redeemPlanName = if (isRedeemActive) viewModel.getRedeemPlanName() else ""
 

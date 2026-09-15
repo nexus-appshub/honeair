@@ -75,7 +75,7 @@ fun UserProfileBottomSheet(
     val expiryText by SubscriptionManager.expiryDate.collectAsState()
     val expiryTimestamp by SubscriptionManager.expiryTimestamp.collectAsState()
     val viewModel: StreamViewModel = viewModel()
-    val isRedeemActive = viewModel.isRedeemCodeActive(profile?.email)
+    val isRedeemActive by viewModel.isRedeemActive.collectAsState()
     val redeemExpiry = if (isRedeemActive) viewModel.getRedeemUnlockExpiry() else 0L
     val redeemPlanName = if (isRedeemActive) viewModel.getRedeemPlanName() else ""
     val effectiveIsPremium = isPremium || isRedeemActive

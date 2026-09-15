@@ -89,12 +89,18 @@ object SubscriptionManager {
                 val response = VipApiClient.apiService.getVipConfig()
                 if (response.success) {
                     _vipConfig.value = response
-                    if (response.premiumUsers.isNotEmpty()) {
-                        synchronized(remotePremiumEmails) {
+                    synchronized(remotePremiumEmails) {
+                        remotePremiumEmails.clear()
+                        if (response.premiumUsers.isNotEmpty()) {
                             remotePremiumEmails.addAll(response.premiumUsers.map { it.trim().lowercase() }.filter { it.isNotBlank() })
                         }
                     }
                     Log.d(TAG, "Fetched ${response.pricingPlans.size} VIP plans successfully")
+                    
+                    // Trigger recompute to update UI state
+                    val auth = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
+                    val user = auth?.currentUser
+                    checkUserSubscription(user?.email, user?.uid)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to fetch live VIP config: ${e.message}")
@@ -177,7 +183,7 @@ object SubscriptionManager {
 
     private fun recomputeStatus(email: String?, uid: String?) {
         val cleanEmail = email?.trim()?.lowercase()
-        val isPrem = cleanEmail != null && cleanEmail != "xubilas.era@gmail.com" && synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
+        val isPrem = cleanEmail != null && synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
         _isPremium.value = isPrem
         _isExpired.value = false
         _expiryTimestamp.value = null

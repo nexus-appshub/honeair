@@ -367,6 +367,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _showPremiumPaywall = MutableStateFlow(false)
     val showPremiumPaywall: StateFlow<Boolean> = _showPremiumPaywall.asStateFlow()
 
+    private val _isRedeemActive = MutableStateFlow(false)
+    val isRedeemActive: StateFlow<Boolean> = _isRedeemActive.asStateFlow()
+
+    init {
+        // Initial check for redeem status
+        viewModelScope.launch {
+            _userProfile.collect { profile ->
+                _isRedeemActive.value = isRedeemCodeActive(profile?.email)
+            }
+        }
+    }
+
     fun triggerPremiumPaywall(show: Boolean = true) {
         _showPremiumPaywall.value = show
     }
@@ -400,6 +412,36 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             return Pair(false, "Invalid code! Please check and try again.")
         }
 
+        // Local Fallback: If code matches the global config (which has Firebase fallback), allow it even if server is down
+        val globalConfig = _appControlConfig.value
+        if (globalConfig != null && globalConfig.redeemCode.isNotBlank() && entered.equals(globalConfig.redeemCode, ignoreCase = true)) {
+            val expiryTimestamp = globalConfig.redeemExpiryTimestamp
+            if (expiryTimestamp > 0 && System.currentTimeMillis() > expiryTimestamp) {
+                return Pair(false, "This code has expired.")
+            }
+
+            val validityHours = globalConfig.redeemValidityHours
+            val validityMs = validityHours * 60 * 60 * 1000L
+            var unlockUntil = System.currentTimeMillis() + validityMs
+            if (expiryTimestamp > 0L) {
+                unlockUntil = unlockUntil.coerceAtMost(expiryTimestamp)
+            }
+
+            sharedPrefs.edit()
+                .putLong("redeem_unlocked_until", unlockUntil)
+                .putString("redeem_unlocked_user", cleanEmail)
+                .putString("redeem_unlocked_code", entered)
+                .putString("redeem_plan_name", "VIP Promo Pass")
+                .apply()
+
+            _isRedeemActive.value = true
+            // Also try to sync in background if possible, but don't wait for it
+            viewModelScope.launch(Dispatchers.IO) {
+                try { com.example.data.api.VipApiClient.apiService.redeemCode(com.example.data.api.RedeemRequest(entered, cleanEmail)) } catch(e: Exception) {}
+            }
+            return Pair(true, "Congratulations! VIP has been activated.")
+        }
+
         return try {
             val response = com.example.data.api.VipApiClient.apiService.redeemCode(
                 com.example.data.api.RedeemRequest(
@@ -430,6 +472,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     .putString("redeem_plan_name", response.planName ?: "VIP Promo Pass")
                     .apply()
 
+                _isRedeemActive.value = true
                 Pair(true, response.message ?: "Congratulations! VIP has been activated.")
             } else {
                 Pair(false, response.message ?: "Invalid or expired code.")
