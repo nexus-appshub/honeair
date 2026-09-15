@@ -63,30 +63,30 @@ object UnifiedStreamManager {
 
         Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime)")
 
-        // 0. Anikoto Deep Native Scraper (Direct scraped M3U8 for Anime / Series / Movies)
-        if (isAnime) {
+        // 0. High-Speed Anime API Resolver (Direct HLS M3U8 with CORS Proxy)
+        if (isAnime || tmdbId.startsWith("anikoto_")) {
             try {
-                val lookupKey = if (tmdbId.startsWith("anikoto_")) {
-                    "https://anikoto.cz/watch/${tmdbId.substringAfter("anikoto_")}"
-                } else if (title.startsWith("http") || title.contains("anikoto.cz")) {
+                val lookupKey = if (title.startsWith("http") || title.contains("anikoto.cz") || title.contains("/watch/")) {
                     title
-                } else {
+                } else if (cleanTitle.isNotBlank()) {
                     cleanTitle
+                } else {
+                    title
                 }
-                Log.d(TAG, "Tier 0: Querying Anikoto Deep Embed Scraper for $lookupKey...")
-                val anikotoStream = AnikotoScraper.getStreamByTitle(
+                Log.d(TAG, "Tier 0: Querying Anime API Resolver for $lookupKey (S$season Ep$episode)...")
+                val animeStream = AnikotoScraper.getStreamByTitle(
                     title = lookupKey,
                     season = season,
                     episode = episode
                 )
-                if (anikotoStream != null && anikotoStream.streamUrl.isNotEmpty()) {
-                    Log.d(TAG, "Tier 0: Anikoto native stream resolved successfully: ${anikotoStream.streamUrl}")
-                    streamCache[cacheKey] = anikotoStream
-                    saveToRoomCache(context, cacheKey, anikotoStream)
-                    return anikotoStream
+                if (animeStream != null && animeStream.streamUrl.isNotEmpty()) {
+                    Log.d(TAG, "Tier 0: Anime stream resolved successfully via API: ${animeStream.streamUrl}")
+                    streamCache[cacheKey] = animeStream
+                    saveToRoomCache(context, cacheKey, animeStream)
+                    return animeStream
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Tier 0 Anikoto scraper failed: ${e.message}")
+                Log.w(TAG, "Tier 0 Anime API resolver failed: ${e.message}")
             }
         }
 

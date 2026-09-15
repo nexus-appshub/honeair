@@ -43,13 +43,4 @@ object RetrofitClient {
             .build()
             .create(YouTubeApi::class.java)
     }
-
-    val hmairApi: HmairApi by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://www.hmair.xyz/")
-            .client(okHttpClient)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-            .create(HmairApi::class.java)
-    }
 }

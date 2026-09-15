@@ -1301,9 +1301,10 @@ fun CinemetaWebViewPlayer(
                                     }
                                 }
                             } else {
-                                currentServerIndex = 1
-                                isLoading = true
-                                hasError = false
+                                // For anime, DO NOT auto-fallback to English western movie embeds!
+                                // Just show error on current server so user can select another sub/dub server manually or retry.
+                                isLoading = false
+                                hasError = true
                             }
                         },
                         onBack = onClosePlayer,

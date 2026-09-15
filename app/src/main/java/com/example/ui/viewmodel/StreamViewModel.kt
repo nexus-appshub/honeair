@@ -10,9 +10,6 @@ import com.example.data.database.AppDatabase
 import com.example.data.model.IptvChannel
 import com.example.data.model.IptvPlaylist
 import com.example.data.model.MediaItem
-import com.example.data.model.SportsEvent
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
 import com.example.data.repository.MediaRepository
 import com.example.data.repository.StreamRepository
 import com.example.data.repository.HomaiRepository
@@ -300,6 +297,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?) {
         _selectedServer.value = server
+        val activeItem = _activeMediaItem.value
+        if (server != null && activeItem != null && _isPlayerPlaying.value) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val streamRes = com.example.scraper.AnikotoScraper.extractStreamFromServer(server, currentServerWatchUrl.ifBlank { activeItem.title })
+                    if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
+                        _activeMediaStreamUrl.value = streamRes.streamUrl
+                        _activeMediaStreamHeaders.value = streamRes.headers
+                        _isPlayerPlaying.value = true
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 
     fun fetchAnikotoServers(item: MediaItem, season: Int = 1, episode: Int = 1) {
@@ -691,145 +703,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     fun setBatterySaverMode(value: Boolean) {
         _batterySaverMode.value = value
         sharedPrefs.edit().putBoolean("setting_battery_saver_mode", value).apply()
-    }
-
-    // Sports Section State
-    private val _sportsChannelsState = MutableStateFlow<UiState<List<IptvChannel>>>(UiState.Loading)
-    val sportsChannelsState: StateFlow<UiState<List<IptvChannel>>> = _sportsChannelsState.asStateFlow()
-
-    private val _sportsEventsState = MutableStateFlow<List<com.example.data.model.SportsEvent>>(emptyList())
-    val sportsEventsState: StateFlow<List<com.example.data.model.SportsEvent>> = _sportsEventsState.asStateFlow()
-
-    private val _activeChannelHeaders = MutableStateFlow<Map<String, String>>(emptyMap())
-    val activeChannelHeaders: StateFlow<Map<String, String>> = _activeChannelHeaders.asStateFlow()
-
-    private var sportsEventsListener: com.google.firebase.firestore.ListenerRegistration? = null
-
-    fun fetchSportsChannels() {
-        _sportsChannelsState.value = UiState.Loading
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val response = com.example.data.network.RetrofitClient.hmairApi.getChannels()
-                val channels = response.channels
-                val filtered = channels.filter { channel ->
-                    val lowerGroup = channel.group.lowercase()
-                    val lowerName = channel.name.lowercase()
-                    
-                    lowerGroup.contains("sports") ||
-                    lowerGroup.contains("sport") ||
-                    lowerName.contains("t sports") ||
-                    lowerName.contains("star sports") ||
-                    lowerName.contains("sony sports") ||
-                    lowerName.contains("willow") ||
-                    lowerName.contains("sports") ||
-                    lowerName.contains("ptv sports") ||
-                    lowerName.contains("sky sports") ||
-                    lowerName.contains("bein") ||
-                    lowerName.contains("ten sports") ||
-                    lowerName.contains("cricket") ||
-                    lowerName.contains("football")
-                }.map { channel ->
-                    IptvChannel(
-                        name = channel.name,
-                        url = channel.url,
-                        logo = channel.logo,
-                        group = "Sports",
-                        tvgId = ""
-                    )
-                }
-                
-                withContext(Dispatchers.Main) {
-                    _sportsChannelsState.value = UiState.Success(filtered)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    _sportsChannelsState.value = UiState.Error(e.localizedMessage ?: "Failed to fetch sports channels")
-                }
-            }
-        }
-    }
-
-    fun startSportsEventsListener() {
-        if (sportsEventsListener != null) return
-        try {
-            val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-            sportsEventsListener = firestore.collection("sportsEvents")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("StreamViewModel", "Error listening to sports events: ${error.message}", error)
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val list = mutableListOf<com.example.data.model.SportsEvent>()
-                        for (doc in snapshot.documents) {
-                            try {
-                                val event = doc.toObject(com.example.data.model.SportsEvent::class.java)
-                                if (event != null) {
-                                    val item = if (event.id.isEmpty()) event.copy(id = doc.id) else event
-                                    list.add(item)
-                                } else {
-                                    val data = doc.data ?: continue
-                                    val teamAMap = data["teamA"] as? Map<*, *>
-                                    val teamBMap = data["teamB"] as? Map<*, *>
-                                    val serversList = (data["servers"] as? List<*>)?.mapNotNull { srv ->
-                                        val sMap = srv as? Map<*, *> ?: return@mapNotNull null
-                                        com.example.data.model.SportsStreamServer(
-                                            name = sMap["name"] as? String ?: "Server",
-                                            url = sMap["url"] as? String ?: "",
-                                            referer = sMap["referer"] as? String,
-                                            origin = sMap["origin"] as? String
-                                        )
-                                    } ?: emptyList()
-
-                                    val eventFallback = com.example.data.model.SportsEvent(
-                                        id = doc.id,
-                                        title = data["title"] as? String ?: "",
-                                        sportCategory = data["sportCategory"] as? String ?: "Cricket",
-                                        tournament = data["tournament"] as? String ?: "",
-                                        status = data["status"] as? String ?: "live",
-                                        startTime = data["startTime"] as? String ?: "",
-                                        badgeText = data["badgeText"] as? String ?: "",
-                                        bannerUrl = data["bannerUrl"] as? String ?: "",
-                                        description = data["description"] as? String ?: "",
-                                        isPinned = data["isPinned"] as? Boolean ?: false,
-                                        isActive = data["isActive"] as? Boolean ?: true,
-                                        viewersCount = data["viewersCount"],
-                                        teamA = com.example.data.model.TeamInfo(
-                                            name = teamAMap?.get("name") as? String ?: "",
-                                            logo = teamAMap?.get("logo") as? String ?: "",
-                                            score = teamAMap?.get("score") as? String ?: ""
-                                        ),
-                                        teamB = com.example.data.model.TeamInfo(
-                                            name = teamBMap?.get("name") as? String ?: "",
-                                            logo = teamBMap?.get("logo") as? String ?: "",
-                                            score = teamBMap?.get("score") as? String ?: ""
-                                        ),
-                                        servers = serversList
-                                    )
-                                    list.add(eventFallback)
-                                }
-                            } catch (e: Exception) {
-                                Log.e("StreamViewModel", "Error parsing sportsEvent document ${doc.id}", e)
-                            }
-                        }
-                        Log.d("StreamViewModel", "Loaded ${list.size} sports events from Firestore")
-                        _sportsEventsState.value = list
-                    }
-                }
-        } catch (e: Exception) {
-            Log.e("StreamViewModel", "Firestore initialization or listener registration failed", e)
-        }
-    }
-
-    fun stopSportsEventsListener() {
-        sportsEventsListener?.remove()
-        sportsEventsListener = null
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        stopSportsEventsListener()
     }
 
     init {
@@ -1948,11 +1821,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Video Player Playback Control
-    fun setActiveChannel(channel: IptvChannel?, headers: Map<String, String> = emptyMap()) {
+    fun setActiveChannel(channel: IptvChannel?) {
         _playbackErrorChannelUrl.value = null
         viewModelScope.launch {
             _activeMediaItem.value = null
-            _activeChannelHeaders.value = headers
             _activeChannel.value = channel
             _isPlayerPlaying.value = true
             if (channel != null) {
