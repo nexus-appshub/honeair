@@ -677,7 +677,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?) {
         _selectedServer.value = server
         val activeItem = _activeMediaItem.value
-        if (server != null && activeItem != null && _isPlayerPlaying.value) {
+        if (server != null && activeItem != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
                     val streamRes = com.example.scraper.AnikotoScraper.extractStreamFromServer(server, currentServerWatchUrl.ifBlank { activeItem.title })

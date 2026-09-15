@@ -135,16 +135,21 @@ object UnifiedStreamManager {
                     cleanQuery = cleanTitle
                 }
                 Log.d(TAG, "Resolving TMDB ID for title query: $cleanQuery")
-                val searchResponse = if (effectiveIsTv) {
-                    com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanQuery)
+                var firstResult = if (effectiveIsTv) {
+                    com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanQuery).results?.firstOrNull()
                 } else {
-                    com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = cleanQuery)
+                    com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = cleanQuery).results?.firstOrNull()
                 }
-                var firstResult = searchResponse.results?.firstOrNull()
-                if (firstResult == null && !effectiveIsTv) {
-                    val tvSearch = com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanQuery)
-                    firstResult = tvSearch.results?.firstOrNull()
-                    if (firstResult != null) effectiveIsTv = true
+                if (firstResult == null) {
+                    firstResult = if (effectiveIsTv) {
+                        com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = cleanQuery).results?.firstOrNull()?.also { effectiveIsTv = false }
+                    } else {
+                        com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanQuery).results?.firstOrNull()?.also { effectiveIsTv = true }
+                    }
+                }
+                if (firstResult == null && cleanTitle.isNotBlank() && cleanQuery != cleanTitle) {
+                    firstResult = com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanTitle).results?.firstOrNull()?.also { effectiveIsTv = true }
+                        ?: com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = cleanTitle).results?.firstOrNull()?.also { effectiveIsTv = false }
                 }
                 if (firstResult != null) {
                     finalTmdbId = firstResult.id.toString()

@@ -337,7 +337,7 @@ fun CinemetaWebViewPlayer(
             activeSubtitles = cached.subtitles
             useExoPlayer = true
             isScrapingDirectStream = false
-        } else if (effectiveNativeUrl == null) {
+        } else {
             isScrapingDirectStream = true
             withContext(Dispatchers.IO) {
                 try {

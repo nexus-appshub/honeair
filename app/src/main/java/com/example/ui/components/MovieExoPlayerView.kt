@@ -895,7 +895,7 @@ fun MovieExoPlayerView(
 
         // Overlay 6: Playback Controls (Timeline & Seek, Play/Pause, Quality Settings)
         AnimatedVisibility(
-            visible = showControls && !isFastForward2x && !isScreenLocked,
+            visible = showControls && !isFastForward2x && !isScreenLocked && !isInPipMode,
             enter = fadeIn() + scaleIn(initialScale = 0.95f),
             exit = fadeOut() + scaleOut(targetScale = 0.95f)
         ) {

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Base security config: Enforce HTTPS for standard app network requests -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Permitted cleartext domains for legacy live IPTV media streams -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">iptv-org.github.io</domain>
+        <domain includeSubdomains="true">gpcdn.net</domain>
+        <domain includeSubdomains="true">deshitv24.net</domain>
+        <domain includeSubdomains="true">alvetv.com</domain>
+        <domain includeSubdomains="true">ottplus.live</domain>
+        <domain includeSubdomains="true">ncare.live</domain>
+    </domain-config>
+</network-security-config>

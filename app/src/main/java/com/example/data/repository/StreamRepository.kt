@@ -66,7 +66,7 @@ class StreamRepository(
             ),
             IptvPlaylist(
                 name = "Fixed Channels 📺",
-                url = "asset://fixed_channels.m3u",
+                url = "asset://fixed_channels.enc",
                 group = "Recommended",
                 logo = "https://img.icons8.com/fluency/96/tv.png"
             ),
@@ -198,12 +198,21 @@ class StreamRepository(
         }
         if (playlistUrl.startsWith("asset://")) {
             try {
-                val assetName = playlistUrl.removePrefix("asset://")
-                addLog("SYSTEM", "Loading Channels", "Loading channels from asset file: $assetName")
-                val raw = context.assets.open(assetName).bufferedReader().use { it.readText() }
+                var assetName = playlistUrl.removePrefix("asset://")
+                if (assetName == "fixed_channels.m3u") {
+                    assetName = "fixed_channels.enc"
+                }
+                addLog("SYSTEM", "Loading Encrypted Channels", "Decrypting secure channels from asset: $assetName")
+                val cipherBytes = context.assets.open(assetName).readBytes()
+                val keyBytes = "HomeAirTvSecurityKey2026SecretM3uKey".toByteArray(Charsets.UTF_8)
+                val decryptedBytes = ByteArray(cipherBytes.size)
+                for (i in cipherBytes.indices) {
+                    decryptedBytes[i] = (cipherBytes[i].toInt() xor keyBytes[i % keyBytes.size].toInt()).toByte()
+                }
+                val raw = String(decryptedBytes, Charsets.UTF_8)
                 val parsed = IptvParser.parseChannels(raw)
                 channelCache[playlistUrl] = parsed
-                addLog("SYSTEM", "Channels Load Success", "Parsed ${parsed.size} stream channels from asset $assetName successfully.")
+                addLog("SYSTEM", "Channels Load Success", "Parsed ${parsed.size} stream channels from encrypted asset $assetName successfully.")
                 return@withContext parsed
             } catch (e: Exception) {
                 addLog("ERROR", "Channels Asset Load Failed", "Error loading asset channels: ${e.localizedMessage}")

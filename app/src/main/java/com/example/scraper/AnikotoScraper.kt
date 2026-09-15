@@ -516,7 +516,8 @@ object AnikotoScraper {
      */
     suspend fun extractStreamFromServer(
         server: AnikotoServer,
-        watchUrl: String = ""
+        watchUrl: String = "",
+        episode: Int = 1
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
             if (server.streamUrl.isNotBlank()) {
@@ -537,7 +538,8 @@ object AnikotoScraper {
             // If streamUrl not pre-filled, query the stream API with server name
             val isDub = server.type.lowercase() == "dub"
             val targetType = if (isDub) "dub" else "sub"
-            val queryUrl = "$API_BASE_URL/api/stream/get?keyword=${URLEncoder.encode(watchUrl, "UTF-8")}&ep=1&type=$targetType&server=${URLEncoder.encode(server.id, "UTF-8")}"
+            val effectiveEp = if (episode <= 0) 1 else episode
+            val queryUrl = "$API_BASE_URL/api/stream/get?keyword=${URLEncoder.encode(watchUrl, "UTF-8")}&ep=$effectiveEp&type=$targetType&server=${URLEncoder.encode(server.id, "UTF-8")}"
             val json = fetchJson(queryUrl)
             val selected = json?.optJSONObject("selectedStream")
             if (selected != null) {
@@ -597,7 +599,26 @@ object AnikotoScraper {
                 }
             }
 
-            // Fallback 3: For Episode 1, if preferred audio type returned null, try alternate audio type (sub/dub)
+            // Fallback 3: Perform Anime Search to find exact watchUrl / slug
+            if (json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) {
+                try {
+                    val searchResults = searchOrFilterAnime(keyword = cleanTitle)
+                    val matchedItem = searchResults.firstOrNull()
+                    if (matchedItem != null && matchedItem.watchUrl.isNotBlank()) {
+                        Log.d(TAG, "Search fallback matched anime watchUrl: ${matchedItem.watchUrl}")
+                        val searchUrl = buildStreamGetUrl(title = matchedItem.watchUrl, episode = effectiveEp, type = audioType)
+                        json = fetchJson(searchUrl)
+                        if (json == null || json.optBoolean("success") != true) {
+                            val searchUrlEp1 = buildStreamGetUrl(title = matchedItem.watchUrl, episode = 1, type = audioType)
+                            json = fetchJson(searchUrlEp1)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Search fallback error in getStreamByTitle: ${e.message}")
+                }
+            }
+
+            // Fallback 4: For Episode 1, if preferred audio type returned null, try alternate audio type (sub/dub)
             if ((json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) && effectiveEp == 1) {
                 val altType = if (audioType == "sub") "dub" else "sub"
                 val altUrl = buildStreamGetUrl(title = cleanTitle, episode = 1, type = altType)

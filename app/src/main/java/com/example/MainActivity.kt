@@ -452,6 +452,21 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
         }
     }
 
+    if (isInPipMode) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            PlayerScreen(
+                viewModel = viewModel,
+                isInPipMode = true,
+                onBackPress = performBackNavigation
+            )
+        }
+        return
+    }
+
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
