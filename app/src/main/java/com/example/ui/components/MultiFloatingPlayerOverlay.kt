@@ -211,11 +211,20 @@ private fun DraggableFloatingPlayerWindow(
 
     // ExoPlayer lifecycle management for this floating instance
     val exoPlayer = remember(instance.id) {
-        ExoPlayer.Builder(context)
-            .setRenderersFactory(
-                DefaultRenderersFactory(context)
-                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-            )
+        val sharedPrefs = context.getSharedPreferences("stream_app_prefs", android.content.Context.MODE_PRIVATE)
+        val userBufferIndex = sharedPrefs.getInt("setting_buffer_index", 1)
+        val userDecoderIndex = sharedPrefs.getInt("setting_decoder_index", 0)
+        val isHwAccel = sharedPrefs.getBoolean("setting_hardware_accel", true)
+
+        val renderersFactory = com.example.network.SmartNetworkBoosterEngine.createRenderersFactory(
+            context = context,
+            decoderMode = userDecoderIndex,
+            isHardwareAccelerated = isHwAccel
+        )
+        val loadControl = com.example.network.SmartNetworkBoosterEngine.createDynamicLoadControl(userBufferIndex, isLiveStream = true)
+
+        ExoPlayer.Builder(context, renderersFactory)
+            .setLoadControl(loadControl)
             .build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = instance.isPlaying
@@ -236,30 +245,20 @@ private fun DraggableFloatingPlayerWindow(
         val targetUrl = instance.streamUrl ?: instance.channel?.url
         if (!targetUrl.isNullOrBlank()) {
             try {
-                val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                    .setUserAgent(instance.headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                    .setConnectTimeoutMs(15000)
-                    .setReadTimeoutMs(20000)
-                    .setAllowCrossProtocolRedirects(true)
+                val mergedHeaders = mutableMapOf<String, String>()
+                instance.channel?.headers?.let { mergedHeaders.putAll(it) }
+                mergedHeaders.putAll(instance.headers)
 
-                instance.headers.forEach { (k, v) ->
-                    if (k != "User-Agent") httpDataSourceFactory.setDefaultRequestProperties(mapOf(k to v))
-                }
-
-                val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+                val httpDataSourceFactory = com.example.network.SmartNetworkBoosterEngine.createBoostedHttpDataSourceFactory(
+                    customHeaders = mergedHeaders,
+                    url = targetUrl
+                )
+                val mediaSourceFactory = com.example.network.SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpDataSourceFactory)
                 val mediaItem = MediaItem.Builder()
                     .setUri(Uri.parse(targetUrl))
                     .build()
 
-                val mediaSource: MediaSource = if (targetUrl.lowercase().contains("m3u8")) {
-                    HlsMediaSource.Factory(dataSourceFactory)
-                        .setAllowChunklessPreparation(true)
-                        .createMediaSource(mediaItem)
-                } else {
-                    ProgressiveMediaSource.Factory(dataSourceFactory)
-                        .createMediaSource(mediaItem)
-                }
-
+                val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
                 exoPlayer.setMediaSource(mediaSource)
                 exoPlayer.prepare()
             } catch (e: Exception) {

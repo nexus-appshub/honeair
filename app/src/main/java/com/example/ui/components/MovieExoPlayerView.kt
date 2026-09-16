@@ -209,14 +209,24 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         errorMessage = null
         exoPlayer?.release()
 
+        val sharedPrefs = context.getSharedPreferences("stream_app_prefs", android.content.Context.MODE_PRIVATE)
+        val userBufferIndex = sharedPrefs.getInt("setting_buffer_index", 1)
+        val userDecoderIndex = sharedPrefs.getInt("setting_decoder_index", 0)
+        val isHwAccel = sharedPrefs.getBoolean("setting_hardware_accel", true)
+
         val httpDataSourceFactory = SmartNetworkBoosterEngine.createBoostedHttpDataSourceFactory(
             customHeaders = customHeaders,
             url = currentUrl
         )
-        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpDataSourceFactory)
-        val loadControl = SmartNetworkBoosterEngine.createDynamicLoadControl()
+        val mediaSourceFactory = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpDataSourceFactory)
+        val loadControl = SmartNetworkBoosterEngine.createDynamicLoadControl(userBufferIndex, isLiveStream = false)
+        val renderersFactory = SmartNetworkBoosterEngine.createRenderersFactory(
+            context = context,
+            decoderMode = userDecoderIndex,
+            isHardwareAccelerated = isHwAccel
+        )
 
-        val player = ExoPlayer.Builder(context)
+        val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setTrackSelector(trackSelector)

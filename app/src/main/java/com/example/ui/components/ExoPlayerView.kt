@@ -250,25 +250,36 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
         retryCount = 0
         exoPlayer?.release()
 
+        val sharedPrefs = context.getSharedPreferences("stream_app_prefs", android.content.Context.MODE_PRIVATE)
+        val userBufferIndex = sharedPrefs.getInt("setting_buffer_index", 1)
+        val userDecoderIndex = sharedPrefs.getInt("setting_decoder_index", 0)
+        val isHwAccel = sharedPrefs.getBoolean("setting_hardware_accel", true)
+
         val httpDataSourceFactory = SmartNetworkBoosterEngine.createBoostedHttpDataSourceFactory(
             customHeaders = customHeaders,
             url = currentUrl
         )
-        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpDataSourceFactory)
+        val mediaSourceFactory = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpDataSourceFactory)
         
         val loadControl = if (batterySaverActive) {
             DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    15000, // min buffer 15s instead of 20-30s
-                    30000, // max buffer 30s instead of 60s
-                    1000,  // buffer for playback 1s instead of 1.5s
-                    2000   // buffer after rebuffer 2s
+                    15000,
+                    30000,
+                    1000,
+                    2000
                 )
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
         } else {
-            SmartNetworkBoosterEngine.createDynamicLoadControl()
+            SmartNetworkBoosterEngine.createDynamicLoadControl(userBufferIndex, isLiveStream = isLiveStream)
         }
+
+        val renderersFactory = SmartNetworkBoosterEngine.createRenderersFactory(
+            context = context,
+            decoderMode = userDecoderIndex,
+            isHardwareAccelerated = isHwAccel && !batterySaverActive
+        )
 
         val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
             if (batterySaverActive) {
@@ -280,7 +291,7 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
             }
         }
 
-        val player = ExoPlayer.Builder(context)
+        val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setTrackSelector(trackSelector)
@@ -375,22 +386,19 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
     // Continuous Live Stream Stall/Freeze Watchdog: Auto-detects and seamlessly recovers if live stream freezes
     LaunchedEffect(exoPlayer, currentUrl, isPlaying) {
         val player = exoPlayer ?: return@LaunchedEffect
-        var lastTrackedPosition = -1L
-        var freezeSeconds = 0
         var bufferingSeconds = 0
 
         while (true) {
             delay(2000)
             if (player.playWhenReady && !isDraggingSlider) {
                 val state = player.playbackState
-                val pos = player.currentPosition
+                val isCurrentlyPlaying = player.isPlaying
 
-                // 1. Recover from stuck buffering (>6s)
-                if (state == Player.STATE_BUFFERING) {
+                // 1. Recover from actual stuck buffering (>14s) without interrupting healthy playing state
+                if (state == Player.STATE_BUFFERING && !isCurrentlyPlaying) {
                     bufferingSeconds += 2
-                    if (bufferingSeconds >= 6) {
+                    if (bufferingSeconds >= 14) {
                         bufferingSeconds = 0
-                        freezeSeconds = 0
                         try {
                             player.seekToDefaultPosition()
                             player.prepare()
@@ -401,31 +409,14 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                     bufferingSeconds = 0
                 }
 
-                // 2. Recover from silent frozen video frames (stuck position for >6s while in STATE_READY)
-                if (state == Player.STATE_READY) {
-                    if (lastTrackedPosition != -1L && pos == lastTrackedPosition) {
-                        freezeSeconds += 2
-                        if (freezeSeconds >= 6) {
-                            freezeSeconds = 0
-                            try {
-                                player.seekToDefaultPosition()
-                                player.prepare()
-                                player.play()
-                            } catch (_: Exception) {}
-                        }
-                    } else {
-                        freezeSeconds = 0
-                        lastTrackedPosition = pos
-                    }
-                } else if (state == Player.STATE_IDLE) {
+                // 2. Recover from stuck idle state
+                if (state == Player.STATE_IDLE && !isCurrentlyPlaying) {
                     try {
-                        player.seekToDefaultPosition()
                         player.prepare()
                         player.play()
                     } catch (_: Exception) {}
                 }
             } else {
-                freezeSeconds = 0
                 bufferingSeconds = 0
             }
         }

@@ -43,6 +43,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.example.network.SmartNetworkBoosterEngine
 import androidx.media3.ui.PlayerView
 import com.example.scraper.ScrapedStreamResult
 import com.example.scraper.UnifiedStreamManager
@@ -76,32 +77,36 @@ fun VideoPlayerScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // 1. Configure optimized HTTP Data Source Factory to prevent M3U8 403 blocks and infinite buffering
-    val dataSourceFactory = remember(streamResult) {
-        val headers = streamResult?.headers ?: mapOf(
-            "Referer" to "https://vidnest.fun/",
-            "Origin" to "https://vidnest.fun",
-            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    val dataSourceFactory = remember(streamResult, activeStreamUrl) {
+        val headers = streamResult?.headers ?: emptyMap()
+        SmartNetworkBoosterEngine.createBoostedHttpDataSourceFactory(
+            customHeaders = headers,
+            url = activeStreamUrl
         )
-        DefaultHttpDataSource.Factory()
-            .setUserAgent(headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-            .setConnectTimeoutMs(25000)
-            .setReadTimeoutMs(25000)
-            .setAllowCrossProtocolRedirects(true)
-            .setDefaultRequestProperties(headers)
     }
 
     // 2. High-performance Load Control to eliminate buffering hangs
     val loadControl = remember {
-        DefaultLoadControl.Builder()
-            .setBufferDurationsMs(5000, 45000, 1500, 3000)
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
+        val sharedPrefs = context.getSharedPreferences("stream_app_prefs", android.content.Context.MODE_PRIVATE)
+        val userBufferIndex = sharedPrefs.getInt("setting_buffer_index", 1)
+        SmartNetworkBoosterEngine.createDynamicLoadControl(userBufferIndex, isLiveStream = false)
     }
 
-    // 3. Create ExoPlayer Instance with custom MediaSourceFactory
+    val renderersFactory = remember {
+        val sharedPrefs = context.getSharedPreferences("stream_app_prefs", android.content.Context.MODE_PRIVATE)
+        val userDecoderIndex = sharedPrefs.getInt("setting_decoder_index", 0)
+        val isHwAccel = sharedPrefs.getBoolean("setting_hardware_accel", true)
+        SmartNetworkBoosterEngine.createRenderersFactory(
+            context = context,
+            decoderMode = userDecoderIndex,
+            isHardwareAccelerated = isHwAccel
+        )
+    }
+
+    // 3. Create ExoPlayer Instance with custom MediaSourceFactory and HW+ Renderers
     val exoPlayer = remember {
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+        ExoPlayer.Builder(context, renderersFactory)
+            .setMediaSourceFactory(SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, dataSourceFactory))
             .setLoadControl(loadControl)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
@@ -112,24 +117,18 @@ fun VideoPlayerScreen(
     LaunchedEffect(tmdbId, activeStreamUrl) {
         if (activeStreamUrl != null) {
             val url = activeStreamUrl!!
-            val headers = mapOf(
-                "Referer" to "https://vidnest.fun/",
-                "Origin" to "https://vidnest.fun",
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+            val headers = streamResult?.headers ?: emptyMap()
+            val httpFactory = SmartNetworkBoosterEngine.createBoostedHttpDataSourceFactory(
+                customHeaders = headers,
+                url = url
             )
-            val httpFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent(headers["User-Agent"]!!)
-                .setConnectTimeoutMs(25000)
-                .setReadTimeoutMs(25000)
-                .setAllowCrossProtocolRedirects(true)
-                .setDefaultRequestProperties(headers)
 
             val mediaItem = MediaItem.Builder()
                 .setUri(Uri.parse(url))
                 .setMimeType(if (url.contains(".m3u8", ignoreCase = true) || url.contains(".txt", ignoreCase = true)) MimeTypes.APPLICATION_M3U8 else MimeTypes.APPLICATION_MP4)
                 .build()
 
-            val mediaSource = DefaultMediaSourceFactory(httpFactory).createMediaSource(mediaItem)
+            val mediaSource = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpFactory).createMediaSource(mediaItem)
             exoPlayer.setMediaSource(mediaSource)
             exoPlayer.prepare()
             exoPlayer.playWhenReady = true

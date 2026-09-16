@@ -80,6 +80,7 @@ object IptvParser {
         var currentLogo = ""
         var currentGroup = ""
         var currentTvgId = ""
+        val currentHeaders = mutableMapOf<String, String>()
 
         reader.forEachLine { line ->
             val trimmed = line.trim()
@@ -96,21 +97,69 @@ object IptvParser {
                         currentName = displayName
                     }
                 }
+            } else if (trimmed.startsWith("#EXTVLCOPT:http-user-agent=", ignoreCase = true)) {
+                currentHeaders["User-Agent"] = trimmed.substringAfter("=", "").trim()
+            } else if (trimmed.startsWith("#EXTVLCOPT:http-referrer=", ignoreCase = true) || trimmed.startsWith("#EXTVLCOPT:http-referer=", ignoreCase = true)) {
+                currentHeaders["Referer"] = trimmed.substringAfter("=", "").trim()
+            } else if (trimmed.startsWith("#EXTVLCOPT:http-origin=", ignoreCase = true)) {
+                currentHeaders["Origin"] = trimmed.substringAfter("=", "").trim()
+            } else if (trimmed.startsWith("#EXTHTTP:", ignoreCase = true)) {
+                try {
+                    val jsonStr = trimmed.substringAfter(":", "").trim()
+                    val json = org.json.JSONObject(jsonStr)
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val value = json.optString(key, "")
+                        if (value.isNotBlank()) {
+                            currentHeaders[key] = value
+                        }
+                    }
+                } catch (_: Exception) {}
+            } else if (trimmed.startsWith("#KODIPROP:inputstream.adaptive.manifest_headers=", ignoreCase = true) ||
+                trimmed.startsWith("#KODIPROP:inputstream.adaptive.stream_headers=", ignoreCase = true)) {
+                val headerContent = trimmed.substringAfter("=", "").trim()
+                headerContent.split("&").forEach { pair ->
+                    val parts = pair.split("=", limit = 2)
+                    if (parts.size == 2 && parts[0].isNotBlank()) {
+                        currentHeaders[parts[0].trim()] = parts[1].trim()
+                    }
+                }
             } else if (trimmed.startsWith("http")) {
-                val name = currentName.ifEmpty { trimmed.substringAfterLast("/") }
+                var streamUrl = trimmed
+                val channelHeaders = mutableMapOf<String, String>()
+                channelHeaders.putAll(currentHeaders)
+
+                // Check pipe syntax: http://stream.m3u8|User-Agent=...&Referer=...
+                if (streamUrl.contains("|")) {
+                    val parts = streamUrl.split("|", limit = 2)
+                    streamUrl = parts[0].trim()
+                    if (parts.size > 1) {
+                        parts[1].split("&").forEach { pair ->
+                            val kv = pair.split("=", limit = 2)
+                            if (kv.size == 2 && kv[0].isNotBlank()) {
+                                channelHeaders[kv[0].trim()] = kv[1].trim()
+                            }
+                        }
+                    }
+                }
+
+                val name = currentName.ifEmpty { streamUrl.substringAfterLast("/") }
                 channels.add(
                     IptvChannel(
                         name = name,
-                        url = trimmed,
+                        url = streamUrl,
                         logo = currentLogo,
                         group = currentGroup.ifEmpty { "Channels" },
-                        tvgId = currentTvgId
+                        tvgId = currentTvgId,
+                        headers = channelHeaders
                     )
                 )
                 currentName = ""
                 currentLogo = ""
                 currentGroup = ""
                 currentTvgId = ""
+                currentHeaders.clear()
             }
         }
         return channels

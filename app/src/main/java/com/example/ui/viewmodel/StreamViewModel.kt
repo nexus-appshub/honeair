@@ -1692,6 +1692,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         com.example.ui.theme.currentThemeIndex.value = value
     }
 
+    private val _decoderIndex = MutableStateFlow(sharedPrefs.getInt("setting_decoder_index", 0))
+    val decoderIndex: StateFlow<Int> = _decoderIndex.asStateFlow()
+    fun setDecoderIndex(value: Int) {
+        _decoderIndex.value = value
+        sharedPrefs.edit().putInt("setting_decoder_index", value).apply()
+    }
+
     private val _hardwareAccel = MutableStateFlow(sharedPrefs.getBoolean("setting_hardware_accel", true))
     val hardwareAccel: StateFlow<Boolean> = _hardwareAccel.asStateFlow()
     fun setHardwareAccel(value: Boolean) {

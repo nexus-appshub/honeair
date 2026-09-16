@@ -183,19 +183,37 @@ fun OfflineVideoPlayerScreen(
             .trim()
     }
 
-    // ExoPlayer Instance (Instantiated ONCE)
+    // ExoPlayer Instance (Instantiated ONCE with HW+ Hardware Acceleration and Track Selection)
     val exoPlayer = remember {
+        val sharedPrefs = context.getSharedPreferences("stream_app_prefs", android.content.Context.MODE_PRIVATE)
+        val userDecoderIndex = sharedPrefs.getInt("setting_decoder_index", 0)
+        val isHwAccel = sharedPrefs.getBoolean("setting_hardware_accel", true)
+
+        val renderersFactory = com.example.network.SmartNetworkBoosterEngine.createRenderersFactory(
+            context = context,
+            decoderMode = userDecoderIndex,
+            isHardwareAccelerated = isHwAccel
+        )
+
+        val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context)
+
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                2000,  // Min buffer before play (small for instant local playback)
-                5000,  // Max buffer
+                2500,  // Min buffer before play
+                8000,  // Max buffer for instant responsive local file seeking
                 1000,  // Playback buffer
-                1000   // Rebuffer
+                1500   // Rebuffer
             )
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        ExoPlayer.Builder(context)
+        ExoPlayer.Builder(context, renderersFactory)
+            .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
+            .setHandleAudioBecomingNoisy(true)
+            .setSeekBackIncrementMs(10000)
+            .setSeekForwardIncrementMs(10000)
             .build()
     }
 

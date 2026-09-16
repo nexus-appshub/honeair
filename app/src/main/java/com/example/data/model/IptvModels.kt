@@ -13,7 +13,8 @@ data class IptvChannel(
     val logo: String = "",
     val group: String = "",
     val tvgId: String = "",
-    val isPremium: Boolean = false
+    val isPremium: Boolean = false,
+    val headers: Map<String, String> = emptyMap()
 )
 
 // ১. স্পোর্টস ইভেন্ট রেসপন্স

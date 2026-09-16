@@ -2536,6 +2536,7 @@ fun HomeScreen(
                     ExoPlayerView(
                         streamUrl = activeChannel!!.url,
                         channelName = activeChannel!!.name,
+                        customHeaders = activeChannel!!.headers,
                         isFullScreen = false,
                         isInPipMode = false,
                         fallbackUrl = fallbackUrl,
@@ -3856,6 +3857,7 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                 ExoPlayerView(
                     streamUrl = channel.url,
                     channelName = channel.name,
+                    customHeaders = channel.headers,
                     isFullScreen = isFullScreen,
                     isInPipMode = isInPipMode || isMiniPlayer,
                     onMiniPlayerToggle = onMiniPlayerToggle,
@@ -6588,7 +6590,22 @@ fun SettingsScreen(
     // Dropdown States
     val selectedBufferIndex by viewModel.bufferIndex.collectAsState()
     val bufferOptions = remember {
-        listOf("Adaptive Standard (10s)", "Fast-Load Caching (3s)", "High-Density (30s)", "Zero-Buffer Cinema")
+        listOf(
+            "Ultra Low Latency (2s) - Fastest Start",
+            "Medium Buffer (5s) - Recommended for Live TV",
+            "Large Buffer (10s) - Anti-Freeze & Heavy Traffic",
+            "Maximum Anti-Buffer (25s) - Zero Lag / Weak Net"
+        )
+    }
+
+    val selectedDecoderIndex by viewModel.decoderIndex.collectAsState()
+    val decoderOptions = remember {
+        listOf(
+            "HW+ Hardware Accelerated (GPU Ultra Smooth)",
+            "Standard Hardware Decoder",
+            "Software Decoder (Fallback Compatibility)",
+            "Auto Smart-Adaptive Engine"
+        )
     }
 
     val selectedQualityIndex by viewModel.qualityIndex.collectAsState()
@@ -7641,12 +7658,24 @@ fun SettingsScreen(
                 item {
                     SettingsDropdownRow(
                         title = "ExoPlayer Stream Buffer",
-                        subtitle = "Network pre-fetching strategy",
+                        subtitle = "Network pre-fetching & anti-freeze cushion",
                         icon = Icons.Default.Speed,
                         iconTint = Color(0xFFFF6B00),
                         options = bufferOptions,
                         selectedIndex = selectedBufferIndex,
                         onOptionSelected = { viewModel.setBufferIndex(it) }
+                    )
+                }
+
+                item {
+                    SettingsDropdownRow(
+                        title = "Decoder Engine",
+                        subtitle = "Video decoding acceleration & fallback",
+                        icon = Icons.Default.Tune,
+                        iconTint = Color(0xFFFF6B00),
+                        options = decoderOptions,
+                        selectedIndex = selectedDecoderIndex,
+                        onOptionSelected = { viewModel.setDecoderIndex(it) }
                     )
                 }
 
