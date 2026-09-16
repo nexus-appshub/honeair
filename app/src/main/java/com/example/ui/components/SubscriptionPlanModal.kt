@@ -559,11 +559,15 @@ fun SubscriptionPlanModal(
                     } else {
                         // === PAYMENT INSTRUCTIONS VIEW ===
                         val paymentGateways = liveVipConfig?.paymentGateways
+                        val merchantConfig = liveVipConfig?.merchantConfig
                         
                         // Default Fallback details if live config is empty
-                        val fallbackBkash = GatewayInfo(number = "01783350280", type = "Personal")
-                        val fallbackNagad = GatewayInfo(number = "01783350280", type = "Personal")
-                        val fallbackRocket = GatewayInfo(number = "01783350280", type = "Personal")
+                        val fallbackBkash = merchantConfig?.bkashNumber?.takeIf { it.isNotBlank() }?.let { GatewayInfo(number = it, type = merchantConfig.bkashType ?: "Personal") }
+                            ?: GatewayInfo(number = "01722104387", type = "Personal")
+                        val fallbackNagad = merchantConfig?.nagadNumber?.takeIf { it.isNotBlank() }?.let { GatewayInfo(number = it, type = merchantConfig.nagadType ?: "Personal") }
+                            ?: GatewayInfo(number = "01722104387", type = "Personal")
+                        val fallbackRocket = merchantConfig?.rocketNumber?.takeIf { it.isNotBlank() }?.let { GatewayInfo(number = it, type = merchantConfig.rocketType ?: "Personal") }
+                            ?: GatewayInfo(number = "01722104387", type = "Personal")
                         
                         val activeBkash = paymentGateways?.bkash ?: fallbackBkash
                         val activeNagad = paymentGateways?.nagad ?: fallbackNagad
@@ -751,7 +755,10 @@ fun SubscriptionPlanModal(
                         Spacer(modifier = Modifier.height(18.dp))
 
                         // WhatsApp Admin Link & Action Button
-                        val rawWhatsapp = paymentGateways?.whatsapp ?: "+8801783350280"
+                        val rawWhatsapp = paymentGateways?.whatsapp
+                            ?: merchantConfig?.whatsappNumber
+                            ?: merchantConfig?.helplineNumber
+                            ?: "+8801722104387"
                         val whatsappUrl = if (rawWhatsapp.startsWith("http")) {
                             rawWhatsapp
                         } else {

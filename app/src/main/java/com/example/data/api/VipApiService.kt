@@ -15,6 +15,7 @@ data class VipConfigResponse(
     val version: String? = "2.0",
     val pricingPlans: List<VipPlan> = emptyList(),
     val paymentGateways: PaymentGateways? = null,
+    val merchantConfig: MerchantConfig? = null,
     val modalNotice: ModalNotice? = null,
     val premiumUsers: List<String> = emptyList(),
     val redeemCodes: List<RedeemCode> = emptyList(),
@@ -24,11 +25,28 @@ data class VipConfigResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class MerchantConfig(
+    val bkashNumber: String? = null,
+    val bkashType: String? = "Personal",
+    val nagadNumber: String? = null,
+    val nagadType: String? = "Personal",
+    val rocketNumber: String? = null,
+    val rocketType: String? = "Personal",
+    val whatsappNumber: String? = null,
+    val helplineNumber: String? = null,
+    val merchantNotes: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class RedeemCode(
     val code: String = "",
     val planName: String? = null,
     val maxUses: Int = 1,
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val durationDays: Double? = null,
+    val expiresAt: String? = null,
+    val isLifetime: Boolean? = false,
+    val usedCount: Int = 0
 )
 
 @JsonClass(generateAdapter = true)

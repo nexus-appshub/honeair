@@ -412,7 +412,79 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             return Pair(false, "Invalid code! Please check and try again.")
         }
 
-        // Local Fallback: If code matches the global config (which has Firebase fallback), allow it even if server is down
+        // 1. Check loaded VIP config redeemCodes (from Firebase app_vip_config.json)
+        val vipConfig = com.example.subscription.SubscriptionManager.vipConfig.value
+        val matchedCode = vipConfig?.redeemCodes?.firstOrNull { it.code.trim().equals(entered, ignoreCase = true) }
+        if (matchedCode != null) {
+            if (!matchedCode.isActive) {
+                return Pair(false, "This redeem code is no longer active.")
+            }
+
+            // Check if code has an expiration date
+            val expiresAtStr = matchedCode.expiresAt
+            if (!expiresAtStr.isNullOrBlank()) {
+                val isExpired = try {
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+                    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    val d = sdf.parse(expiresAtStr.substringBefore('.'))
+                    d != null && System.currentTimeMillis() > d.time
+                } catch (e: Exception) {
+                    false
+                }
+                if (isExpired) {
+                    return Pair(false, "This redeem code has expired.")
+                }
+            }
+
+            val planName = matchedCode.planName ?: "VIP Promo Pass"
+            val durationDays = matchedCode.durationDays
+
+            // Calculate precise duration (e.g. 0.25 days = 6 hours for 6h match pass)
+            val validityMs: Long = when {
+                matchedCode.isLifetime == true -> 100L * 365 * 24 * 3600 * 1000L
+                durationDays != null && durationDays > 0.0 -> {
+                    (durationDays * 24.0 * 3600.0 * 1000.0).toLong()
+                }
+                planName.contains("6 hour", ignoreCase = true) || planName.contains("6h", ignoreCase = true) || planName.contains("match pass", ignoreCase = true) -> {
+                    6 * 3600 * 1000L
+                }
+                planName.contains("12 hour", ignoreCase = true) || planName.contains("12h", ignoreCase = true) -> {
+                    12 * 3600 * 1000L
+                }
+                planName.contains("1 day", ignoreCase = true) || planName.contains("24 hour", ignoreCase = true) -> {
+                    24 * 3600 * 1000L
+                }
+                planName.contains("7 day", ignoreCase = true) || planName.contains("1 week", ignoreCase = true) -> {
+                    7 * 24 * 3600 * 1000L
+                }
+                planName.contains("30 day", ignoreCase = true) || planName.contains("1 month", ignoreCase = true) -> {
+                    30 * 24 * 3600 * 1000L
+                }
+                else -> {
+                    (_appControlConfig.value?.redeemValidityHours ?: 24) * 3600 * 1000L
+                }
+            }
+
+            val unlockUntil = System.currentTimeMillis() + validityMs
+            sharedPrefs.edit()
+                .putLong("redeem_unlocked_until", unlockUntil)
+                .putString("redeem_unlocked_user", cleanEmail)
+                .putString("redeem_unlocked_code", entered)
+                .putString("redeem_plan_name", planName)
+                .apply()
+
+            _isRedeemActive.value = true
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    com.example.data.api.VipApiClient.apiService.redeemCode(
+                        com.example.data.api.RedeemRequest(entered, cleanEmail)
+                    )
+                } catch (e: Exception) {}
+            }
+            return Pair(true, "Congratulations! $planName has been activated.")
+        }
+
+        // 2. Check local/remote appControl global redeem code
         val globalConfig = _appControlConfig.value
         if (globalConfig != null && globalConfig.redeemCode.isNotBlank() && entered.equals(globalConfig.redeemCode, ignoreCase = true)) {
             val expiryTimestamp = globalConfig.redeemExpiryTimestamp
@@ -420,28 +492,33 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 return Pair(false, "This code has expired.")
             }
 
-            val validityHours = globalConfig.redeemValidityHours
-            val validityMs = validityHours * 60 * 60 * 1000L
+            val isMatchPass = entered.contains("match", ignoreCase = true) || entered.contains("6h", ignoreCase = true)
+            val validityMs = if (isMatchPass) {
+                6 * 3600 * 1000L
+            } else {
+                globalConfig.redeemValidityHours * 3600 * 1000L
+            }
             var unlockUntil = System.currentTimeMillis() + validityMs
             if (expiryTimestamp > 0L) {
                 unlockUntil = unlockUntil.coerceAtMost(expiryTimestamp)
             }
 
+            val planName = if (isMatchPass) "6 Hours Match Pass" else "VIP Promo Pass"
             sharedPrefs.edit()
                 .putLong("redeem_unlocked_until", unlockUntil)
                 .putString("redeem_unlocked_user", cleanEmail)
                 .putString("redeem_unlocked_code", entered)
-                .putString("redeem_plan_name", "VIP Promo Pass")
+                .putString("redeem_plan_name", planName)
                 .apply()
 
             _isRedeemActive.value = true
-            // Also try to sync in background if possible, but don't wait for it
             viewModelScope.launch(Dispatchers.IO) {
                 try { com.example.data.api.VipApiClient.apiService.redeemCode(com.example.data.api.RedeemRequest(entered, cleanEmail)) } catch(e: Exception) {}
             }
-            return Pair(true, "Congratulations! VIP has been activated.")
+            return Pair(true, "Congratulations! $planName has been activated.")
         }
 
+        // 3. Server API check via Render
         return try {
             val response = com.example.data.api.VipApiClient.apiService.redeemCode(
                 com.example.data.api.RedeemRequest(
@@ -452,24 +529,36 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             )
             
             if (response.success) {
-                // If successful, refresh the VIP config so the local app knows they are premium
                 com.example.subscription.SubscriptionManager.fetchLiveVipConfig()
 
-                // Save locally to display the "Time Left" duration in the profile tab
-                val config = _appControlConfig.value
-                val expiryTimestamp = config?.redeemExpiryTimestamp ?: 0L
-                val validityHours = config?.redeemValidityHours ?: 24
-                val validityMs = validityHours * 60 * 60 * 1000L
-                var unlockUntil = System.currentTimeMillis() + validityMs
-                if (expiryTimestamp > 0L) {
-                    unlockUntil = unlockUntil.coerceAtMost(expiryTimestamp)
+                val serverPlan = response.planName ?: "VIP Promo Pass"
+                val validityMs: Long = when {
+                    serverPlan.contains("6 hour", ignoreCase = true) || serverPlan.contains("6h", ignoreCase = true) || serverPlan.contains("match pass", ignoreCase = true) -> {
+                        6 * 3600 * 1000L
+                    }
+                    serverPlan.contains("12 hour", ignoreCase = true) || serverPlan.contains("12h", ignoreCase = true) -> {
+                        12 * 3600 * 1000L
+                    }
+                    serverPlan.contains("1 day", ignoreCase = true) || serverPlan.contains("24 hour", ignoreCase = true) -> {
+                        24 * 3600 * 1000L
+                    }
+                    serverPlan.contains("7 day", ignoreCase = true) || serverPlan.contains("1 week", ignoreCase = true) -> {
+                        7 * 24 * 3600 * 1000L
+                    }
+                    serverPlan.contains("30 day", ignoreCase = true) || serverPlan.contains("1 month", ignoreCase = true) -> {
+                        30 * 24 * 3600 * 1000L
+                    }
+                    else -> {
+                        (_appControlConfig.value?.redeemValidityHours ?: 24) * 3600 * 1000L
+                    }
                 }
+                val unlockUntil = System.currentTimeMillis() + validityMs
                 
                 sharedPrefs.edit()
                     .putLong("redeem_unlocked_until", unlockUntil)
                     .putString("redeem_unlocked_user", cleanEmail)
                     .putString("redeem_unlocked_code", entered)
-                    .putString("redeem_plan_name", response.planName ?: "VIP Promo Pass")
+                    .putString("redeem_plan_name", serverPlan)
                     .apply()
 
                 _isRedeemActive.value = true
@@ -479,6 +568,48 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            // Direct Firebase RTDB fallback query if Render timed out or failed
+            try {
+                val okHttpClient = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val req = okhttp3.Request.Builder()
+                    .url("https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/app_vip_config/redeemCodes.json")
+                    .build()
+                okHttpClient.newCall(req).execute().use { fbRes ->
+                    val fbBody = fbRes.body?.string()
+                    if (fbRes.isSuccessful && !fbBody.isNullOrBlank() && fbBody.trim().startsWith("[")) {
+                        val arr = org.json.JSONArray(fbBody)
+                        for (i in 0 until arr.length()) {
+                            val cObj = arr.optJSONObject(i) ?: continue
+                            val cCode = cObj.optString("code", "")
+                            if (cCode.equals(entered, ignoreCase = true)) {
+                                val isActive = cObj.optBoolean("isActive", true)
+                                if (!isActive) return Pair(false, "This code is no longer active.")
+                                val planName = cObj.optString("planName", "VIP Pass")
+                                val dDays = if (cObj.has("durationDays")) cObj.optDouble("durationDays") else null
+                                val vMs: Long = when {
+                                    cObj.optBoolean("isLifetime", false) -> 100L * 365 * 24 * 3600 * 1000L
+                                    dDays != null && dDays > 0.0 -> (dDays * 24.0 * 3600.0 * 1000.0).toLong()
+                                    planName.contains("6 hour", ignoreCase = true) || planName.contains("6h", ignoreCase = true) || planName.contains("match pass", ignoreCase = true) -> 6 * 3600 * 1000L
+                                    else -> 24 * 3600 * 1000L
+                                }
+                                val unlockUntil = System.currentTimeMillis() + vMs
+                                sharedPrefs.edit()
+                                    .putLong("redeem_unlocked_until", unlockUntil)
+                                    .putString("redeem_unlocked_user", cleanEmail)
+                                    .putString("redeem_unlocked_code", entered)
+                                    .putString("redeem_plan_name", planName)
+                                    .apply()
+                                _isRedeemActive.value = true
+                                return Pair(true, "Congratulations! $planName has been activated.")
+                            }
+                        }
+                    }
+                }
+            } catch (ignored: Exception) {}
+
             Pair(false, "Network error while applying redeem code. Please try again.")
         }
     }
@@ -564,10 +695,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         return false
     }
 
-    private var hasDismissedAppNoticeInSession = false
+    private var lastDismissedNoticeKey: String = ""
 
     fun dismissAppNotice() {
-        hasDismissedAppNoticeInSession = true
+        val currentNotice = _appControlConfig.value?.notice
+        if (currentNotice != null) {
+            lastDismissedNoticeKey = "${currentNotice.title}_${currentNotice.message}"
+        }
         val current = _appControlConfig.value ?: return
         _appControlConfig.value = current.copy(notice = null)
     }
@@ -576,13 +710,14 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isCheckingSuspension.value = true
             val client = okhttp3.OkHttpClient.Builder()
-                .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                 .build()
 
             val controlUrls = listOf(
-                "https://homeairtv-server.onrender.com/api/appControl",
-                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl.json"
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl.json",
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/configs/globalConfig.json",
+                "https://homeairtv-server.onrender.com/api/appControl"
             )
             var configLoaded = false
             for (urlStr in controlUrls) {
@@ -674,17 +809,81 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 }
                             }
 
-                            val noticeObj = json.optJSONObject("notice")
-                            val notice = if (noticeObj != null) {
-                                AppNotice(
-                                    title = noticeObj.optString("title", ""),
-                                    message = noticeObj.optString("message", ""),
-                                    imageUrl = noticeObj.optString("imageUrl", null),
-                                    buttonText = noticeObj.optString("buttonText", null),
-                                    buttonUrl = noticeObj.optString("buttonUrl", null),
-                                    isDismissible = noticeObj.optBoolean("isDismissible", true)
-                                )
-                            } else null
+                            val noticeRaw = json.opt("notice")
+                                ?: json.opt("specialAnnouncement")
+                                ?: json.opt("special_announcement")
+                                ?: json.opt("announcement")
+                                ?: json.opt("modalNotice")
+                                ?: json.opt("adminNotice")
+
+                            val parsedNotice: AppNotice? = when (noticeRaw) {
+                                is org.json.JSONObject -> {
+                                    val isEnabled = noticeRaw.optBoolean("enabled", true)
+                                    if (isEnabled) {
+                                        val title = noticeRaw.optString("title", "").ifBlank {
+                                            noticeRaw.optString("header", "Special Announcement")
+                                        }
+                                        val message = noticeRaw.optString("message", "").ifBlank {
+                                            noticeRaw.optString("text", "").ifBlank {
+                                                noticeRaw.optString("body", "").ifBlank {
+                                                    noticeRaw.optString("description", "")
+                                                }
+                                            }
+                                        }
+                                        val rawImg = noticeRaw.optString("imageUrl", "").ifBlank {
+                                            noticeRaw.optString("image", "").ifBlank {
+                                                noticeRaw.optString("bannerUrl", "")
+                                            }
+                                        }
+                                        val imgUrl = if (rawImg.isBlank() || rawImg == "null") null else rawImg
+
+                                        val rawBtnText = noticeRaw.optString("buttonText", "").ifBlank {
+                                            noticeRaw.optString("btnText", "").ifBlank {
+                                                noticeRaw.optString("actionText", "")
+                                            }
+                                        }
+                                        val btnText = if (rawBtnText.isBlank() || rawBtnText == "null") null else rawBtnText
+
+                                        val rawBtnUrl = noticeRaw.optString("buttonUrl", "").ifBlank {
+                                            noticeRaw.optString("btnUrl", "").ifBlank {
+                                                noticeRaw.optString("actionUrl", "").ifBlank {
+                                                    noticeRaw.optString("link", "")
+                                                }
+                                            }
+                                        }
+                                        val btnUrl = if (rawBtnUrl.isBlank() || rawBtnUrl == "null") null else rawBtnUrl
+                                        val isDismissible = noticeRaw.optBoolean("isDismissible", noticeRaw.optBoolean("dismissible", true))
+
+                                        if (title.isNotBlank() || message.isNotBlank()) {
+                                            AppNotice(
+                                                title = title,
+                                                message = message,
+                                                imageUrl = imgUrl,
+                                                buttonText = btnText,
+                                                buttonUrl = btnUrl,
+                                                isDismissible = isDismissible
+                                            )
+                                        } else null
+                                    } else null
+                                }
+                                is String -> {
+                                    if (noticeRaw.isNotBlank() && noticeRaw != "null") {
+                                        AppNotice(
+                                            title = "Special Announcement",
+                                            message = noticeRaw,
+                                            imageUrl = null,
+                                            buttonText = null,
+                                            buttonUrl = null,
+                                            isDismissible = true
+                                        )
+                                    } else null
+                                }
+                                else -> null
+                            }
+
+                            val noticeKey = if (parsedNotice != null) "${parsedNotice.title}_${parsedNotice.message}" else ""
+                            val isDismissed = noticeKey.isNotBlank() && noticeKey == lastDismissedNoticeKey
+                            val notice = if (isDismissed) null else parsedNotice
 
                             // Cache to SharedPreferences for instant cold-boot enforcement
                             try {
@@ -715,7 +914,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 isAppSuspended = isSuspended,
                                 suspensionTitle = suspensionTitle,
                                 suspensionMessage = suspensionMessage,
-                                notice = if (hasDismissedAppNoticeInSession) null else notice,
+                                notice = notice,
                                 isSportsTabLocked = isSportsLocked,
                                 sportsTabStatusText = sportsStatus,
                                 sportsLockReason = sportsReason,

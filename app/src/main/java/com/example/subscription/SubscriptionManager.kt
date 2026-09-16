@@ -1,7 +1,11 @@
 package com.example.subscription
 
 import android.util.Log
+import com.example.data.api.GatewayInfo
+import com.example.data.api.MerchantConfig
+import com.example.data.api.ModalNotice
 import com.example.data.api.PaymentGateways
+import com.example.data.api.RedeemCode
 import com.example.data.api.VipApiClient
 import com.example.data.api.VipConfigResponse
 import com.example.data.api.VipPlan
@@ -17,9 +21,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 /**
  * SubscriptionManager manages VIP / Premium membership status using Firebase Auth & Firestore,
@@ -81,30 +89,239 @@ object SubscriptionManager {
     }
 
     /**
-     * Fetches live VIP pricing plans and payment gateways from the server API
+     * Fetches live VIP pricing plans and payment gateways from the server API and Firebase RTDB
      */
     fun fetchLiveVipConfig() {
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
+            // Priority 1: Fetch directly from Firebase Realtime Database (where admin panel saves changes immediately)
+            val firebaseUrls = listOf(
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/app_vip_config.json",
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/configs/vipConfig.json"
+            )
+
+            var loadedFromFirebase = false
+            val okHttpClient = OkHttpClient.Builder()
+                .connectTimeout(12, TimeUnit.SECONDS)
+                .readTimeout(12, TimeUnit.SECONDS)
+                .build()
+
+            for (fbUrl in firebaseUrls) {
+                if (loadedFromFirebase) break
+                try {
+                    val req = Request.Builder()
+                        .url(fbUrl)
+                        .header("Accept", "application/json")
+                        .build()
+                    okHttpClient.newCall(req).execute().use { response ->
+                        val body = response.body?.string()
+                        if (response.isSuccessful && !body.isNullOrBlank() && body.trim() != "null" && body.trim().startsWith("{")) {
+                            val parsed = parseVipConfigFromJson(body)
+                            if (parsed != null && (parsed.pricingPlans.isNotEmpty() || parsed.paymentGateways != null || parsed.merchantConfig != null)) {
+                                _vipConfig.value = parsed
+                                synchronized(remotePremiumEmails) {
+                                    remotePremiumEmails.clear()
+                                    if (parsed.premiumUsers.isNotEmpty()) {
+                                        remotePremiumEmails.addAll(parsed.premiumUsers.map { it.trim().lowercase() }.filter { it.isNotBlank() })
+                                    }
+                                }
+                                loadedFromFirebase = true
+                                Log.d(TAG, "Successfully loaded live VIP config & payment info from Firebase: $fbUrl")
+                                
+                                val auth = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
+                                val user = auth?.currentUser
+                                checkUserSubscription(user?.email, user?.uid)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Firebase VIP config fetch note for $fbUrl: ${e.message}")
+                }
+            }
+
+            // Priority 2: Query Render API as mirror or fallback
             try {
                 val response = VipApiClient.apiService.getVipConfig()
                 if (response.success) {
-                    _vipConfig.value = response
-                    synchronized(remotePremiumEmails) {
-                        remotePremiumEmails.clear()
-                        if (response.premiumUsers.isNotEmpty()) {
-                            remotePremiumEmails.addAll(response.premiumUsers.map { it.trim().lowercase() }.filter { it.isNotBlank() })
+                    val current = _vipConfig.value
+                    if (!loadedFromFirebase || current == null || current.pricingPlans.isEmpty()) {
+                        _vipConfig.value = response
+                        synchronized(remotePremiumEmails) {
+                            remotePremiumEmails.clear()
+                            if (response.premiumUsers.isNotEmpty()) {
+                                remotePremiumEmails.addAll(response.premiumUsers.map { it.trim().lowercase() }.filter { it.isNotBlank() })
+                            }
                         }
+                    } else {
+                        // Merge payment gateways and pricing plans if Firebase had partial info
+                        val mergedGateways = current.paymentGateways ?: response.paymentGateways
+                        val mergedPlans = if (current.pricingPlans.isNotEmpty()) current.pricingPlans else response.pricingPlans
+                        _vipConfig.value = current.copy(
+                            paymentGateways = mergedGateways,
+                            pricingPlans = mergedPlans
+                        )
                     }
-                    Log.d(TAG, "Fetched ${response.pricingPlans.size} VIP plans successfully")
-                    
-                    // Trigger recompute to update UI state
                     val auth = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
                     val user = auth?.currentUser
                     checkUserSubscription(user?.email, user?.uid)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to fetch live VIP config: ${e.message}")
+                Log.w(TAG, "Render VIP API fetch note: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Parses Firebase app_vip_config JSON into VipConfigResponse, supporting both merchantConfig
+     * and paymentGateways schemas used by the website admin panel.
+     */
+    private fun parseVipConfigFromJson(jsonStr: String): VipConfigResponse? {
+        return try {
+            val json = JSONObject(jsonStr)
+
+            // 1. Merchant Config
+            val mObj = json.optJSONObject("merchantConfig")
+            val merchantConfig = if (mObj != null) {
+                MerchantConfig(
+                    bkashNumber = mObj.optString("bkashNumber", "").takeIf { it.isNotBlank() },
+                    bkashType = mObj.optString("bkashType", "Personal"),
+                    nagadNumber = mObj.optString("nagadNumber", "").takeIf { it.isNotBlank() },
+                    nagadType = mObj.optString("nagadType", "Personal"),
+                    rocketNumber = mObj.optString("rocketNumber", "").takeIf { it.isNotBlank() },
+                    rocketType = mObj.optString("rocketType", "Personal"),
+                    whatsappNumber = mObj.optString("whatsappNumber", "").takeIf { it.isNotBlank() },
+                    helplineNumber = mObj.optString("helplineNumber", "").takeIf { it.isNotBlank() },
+                    merchantNotes = mObj.optString("merchantNotes", "").takeIf { it.isNotBlank() }
+                )
+            } else null
+
+            // 2. Payment Gateways (merge direct paymentGateways with merchantConfig)
+            val pgObj = json.optJSONObject("paymentGateways")
+            val bkashObj = pgObj?.optJSONObject("bkash")
+            val nagadObj = pgObj?.optJSONObject("nagad")
+            val rocketObj = pgObj?.optJSONObject("rocket")
+
+            val bkashNum = bkashObj?.optString("number", "")?.takeIf { it.isNotBlank() }
+                ?: merchantConfig?.bkashNumber
+            val bkashType = bkashObj?.optString("type", "")?.takeIf { it.isNotBlank() }
+                ?: merchantConfig?.bkashType ?: "Personal"
+
+            val nagadNum = nagadObj?.optString("number", "")?.takeIf { it.isNotBlank() }
+                ?: merchantConfig?.nagadNumber
+            val nagadType = nagadObj?.optString("type", "")?.takeIf { it.isNotBlank() }
+                ?: merchantConfig?.nagadType ?: "Personal"
+
+            val rocketNum = rocketObj?.optString("number", "")?.takeIf { it.isNotBlank() }
+                ?: merchantConfig?.rocketNumber
+            val rocketType = rocketObj?.optString("type", "")?.takeIf { it.isNotBlank() }
+                ?: merchantConfig?.rocketType ?: "Personal"
+
+            val whatsappNum = pgObj?.optString("whatsapp", "")?.takeIf { it.isNotBlank() }
+                ?: merchantConfig?.whatsappNumber
+                ?: merchantConfig?.helplineNumber
+
+            val paymentGateways = PaymentGateways(
+                bkash = if (!bkashNum.isNullOrBlank()) GatewayInfo(number = bkashNum, type = bkashType) else null,
+                nagad = if (!nagadNum.isNullOrBlank()) GatewayInfo(number = nagadNum, type = nagadType) else null,
+                rocket = if (!rocketNum.isNullOrBlank()) GatewayInfo(number = rocketNum, type = rocketType) else null,
+                whatsapp = whatsappNum
+            )
+
+            // 3. Pricing Plans
+            val plansList = mutableListOf<VipPlan>()
+            val plansArr = json.optJSONArray("pricingPlans")
+            if (plansArr != null) {
+                for (i in 0 until plansArr.length()) {
+                    val pObj = plansArr.optJSONObject(i) ?: continue
+                    val featuresList = mutableListOf<String>()
+                    val fArr = pObj.optJSONArray("features")
+                    if (fArr != null) {
+                        for (f in 0 until fArr.length()) {
+                            val feat = fArr.optString(f)
+                            if (feat.isNotBlank()) featuresList.add(feat)
+                        }
+                    }
+                    plansList.add(
+                        VipPlan(
+                            id = pObj.optString("id", "plan_$i"),
+                            name = pObj.optString("name", "VIP Plan"),
+                            duration = pObj.optString("duration", ""),
+                            priceBDT = pObj.optInt("priceBDT", 0),
+                            originalPriceBDT = if (pObj.has("originalPriceBDT")) pObj.optInt("originalPriceBDT") else null,
+                            isPopular = pObj.optBoolean("isPopular", false),
+                            badge = pObj.optString("badge", null),
+                            features = featuresList
+                        )
+                    )
+                }
+            }
+
+            // 4. Redeem Codes
+            val redeemCodesList = mutableListOf<RedeemCode>()
+            val rcArr = json.optJSONArray("redeemCodes")
+            if (rcArr != null) {
+                for (i in 0 until rcArr.length()) {
+                    val rObj = rcArr.optJSONObject(i) ?: continue
+                    redeemCodesList.add(
+                        RedeemCode(
+                            code = rObj.optString("code", ""),
+                            planName = rObj.optString("planName", null),
+                            maxUses = rObj.optInt("maxUses", 1),
+                            isActive = rObj.optBoolean("isActive", true),
+                            durationDays = if (rObj.has("durationDays")) rObj.optDouble("durationDays") else null,
+                            expiresAt = rObj.optString("expiresAt", null),
+                            isLifetime = rObj.optBoolean("isLifetime", false),
+                            usedCount = rObj.optInt("usedCount", 0)
+                        )
+                    )
+                }
+            }
+
+            // 5. Premium Users
+            val premiumEmailsList = mutableListOf<String>()
+            val puArr = json.optJSONArray("premiumUsers")
+            if (puArr != null) {
+                for (i in 0 until puArr.length()) {
+                    val emailStr = when (val item = puArr.get(i)) {
+                        is JSONObject -> {
+                            val status = item.optString("status", "active")
+                            if (status.equals("active", ignoreCase = true) || item.optBoolean("isLifetime", false)) {
+                                item.optString("email", "")
+                            } else ""
+                        }
+                        is String -> item
+                        else -> ""
+                    }
+                    if (emailStr.isNotBlank()) {
+                        premiumEmailsList.add(emailStr.trim().lowercase())
+                    }
+                }
+            }
+
+            // 6. Modal Notice
+            val mnObj = json.optJSONObject("modalNotice")
+            val modalNotice = if (mnObj != null) {
+                ModalNotice(
+                    title = mnObj.optString("title", ""),
+                    subtitle = mnObj.optString("subtitle", ""),
+                    supportWhatsApp = mnObj.optString("supportWhatsApp", null)
+                )
+            } else null
+
+            VipConfigResponse(
+                success = true,
+                pricingPlans = plansList,
+                paymentGateways = paymentGateways,
+                merchantConfig = merchantConfig,
+                modalNotice = modalNotice,
+                premiumUsers = premiumEmailsList,
+                redeemCodes = redeemCodesList,
+                isMobilePaymentEnabled = json.optBoolean("isMobilePaymentEnabled", true),
+                mobilePaymentDisabledNote = json.optString("mobilePaymentDisabledNote", null),
+                externalPaymentUrl = json.optString("externalPaymentUrl", null)
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing VIP config from JSON", e)
+            null
         }
     }
 

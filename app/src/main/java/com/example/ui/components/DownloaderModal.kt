@@ -608,20 +608,6 @@ fun DownloaderModal(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 17.sp
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .background(Color(0xFFFF4081).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "ANIKOTO CORE",
-                                        color = Color(0xFFFF4081),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 8.sp,
-                                        letterSpacing = 0.5.sp
-                                    )
-                                }
                             }
                             Text(
                                 text = "$title • S${season}E${episode}",

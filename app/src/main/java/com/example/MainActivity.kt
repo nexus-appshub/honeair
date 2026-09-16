@@ -300,7 +300,22 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             return
         }
 
-        config.notice?.let { notice ->
+        val vipModalNotice by com.example.subscription.SubscriptionManager.vipConfig.collectAsState()
+        val activeNotice = config.notice ?: run {
+            val vNotice = vipModalNotice?.modalNotice
+            if (vNotice != null && (vNotice.title.isNotBlank() || vNotice.subtitle.isNotBlank())) {
+                com.example.ui.viewmodel.AppNotice(
+                    title = vNotice.title.ifBlank { "Special Announcement" },
+                    message = vNotice.subtitle,
+                    imageUrl = null,
+                    buttonText = if (!vNotice.supportWhatsApp.isNullOrBlank()) "Contact Admin" else null,
+                    buttonUrl = if (!vNotice.supportWhatsApp.isNullOrBlank()) "https://wa.me/${vNotice.supportWhatsApp?.replace("+", "")?.replace(" ", "")?.trim()}" else null,
+                    isDismissible = true
+                )
+            } else null
+        }
+
+        activeNotice?.let { notice ->
             AppNoticeDialog(
                 notice = notice,
                 onDismiss = { viewModel.dismissAppNotice() }
