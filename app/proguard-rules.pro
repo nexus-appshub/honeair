@@ -10,11 +10,19 @@
 -keep class com.example.data.model.** { *; }
 -keep class com.example.data.database.** { *; }
 -keep class com.example.data.api.** { *; }
+-keep class com.example.scraper.** { *; }
+-dontwarn com.example.scraper.**
 -keep class com.example.update.** { *; }
 -keep class com.example.download.** { *; }
 -keep class com.example.network.** { *; }
 -keep class com.example.ui.viewmodel.UserProfile { *; }
 -keep class com.example.ui.viewmodel.** { *; }
+
+# Prevent Javascript interface methods from being obfuscated or removed
+-keepattributes JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
 # Firebase & Firestore rules
 -keep class com.google.firebase.** { *; }

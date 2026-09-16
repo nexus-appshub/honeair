@@ -44,6 +44,7 @@ credentials = "1.5.0"
 googleid = "1.1.1"
 media3 = "1.4.1"
 jsoup = "1.18.3"
+startapp = "5.3.1"
 
 
 [libraries]
@@ -106,6 +107,7 @@ androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.re
 androidx-media3-exoplayer-hls = { group = "androidx.media3", name = "media3-exoplayer-hls", version.ref = "media3" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
+startapp-sdk = { group = "com.startapp", name = "inapp-sdk", version.ref = "startapp" }
 
 
 [plugins]
