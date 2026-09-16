@@ -326,7 +326,74 @@ object UniversalAnimeDownloadScraper {
     }
 
     // --------------------------------------------------------------------------------------------------------
-    // 6. MULTI-SOURCE DOWNLOAD RESOLVER (Aggregates Anikoto, Kiwi, Aniwatch, MegaCloud, VidSrc, Vidnest, Vidrock)
+    // 6. NATIVE IN-APP ANIME STREAM EXTRACTION ENGINE (Direct Embed Decryption & Playback)
+    // --------------------------------------------------------------------------------------------------------
+    suspend fun extractNativeAnimeStream(
+        title: String,
+        season: Int = 1,
+        episode: Int = 1,
+        preferDub: Boolean = false
+    ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Starting Native Anime Stream Scraping for: $title (S$season Ep $episode, Dub: $preferDub)")
+            val serverGroup = AnikotoScraper.fetchAvailableServers(title = title, season = season, episode = episode)
+            val targetServers = if (preferDub && serverGroup.dubServers.isNotEmpty()) {
+                serverGroup.dubServers
+            } else if (serverGroup.subServers.isNotEmpty()) {
+                serverGroup.subServers
+            } else {
+                serverGroup.subServers + serverGroup.dubServers
+            }
+
+            val jobs = targetServers.take(5).map { srv ->
+                async {
+                    try {
+                        if (srv.streamUrl.isNotBlank() && (srv.streamUrl.endsWith(".m3u8") || srv.streamUrl.endsWith(".mp4") || srv.streamUrl.contains("/m3u8"))) {
+                            return@async ScrapedStreamResult(
+                                streamUrl = srv.streamUrl,
+                                headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to srv.referer.ifBlank { "https://anikoto.cz/" }),
+                                referer = srv.referer.ifBlank { "https://anikoto.cz/" },
+                                subtitles = emptyList()
+                            )
+                        }
+                        val embedUrl = AnikotoScraper.extractServerEmbedUrl(srv.linkId, serverGroup.watchUrl.ifBlank { "https://anikoto.cz/" })
+                        if (!embedUrl.isNullOrBlank()) {
+                            val resolved = resolveDirectMediaStream(embedUrl, serverGroup.watchUrl.ifBlank { "https://anikoto.cz/" })
+                            if (resolved.directUrl.isNotBlank()) {
+                                return@async ScrapedStreamResult(
+                                    streamUrl = resolved.directUrl,
+                                    headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to resolved.referer),
+                                    referer = resolved.referer,
+                                    subtitles = resolved.tracks.map {
+                                        SubtitleTrack(
+                                            url = it.url,
+                                            lang = it.lang,
+                                            label = it.label,
+                                            default = it.default
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Native server resolution failed for ${srv.name}: ${e.message}")
+                    }
+                    null
+                }
+            }
+
+            val results = jobs.awaitAll().filterNotNull()
+            if (results.isNotEmpty()) {
+                return@withContext results.first()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "extractNativeAnimeStream error: ${e.message}", e)
+        }
+        null
+    }
+
+    // --------------------------------------------------------------------------------------------------------
+    // 7. MULTI-SOURCE DOWNLOAD RESOLVER (Aggregates Anikoto, Kiwi, Aniwatch, MegaCloud, VidSrc, Vidnest, Vidrock)
     // --------------------------------------------------------------------------------------------------------
     suspend fun resolveAllDownloadableOptions(
         title: String,

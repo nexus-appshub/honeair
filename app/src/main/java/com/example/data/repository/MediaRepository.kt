@@ -209,18 +209,19 @@ class MediaRepository {
         addJob("Latest", "movie") { tmdbApi.getNowPlayingMovies(page = it) }
         addJob("Latest", "movie") { tmdbApi.getLatestReleasedMovies(page = it) }
         addJob("Latest", "series") { tmdbApi.getOnTheAirTvShows(page = it) }
-        // All anime in Latest is sourced purely from Anikoto
+        // All anime in Latest is sourced from Anikoto + TMDB Anime
         jobs.add(async(Dispatchers.IO) {
             try {
                 val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(sortBy = "latest-updated", page = page)
                 list.map { item ->
                     val isMovie = item.type.lowercase().contains("movie")
                     val type = if (isMovie) "movie" else "series"
+                    val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                     MediaItem(
                         id = "anikoto_${item.id}",
                         title = item.title,
                         category = if (isMovie) "Latest Anime Movies" else "Latest Anime Series",
-                        imageUrl = item.posterUrl,
+                        imageUrl = poster.ifBlank { if (isMovie) "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80" else "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
                         rating = if (item.rating.isNotBlank()) item.rating else "8.4",
                         year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2025",
                         description = item.description,
@@ -231,6 +232,14 @@ class MediaRepository {
                         type = type
                     )
                 }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        })
+        jobs.add(async(Dispatchers.IO) {
+            try {
+                val res = tmdbApi.getLatestAiringAnime(page = page).results ?: emptyList()
+                res.map { mapToMediaItem(it, "Latest Anime Series", "series") }
             } catch (e: Exception) {
                 emptyList()
             }
@@ -268,11 +277,12 @@ class MediaRepository {
             try {
                 val animeSeries = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "TV", sortBy = "latest-updated", page = 1)
                 animeSeries.map { item ->
+                    val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                     MediaItem(
                         id = "anikoto_${item.id}",
                         title = item.title,
                         category = "Anime Series",
-                        imageUrl = item.posterUrl,
+                        imageUrl = poster.ifBlank { "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
                         rating = if (item.rating.isNotBlank()) item.rating else "8.3",
                         year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
                         description = item.description,
@@ -289,13 +299,22 @@ class MediaRepository {
         })
         jobs.add(async(Dispatchers.IO) {
             try {
+                val res = tmdbApi.getAnime(page = 1).results ?: emptyList()
+                res.map { mapToMediaItem(it, "Anime Series", "series") }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        })
+        jobs.add(async(Dispatchers.IO) {
+            try {
                 val animeMovies = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "Movie", sortBy = "latest-updated", page = 1)
                 animeMovies.map { item ->
+                    val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                     MediaItem(
                         id = "anikoto_${item.id}",
                         title = item.title,
                         category = "Anime Movies",
-                        imageUrl = item.posterUrl,
+                        imageUrl = poster.ifBlank { "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80" },
                         rating = if (item.rating.isNotBlank()) item.rating else "8.5",
                         year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
                         description = item.description,
@@ -306,6 +325,14 @@ class MediaRepository {
                         type = "movie"
                     )
                 }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        })
+        jobs.add(async(Dispatchers.IO) {
+            try {
+                val res = tmdbApi.getAnimeMovies(page = 1).results ?: emptyList()
+                res.map { mapToMediaItem(it, "Anime Movies", "movie") }
             } catch (e: Exception) {
                 emptyList()
             }
@@ -584,11 +611,12 @@ class MediaRepository {
                     try {
                         val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "TV", page = page)
                         list.map { item ->
+                            val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                             MediaItem(
                                 id = "anikoto_${item.id}",
                                 title = item.title,
                                 category = "Anime Series",
-                                imageUrl = item.posterUrl,
+                                imageUrl = poster.ifBlank { "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
                                 rating = if (item.rating.isNotBlank()) item.rating else "8.2",
                                 year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
                                 description = item.description,
@@ -603,17 +631,26 @@ class MediaRepository {
                         emptyList()
                     }
                 })
+                jobs.add(async(Dispatchers.IO) {
+                    try {
+                        val res = tmdbApi.getAnime(page = page).results ?: emptyList()
+                        res.map { mapToMediaItem(it, "Anime Series", "series") }
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                })
             }
             catLower.contains("anime movies") -> {
                 jobs.add(async(Dispatchers.IO) {
                     try {
                         val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "Movie", page = page)
                         list.map { item ->
+                            val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                             MediaItem(
                                 id = "anikoto_${item.id}",
                                 title = item.title,
                                 category = "Anime Movies",
-                                imageUrl = item.posterUrl,
+                                imageUrl = poster.ifBlank { "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80" },
                                 rating = if (item.rating.isNotBlank()) item.rating else "8.5",
                                 year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
                                 description = item.description,
@@ -624,6 +661,14 @@ class MediaRepository {
                                 type = "movie"
                             )
                         }
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                })
+                jobs.add(async(Dispatchers.IO) {
+                    try {
+                        val res = tmdbApi.getAnimeMovies(page = page).results ?: emptyList()
+                        res.map { mapToMediaItem(it, "Anime Movies", "movie") }
                     } catch (e: Exception) {
                         emptyList()
                     }
@@ -678,11 +723,12 @@ class MediaRepository {
             try {
                 val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "TV", page = page)
                 list.map { item ->
+                    val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                     MediaItem(
                         id = "anikoto_${item.id}",
                         title = item.title,
                         category = "Anime Series",
-                        imageUrl = item.posterUrl,
+                        imageUrl = poster.ifBlank { "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
                         rating = if (item.rating.isNotBlank()) item.rating else "8.2",
                         year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
                         description = item.description,
@@ -699,13 +745,22 @@ class MediaRepository {
         })
         jobs.add(async(Dispatchers.IO) {
             try {
+                val res = tmdbApi.getAnime(page = page).results ?: emptyList()
+                res.map { mapToMediaItem(it, "Anime Series", "series") }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        })
+        jobs.add(async(Dispatchers.IO) {
+            try {
                 val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "Movie", page = page)
                 list.map { item ->
+                    val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                     MediaItem(
                         id = "anikoto_${item.id}",
                         title = item.title,
                         category = "Anime Movies",
-                        imageUrl = item.posterUrl,
+                        imageUrl = poster.ifBlank { "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80" },
                         rating = if (item.rating.isNotBlank()) item.rating else "8.5",
                         year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
                         description = item.description,
@@ -716,6 +771,14 @@ class MediaRepository {
                         type = "movie"
                     )
                 }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        })
+        jobs.add(async(Dispatchers.IO) {
+            try {
+                val res = tmdbApi.getAnimeMovies(page = page).results ?: emptyList()
+                res.map { mapToMediaItem(it, "Anime Movies", "movie") }
             } catch (e: Exception) {
                 emptyList()
             }
@@ -736,9 +799,7 @@ class MediaRepository {
                 val t = tmdbApi.searchTvShows(query = query).results ?: emptyList()
                 m + t
             }
-            // Filter out any anime from TMDB results
-            val nonAnimeTmdbResults = tmdbResults.filter { !isTmdbAnime(it) }
-            val mappedTmdb = nonAnimeTmdbResults.take(20).map { result ->
+            val mappedTmdb = tmdbResults.take(25).map { result ->
                 val requestedType = if (type == "movie" || type == "series" || type == "tv") type else "auto"
                 mapToMediaItem(result, "Search", requestedType) 
             }
@@ -758,11 +819,12 @@ class MediaRepository {
                     }
                 }.map { item ->
                     val isMovie = item.type.lowercase().contains("movie")
+                    val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
                     MediaItem(
                         id = "anikoto_${item.id}",
                         title = item.title,
                         category = if (isMovie) "Anime Movies" else "Anime Series",
-                        imageUrl = item.posterUrl,
+                        imageUrl = poster.ifBlank { if (isMovie) "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80" else "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
                         rating = if (item.rating.isNotBlank()) item.rating else "8.3",
                         year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
                         description = item.description,

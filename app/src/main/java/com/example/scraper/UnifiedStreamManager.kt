@@ -64,7 +64,7 @@ object UnifiedStreamManager {
 
         Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime)")
 
-        // 0. High-Speed Anime API Resolver (Direct HLS M3U8 with CORS Proxy)
+        // 0. High-Speed Anime Native & API Resolver (Direct Native Extraction + HLS M3U8)
         if (isAnime || tmdbId.startsWith("anikoto_")) {
             try {
                 val lookupKey = if (title.startsWith("http") || title.contains("anikoto.cz") || title.contains("/watch/")) {
@@ -74,7 +74,22 @@ object UnifiedStreamManager {
                 } else {
                     title
                 }
-                Log.d(TAG, "Tier 0: Querying Anime API Resolver for $lookupKey (S$season Ep$effectiveEpisode)...")
+                Log.d(TAG, "Tier 0: Querying In-App Native Scraper & Anime API for $lookupKey (S$season Ep$effectiveEpisode)...")
+                
+                // First try direct in-app native extraction
+                val nativeStream = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
+                    title = lookupKey,
+                    season = season,
+                    episode = effectiveEpisode
+                )
+                if (nativeStream != null && nativeStream.streamUrl.isNotEmpty()) {
+                    Log.d(TAG, "Tier 0: Anime stream resolved via Native In-App Scraper: ${nativeStream.streamUrl}")
+                    streamCache[cacheKey] = nativeStream
+                    saveToRoomCache(context, cacheKey, nativeStream)
+                    return nativeStream
+                }
+
+                // API stream fallback
                 val animeStream = AnikotoScraper.getStreamByTitle(
                     title = lookupKey,
                     season = season,
@@ -87,7 +102,7 @@ object UnifiedStreamManager {
                     return animeStream
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Tier 0 Anime API resolver failed: ${e.message}")
+                Log.w(TAG, "Tier 0 Anime resolver failed: ${e.message}")
             }
         }
 

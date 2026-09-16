@@ -10369,6 +10369,22 @@ fun CompactMediaCard(
     ) {
         Column {
             var isImageLoadError by remember(item.imageUrl) { mutableStateOf(false) }
+            val fallbackPoster = remember(item.title, item.type, item.category) {
+                val isAnime = item.category.contains("Anime", ignoreCase = true) || item.type.equals("anime", ignoreCase = true)
+                val isMovie = item.type.equals("movie", ignoreCase = true) || item.category.contains("Movie", ignoreCase = true)
+                if (isAnime) {
+                    if (isMovie) "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80"
+                    else "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80"
+                } else {
+                    val defaultCinemaPosters = listOf(
+                        "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&q=80",
+                        "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80",
+                        "https://images.unsplash.com/photo-1518676599900-d28bb34aa5d1?w=500&q=80"
+                    )
+                    val idx = kotlin.math.abs(item.title.hashCode()) % defaultCinemaPosters.size
+                    defaultCinemaPosters[idx]
+                }
+            }
 
             Box(
                 modifier = Modifier
@@ -10380,12 +10396,13 @@ fun CompactMediaCard(
                         )
                     )
             ) {
-                if (!isImageLoadError && item.imageUrl.isNotBlank()) {
+                if (item.imageUrl.isNotBlank() && !isImageLoadError) {
                     val context = LocalContext.current
                     val imageRequest = remember(item.imageUrl) {
                         ImageRequest.Builder(context)
                             .data(item.imageUrl)
                             .crossfade(true)
+                            .error(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
                             .diskCacheKey(item.imageUrl)
                             .memoryCacheKey(item.imageUrl)
                             .build()
@@ -10394,12 +10411,26 @@ fun CompactMediaCard(
                         model = imageRequest,
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
-                        onError = { isImageLoadError = true },
+                        onError = {
+                            isImageLoadError = true
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Fallback poster image or styled placeholder
+                    val context = LocalContext.current
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(fallbackPoster)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
 
-                if (isImageLoadError || item.imageUrl.isBlank()) {
+                if (isImageLoadError && fallbackPoster.isBlank()) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -10551,6 +10582,22 @@ fun MediaCard(
     ) {
         Column {
             var isImageLoadError by remember(item.imageUrl) { mutableStateOf(false) }
+            val fallbackPoster = remember(item.title, item.type, item.category) {
+                val isAnime = item.category.contains("Anime", ignoreCase = true) || item.type.equals("anime", ignoreCase = true)
+                val isMovie = item.type.equals("movie", ignoreCase = true) || item.category.contains("Movie", ignoreCase = true)
+                if (isAnime) {
+                    if (isMovie) "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80"
+                    else "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80"
+                } else {
+                    val defaultCinemaPosters = listOf(
+                        "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&q=80",
+                        "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80",
+                        "https://images.unsplash.com/photo-1518676599900-d28bb34aa5d1?w=500&q=80"
+                    )
+                    val idx = kotlin.math.abs(item.title.hashCode()) % defaultCinemaPosters.size
+                    defaultCinemaPosters[idx]
+                }
+            }
 
             Box(
                 modifier = Modifier
@@ -10562,12 +10609,13 @@ fun MediaCard(
                         )
                     )
             ) {
-                if (!isImageLoadError && item.imageUrl.isNotBlank()) {
+                if (item.imageUrl.isNotBlank() && !isImageLoadError) {
                     val context = LocalContext.current
                     val imageRequest = remember(item.imageUrl) {
                         ImageRequest.Builder(context)
                             .data(item.imageUrl)
                             .crossfade(true)
+                            .error(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
                             .diskCacheKey(item.imageUrl)
                             .memoryCacheKey(item.imageUrl)
                             .build()
@@ -10579,9 +10627,20 @@ fun MediaCard(
                         onError = { isImageLoadError = true },
                         modifier = Modifier.fillMaxSize()
                     )
+                } else {
+                    val context = LocalContext.current
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(fallbackPoster)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
-                if (isImageLoadError || item.imageUrl.isBlank()) {
+                if (isImageLoadError && fallbackPoster.isBlank()) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()

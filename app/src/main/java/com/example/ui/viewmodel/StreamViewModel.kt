@@ -191,9 +191,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     
                     val isPrem = item.isPremium || 
                                  premiumIdsFromDb.contains(cleanId) ||
-                                 (cleanId.isNotBlank() && configPremiumIds.contains(cleanId)) ||
-                                 (cleanTitle.isNotBlank() && configPremiumIds.any { cleanTitle.contains(it, ignoreCase = true) }) ||
-                                 (cleanCategory.isNotBlank() && (configPremiumCats.contains(cleanCategory) || configLockedTabs.contains(cleanCategory)))
+                                 (cleanId.isNotBlank() && configPremiumIds.any { it.isNotBlank() && it.equals(cleanId, ignoreCase = true) }) ||
+                                 (cleanTitle.isNotBlank() && configPremiumIds.any { it.isNotBlank() && it.equals(cleanTitle, ignoreCase = true) }) ||
+                                 (cleanCategory.isNotBlank() && (configPremiumCats.any { it.isNotBlank() && it.equals(cleanCategory, ignoreCase = true) } || configLockedTabs.any { it.isNotBlank() && it.equals(cleanCategory, ignoreCase = true) }))
                                  
                     if (isPrem) {
                         item.copy(isPremium = true)
@@ -1303,13 +1303,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     var currentServerWatchUrl: String = ""
         private set
 
-    fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?) {
+    fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?, episode: Int? = null) {
         _selectedServer.value = server
         val activeItem = _activeMediaItem.value
+        val curEp = episode ?: _activeMediaEpisode.value
         if (server != null && activeItem != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    val streamRes = com.example.scraper.AnikotoScraper.extractStreamFromServer(server, currentServerWatchUrl.ifBlank { activeItem.title })
+                    val streamRes = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                        server = server,
+                        watchUrl = currentServerWatchUrl.ifBlank { activeItem.title },
+                        episode = curEp
+                    )
                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
                         _activeMediaStreamUrl.value = streamRes.streamUrl
                         _activeMediaStreamHeaders.value = streamRes.headers
@@ -2507,7 +2512,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             if (pickedServer != null) {
                 val serverStream = com.example.scraper.AnikotoScraper.extractStreamFromServer(
                     server = pickedServer,
-                    watchUrl = currentServerWatchUrl
+                    watchUrl = currentServerWatchUrl.ifEmpty { effectiveItem.title },
+                    episode = episode
                 )
                 if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
                     _activeChannel.value = null

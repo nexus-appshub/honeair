@@ -469,15 +469,8 @@ object SubscriptionManager {
      * Episode index > 0 (Episode 2+) requires VIP subscription if content is restricted or premium.
      */
     fun isEpisodePlayable(isSeries: Boolean, episodeNum: Int, isPremiumContent: Boolean = false): Boolean {
-        if (!isSeries && !isPremiumContent) return true
+        if (!isPremiumContent) return true
         if (_isPremium.value) return true
-
-        // For series: Episode 1 is free to preview (episode index == 0 or episodeNum <= freeEpisodeLimit)
-        if (isSeries && episodeNum <= freeEpisodeLimit) {
-            return true
-        }
-
-        // Non-premium user attempting to watch Episode 2+ of a series or locked content
         return false
     }
 

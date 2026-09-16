@@ -425,10 +425,11 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
         val srv = selectedServer
         if (isAnime && srv != null) {
             withContext(Dispatchers.IO) {
-                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
+                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
                 val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
                     server = srv,
-                    watchUrl = watchUrl
+                    watchUrl = watchUrl,
+                    episode = currentEpisode
                 )
                 if (extracted != null && extracted.streamUrl.isNotBlank()) {
                     withContext(Dispatchers.Main) {
@@ -1333,7 +1334,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         selectedAnikotoServer = selectedServer,
                         onSelectAnikotoServer = { srv ->
                             selectedVidnestServerKey = null
-                            viewModel.selectAnikotoServer(srv)
+                            viewModel.selectAnikotoServer(srv, currentEpisode)
                             scope.launch(Dispatchers.IO) {
                                 withContext(Dispatchers.Main) {
                                     isLoading = true
@@ -1342,7 +1343,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
                                 val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
                                     server = srv,
-                                    watchUrl = watchUrl
+                                    watchUrl = watchUrl,
+                                    episode = currentEpisode
                                 )
                                 withContext(Dispatchers.Main) {
                                     if (extracted != null && extracted.streamUrl.isNotBlank()) {
@@ -1813,13 +1815,11 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 }
             }
 
-            // VIP Paywall Overlay inside player frame (If episode index > 0 and user is not premium)
-            val isEpisodeLocked = remember(isSeries, currentEpisode, isVipUser, currentMediaItem) {
+            // VIP Paywall Overlay inside player frame (Only locked if explicitly marked as premium in Admin Panel / Database)
+            val isEpisodeLocked = remember(isVipUser, currentMediaItem) {
                 if (isVipUser) {
                     false
                 } else if (currentMediaItem?.isPremium == true) {
-                    true
-                } else if (isSeries && currentEpisode > 1) {
                     true
                 } else {
                     false
@@ -1903,8 +1903,24 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             
             // Now Playing Info Card (Rich & Expandable)
             item {
-                val playingItem = allMediaItems.find { it.imdbId == imdbId } ?: allMediaItems.find { it.title == title }
+                val playingItem = currentMediaItem
+                    ?: allMediaItems.find { it.imdbId == imdbId || it.id == imdbId }
+                    ?: allMediaItems.find { it.title.equals(title, ignoreCase = true) }
                 if (playingItem != null) {
+                    var posterUrlToUse by remember(playingItem.imageUrl) { mutableStateOf(playingItem.imageUrl) }
+                    var hasPosterError by remember(posterUrlToUse) { mutableStateOf(false) }
+
+                    LaunchedEffect(playingItem.title, isAnime) {
+                        if (posterUrlToUse.isBlank() && isAnime) {
+                            val enriched = withContext(Dispatchers.IO) {
+                                com.example.scraper.AnimePosterEngine.getAnimePosterAndBanner(playingItem.title)
+                            }
+                            if (enriched != null && enriched.posterUrl.isNotBlank()) {
+                                posterUrlToUse = enriched.posterUrl
+                            }
+                        }
+                    }
+
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1923,18 +1939,58 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.width(80.dp)
                             ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(playingItem.imageUrl)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = "Poster",
+                                Box(
                                     modifier = Modifier
                                         .size(width = 80.dp, height = 120.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(SpaceBlack),
-                                    contentScale = ContentScale.Crop
-                                )
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(Color(0xFF1E1B4B), SpaceBlack)
+                                            )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (posterUrlToUse.isNotBlank() && !hasPosterError) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(posterUrlToUse)
+                                                .crossfade(true)
+                                                .listener(
+                                                    onError = { _, _ ->
+                                                        hasPosterError = true
+                                                    }
+                                                )
+                                                .build(),
+                                            contentDescription = "Poster",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        // Fallback decorative anime placeholder
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                            modifier = Modifier.padding(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isAnime) Icons.Default.AutoAwesome else Icons.Default.Movie,
+                                                contentDescription = null,
+                                                tint = NeonMagenta,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = playingItem.title.take(12),
+                                                color = Color.White.copy(alpha = 0.8f),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Button(
                                     onClick = {
@@ -2269,7 +2325,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                             selected = isSelected,
                                             onClick = {
                                                 selectedVidnestServerKey = null
-                                                viewModel.selectAnikotoServer(srv)
+                                                viewModel.selectAnikotoServer(srv, currentEpisode)
                                                 scope.launch(Dispatchers.IO) {
                                                     withContext(Dispatchers.Main) {
                                                         isLoading = true
@@ -2278,7 +2334,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                     val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
                                                     val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
                                                         server = srv,
-                                                        watchUrl = watchUrl
+                                                        watchUrl = watchUrl,
+                                                        episode = currentEpisode
                                                     )
                                                     withContext(Dispatchers.Main) {
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
@@ -2364,7 +2421,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                             selected = isSelected,
                                             onClick = {
                                                 selectedVidnestServerKey = null
-                                                viewModel.selectAnikotoServer(srv)
+                                                viewModel.selectAnikotoServer(srv, currentEpisode)
                                                 scope.launch(Dispatchers.IO) {
                                                     withContext(Dispatchers.Main) {
                                                         isLoading = true
@@ -2373,7 +2430,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                     val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
                                                     val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
                                                         server = srv,
-                                                        watchUrl = watchUrl
+                                                        watchUrl = watchUrl,
+                                                        episode = currentEpisode
                                                     )
                                                     withContext(Dispatchers.Main) {
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
@@ -3480,7 +3538,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     items(visibleEpisodes) { ep ->
-                                        val isEpLocked = !isVipUser && isSeries && ep > 1
+                                        val isEpLocked = !isVipUser && (currentMediaItem?.isPremium == true)
                                         val epTitle = if (isAnime && anikotoEpisodes.isNotEmpty()) {
                                             anikotoEpisodes.find { it.number == ep }?.title
                                         } else null
@@ -3994,6 +4052,21 @@ fun RelatedMediaCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isAnime = item.category.contains("anime", ignoreCase = true) || item.type.equals("anime", ignoreCase = true)
+    var posterToLoad by remember(item.imageUrl) { mutableStateOf(item.imageUrl) }
+    var isLoadFailed by remember(posterToLoad) { mutableStateOf(false) }
+
+    LaunchedEffect(item.title, isAnime) {
+        if (posterToLoad.isBlank() && isAnime) {
+            val enriched = withContext(Dispatchers.IO) {
+                com.example.scraper.AnimePosterEngine.getAnimePosterAndBanner(item.title)
+            }
+            if (enriched != null && enriched.posterUrl.isNotBlank()) {
+                posterToLoad = enriched.posterUrl
+            }
+        }
+    }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = DeepSlate),
         shape = RoundedCornerShape(16.dp),
@@ -4008,16 +4081,53 @@ fun RelatedMediaCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(130.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF1E1B4B), SpaceBlack)
+                        )
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(item.imageUrl)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (posterToLoad.isNotBlank() && !isLoadFailed) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(posterToLoad)
+                            .crossfade(true)
+                            .listener(
+                                onError = { _, _ ->
+                                    isLoadFailed = true
+                                }
+                            )
+                            .build(),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Fallback visual tile
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isAnime) Icons.Default.AutoAwesome else Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = item.title.take(15),
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
 
                 // Premium VIP Badge Overlay Top Left
                 if (item.isPremium) {

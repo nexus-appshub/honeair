@@ -114,7 +114,7 @@ fun VideoPlayerScreen(
     }
 
     // 4. Resolve Stream from UnifiedStreamManager (Zero-Server Architecture)
-    LaunchedEffect(tmdbId, activeStreamUrl) {
+    LaunchedEffect(tmdbId, season, episode, activeStreamUrl) {
         if (activeStreamUrl != null) {
             val url = activeStreamUrl!!
             val headers = streamResult?.headers ?: emptyMap()

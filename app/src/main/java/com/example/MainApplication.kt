@@ -113,16 +113,39 @@ class MainApplication : Application(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            // Inject custom OkHttpClient with Chrome User-Agent and Referer headers for all image loading.
-            // This is essential to prevent 403 Forbidden errors when loading anime posters/banners from cdn.anipixcdn.co or anikoto.cz.
+            // Inject custom OkHttpClient with dynamic User-Agent and Referer headers for all image sources.
+            // Handles anime CDN hosts (cdn.anipixcdn.co, anikoto.cz, myanimelist, tmdb, etc.) to prevent 403 Forbidden errors.
             .okHttpClient {
                 okhttp3.OkHttpClient.Builder()
                     .addInterceptor { chain ->
-                        val request = chain.request().newBuilder()
-                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                            .header("Referer", "https://anikoto.cz/")
-                            .build()
-                        chain.proceed(request)
+                        val original = chain.request()
+                        val urlStr = original.url.toString()
+                        val host = original.url.host.lowercase()
+
+                        val reqBuilder = original.newBuilder()
+                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                            .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+
+                        when {
+                            host.contains("anikoto") || host.contains("anipixcdn") -> {
+                                reqBuilder.header("Referer", "https://anikoto.cz/")
+                            }
+                            host.contains("anilist") || host.contains("s4.anilist.co") -> {
+                                reqBuilder.header("Referer", "https://anilist.co/")
+                            }
+                            host.contains("myanimelist") || host.contains("jikan") -> {
+                                reqBuilder.header("Referer", "https://myanimelist.net/")
+                            }
+                            host.contains("tmdb.org") || host.contains("themoviedb.org") -> {
+                                reqBuilder.header("Referer", "https://www.themoviedb.org/")
+                            }
+                            else -> {
+                                // Default permissive referer or retain original
+                                reqBuilder.header("Referer", "https://www.google.com/")
+                            }
+                        }
+
+                        chain.proceed(reqBuilder.build())
                     }
                     .build()
             }
