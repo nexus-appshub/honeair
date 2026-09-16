@@ -297,15 +297,51 @@ object AnimePosterEngine {
     }
 
     /**
+     * Centralized utility to identify whether a media item is an anime based on id, category, type, and title keywords
+     */
+    fun isAnime(title: String, category: String? = null, type: String? = null, id: String? = null): Boolean {
+        val t = title.lowercase()
+        val cat = (category ?: "").lowercase()
+        val tp = (type ?: "").lowercase()
+        val idStr = (id ?: "").lowercase()
+
+        if (idStr.startsWith("anikoto_") || cat.contains("anime") || tp.equals("anime")) return true
+
+        // Common anime titles, franchises, and keywords
+        val keywords = listOf(
+            "naruto", "boruto", "one piece", "demon slayer", "attack on titan", "jujutsu", "kaisen",
+            "my hero academia", "boku no hero", "bleach", "kono suba", "konosuba", "reincarnated",
+            "isekai", "solo leveling", "tensei", "sword art", "black clover", "frieren", "chainsaw man",
+            "blue lock", "spy x", "oshi no ko", "kaiju", "haikyu", "dr. stone", "dr stone", "baki",
+            "tokyo ghoul", "fairy tail", "death note", "hunter x", "slime", "classroom of the elite",
+            "dragon ball", "pokemon", "apothecary diaries", "elusive samurai", "failure frame",
+            "gundam", "bookworm", "ascendance of a", "honzuki", "overlord", "rezero", "re:zero",
+            "jobless reincarnation", "wind breaker", "hell's paradise", "hells paradise", "heavenly delusion",
+            "mashle", "undead unluck", "shangri-la", "delicious in dungeon", "dunmeshi", "metallic rouge",
+            "sengoku youko", "bucchigiri", "ninja kamui", "tsukimichi", "go! go! loser ranger!", "girls band cry",
+            "alya sometimes hides her feelings", "roshidere", "too many losing heroines", "makeine", "wistoria",
+            "monogatari", "senpai is an otokonoko", "mayonaka punch", "nokotan", "deer friend", "gintama",
+            "food wars", "shokugeki", "kaguya", "vinland", "steins;gate", "steins gate", "fullmetal alchemist",
+            "fmab", "code geass", "violet evergarden", "your lie in april", "cyberpunk edgerunners", "one punch man",
+            "mob psycho", "no game no life", "future diary", "mirai nikki", "another", "angel beats", "noragami",
+            "neon genesis", "evangelion", "cowboy bebop", "clannad", "toradora", "your name", "weathering with you",
+            "suzume", "silent voice", "spirited away", "howl's moving", "howls moving", "totoro", "mononoke",
+            "grave of the fireflies", "anohana", "erased", "monster", "pluto", "the fable", "bartender"
+        )
+        for (kw in keywords) {
+            if (t.contains(kw)) return true
+        }
+        return false
+    }
+
+    /**
      * Enhances a list of generic MediaItem objects with AniList high-resolution posters and descriptions
      */
     suspend fun enhanceMediaItems(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.IO) {
         val jobs = items.map { item ->
             async {
-                val isAnime = item.id.startsWith("anikoto_") ||
-                        item.category?.contains("Anime", ignoreCase = true) == true ||
-                        item.type.equals("anime", ignoreCase = true)
-                if (isAnime) {
+                val isAnimeItem = isAnime(title = item.title, category = item.category, type = item.type, id = item.id)
+                if (isAnimeItem) {
                     val metadata = getAnimePosterAndBanner(item.title)
                     if (metadata != null && metadata.posterUrl.isNotBlank()) {
                         item.copy(

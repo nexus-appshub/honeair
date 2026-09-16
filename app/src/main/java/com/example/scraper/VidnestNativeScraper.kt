@@ -27,17 +27,17 @@ object VidnestNativeScraper {
 
     val PROVIDERS = listOf(
         VidnestProviderInfo("delta", "HINDI", "allmovies", "https://vidnest.fun/"),
-        VidnestProviderInfo("filxer", "Filxer (Fast)", "rogflix", "https://rogflix.fun/"),
-        VidnestProviderInfo("lamda", "Lamda (Ultra)", "allmovies", "https://vidnest.fun/"),
-        VidnestProviderInfo("prime", "Prime (VidRock)", "vidrock", "https://vidrock.net/"),
-        VidnestProviderInfo("hexa", "Hexa (VidLink)", "vidlink", "https://vidlink.pro/"),
-        VidnestProviderInfo("zeta", "Zeta (NextGen)", "nextgencloudfabric", "https://nextgencloudfabric.com/"),
-        VidnestProviderInfo("alfa", "Alfa (Videasy)", "videasy", "https://tiktoks.animanga.fun/"),
-        VidnestProviderInfo("gama", "Gama (VidZee)", "vidzee", "https://s1.streamflixapi.site/"),
-        VidnestProviderInfo("ophim", "Ophim (HD)", "klikxxi", "https://vidnest.fun/"),
-        VidnestProviderInfo("catflix", "Catflix (Buzz)", "buzz", "https://ployan.me/"),
-        VidnestProviderInfo("beta", "Beta (VidXYZ)", "vidxyz", "https://moviesapi.to/"),
-        VidnestProviderInfo("sigma", "Sigma (Holly)", "hollymoviehd", "https://vidnest.fun/")
+        VidnestProviderInfo("filxer", "Filxer", "rogflix", "https://rogflix.fun/"),
+        VidnestProviderInfo("lamda", "Lamda", "allmovies", "https://vidnest.fun/"),
+        VidnestProviderInfo("prime", "Prime", "vidrock", "https://vidrock.net/"),
+        VidnestProviderInfo("hexa", "Hexa", "vidlink", "https://vidlink.pro/"),
+        VidnestProviderInfo("zeta", "Zeta", "nextgencloudfabric", "https://nextgencloudfabric.com/"),
+        VidnestProviderInfo("alfa", "Alfa", "videasy", "https://tiktoks.animanga.fun/"),
+        VidnestProviderInfo("gama", "Gama", "vidzee", "https://s1.streamflixapi.site/"),
+        VidnestProviderInfo("ophim", "Ophim", "klikxxi", "https://vidnest.fun/"),
+        VidnestProviderInfo("catflix", "Catflix", "buzz", "https://ployan.me/"),
+        VidnestProviderInfo("beta", "Beta", "vidxyz", "https://moviesapi.to/"),
+        VidnestProviderInfo("sigma", "Sigma", "hollymoviehd", "https://vidnest.fun/")
     )
 
     private val BASE_URLS = listOf(

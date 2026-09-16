@@ -86,8 +86,12 @@ fun MediaDetailSheet(
     val isFetchingServers by viewModel.isFetchingServers.collectAsState()
 
     val isAnime = remember(item) {
-        item.id.startsWith("anikoto_") || item.category?.contains("Anime", ignoreCase = true) == true ||
-        item.type.equals("anime", ignoreCase = true) || item.title.lowercase().contains("naruto") || item.title.lowercase().contains("boruto")
+        com.example.scraper.AnimePosterEngine.isAnime(
+            title = item.title,
+            category = item.category,
+            type = item.type,
+            id = item.id
+        )
     }
 
     val anikotoDetails by viewModel.anikotoDetailsState.collectAsState()

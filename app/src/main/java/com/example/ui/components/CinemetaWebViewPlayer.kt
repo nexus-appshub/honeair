@@ -295,22 +295,12 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     val effectiveNativeUrl = if (isNativeMatching) nativeStreamUrl else null
 
     val isAnime = remember(currentMediaItem, title, type) {
-        val id = currentMediaItem?.id ?: ""
-        val cat = currentMediaItem?.category?.lowercase() ?: ""
-        val t = (currentMediaItem?.title ?: title).lowercase()
-        id.contains("anikoto", ignoreCase = true) ||
-        cat.contains("anime") || type.equals("anime", ignoreCase = true) ||
-        t.contains("naruto") || t.contains("boruto") || t.contains("one piece") || t.contains("demon slayer") || t.contains("attack on titan") ||
-        t.contains("duke's son") || t.contains("dukes son") || t.contains("claims he won't love me") ||
-        t.contains("jujutsu") || t.contains("kaisen") || t.contains("academia") || t.contains("bleach") ||
-        t.contains("kono suba") || t.contains("reincarnated") || t.contains("isekai") || t.contains("solo leveling") ||
-        t.contains("tensei") || t.contains("sword art") || t.contains("black clover") || t.contains("frieren") ||
-        t.contains("chainsaw") || t.contains("blue lock") || t.contains("spy x") || t.contains("oshi no") ||
-        t.contains("kaiju") || t.contains("haikyu") || t.contains("stone") || t.contains("baki") ||
-        t.contains("ghoul") || t.contains("fairy tail") || t.contains("death note") || t.contains("hunter x") ||
-        t.contains("manga") || t.contains("slime") || t.contains("classroom of the") || t.contains("konosuba") ||
-        t.contains("dragon ball") || t.contains("pokemon") || t.contains("excalibur") || t.contains("shippuden") ||
-        t.contains("apothecary") || t.contains("elusive") || t.contains("failure frame") || t.contains("gundam")
+        com.example.scraper.AnimePosterEngine.isAnime(
+            title = currentMediaItem?.title ?: title,
+            category = currentMediaItem?.category,
+            type = type,
+            id = currentMediaItem?.id ?: imdbId
+        )
     }
 
     // Automatic In-App Scraping to enable ExoPlayer playback immediately

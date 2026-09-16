@@ -2400,8 +2400,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun fetchAnikotoMediaData(item: MediaItem, selectedSeasonNum: Int = 1) {
-        val isAnime = item.id.startsWith("anikoto_") || item.category?.contains("Anime", ignoreCase = true) == true ||
-                      item.type.equals("anime", ignoreCase = true) || item.title.lowercase().contains("naruto") || item.title.lowercase().contains("boruto")
+        val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
+            title = item.title,
+            category = item.category,
+            type = item.type,
+            id = item.id
+        )
         if (!isAnime) return
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -2442,8 +2446,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
         if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, season, episode) != null) return
 
-        val isAnime = effectiveItem.category.lowercase().contains("anime") || effectiveItem.type.equals("anime", ignoreCase = true) ||
-                      effectiveItem.title.lowercase().contains("naruto") || effectiveItem.title.lowercase().contains("boruto")
+        val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
+            title = effectiveItem.title,
+            category = effectiveItem.category,
+            type = effectiveItem.type,
+            id = effectiveItem.id
+        )
 
         val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
                            effectiveItem.type.equals("tv", ignoreCase = true) ||
@@ -2538,8 +2546,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
-            val isAnime = effectiveItem.category.lowercase().contains("anime") || effectiveItem.type.equals("anime", ignoreCase = true) ||
-                          effectiveItem.title.lowercase().contains("naruto") || effectiveItem.title.lowercase().contains("boruto")
+            val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
+                title = effectiveItem.title,
+                category = effectiveItem.category,
+                type = effectiveItem.type,
+                id = effectiveItem.id
+            )
 
             val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
                                effectiveItem.type.equals("tv", ignoreCase = true) ||

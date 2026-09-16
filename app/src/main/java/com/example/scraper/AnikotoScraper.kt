@@ -706,7 +706,7 @@ object AnikotoScraper {
                         val parsedServer = AnikotoServer(
                             id = srvId,
                             linkId = streamUrl,
-                            name = if (srvName.contains("(")) srvName.substringAfter("(").substringBefore(")") else srvName,
+                            name = "Server ${i + 1}",
                             type = audioType.lowercase(),
                             streamUrl = streamUrl,
                             rawUrl = rawUrl,
@@ -743,7 +743,7 @@ object AnikotoScraper {
                                     AnikotoServer(
                                         id = srvId,
                                         linkId = streamUrl,
-                                        name = if (srvName.contains("(")) srvName.substringAfter("(").substringBefore(")") else srvName,
+                                        name = "Server ${dubServers.size + 1}",
                                         type = "dub",
                                         streamUrl = streamUrl,
                                         rawUrl = rawUrl,
@@ -756,14 +756,12 @@ object AnikotoScraper {
                 }
             }
 
-            // Distinct and name servers nicely
-            val cleanSub = subServers.distinctBy { it.name + it.id }.mapIndexed { idx, srv ->
-                val displayName = if (srv.name.isNotBlank()) "Server ${idx + 1} (${srv.name})" else "Server ${idx + 1}"
-                srv.copy(name = displayName)
+            // Distinct and name servers nicely without bracketed names (e.g. Server 1, Server 2)
+            val cleanSub = subServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
+                srv.copy(name = "Server ${idx + 1}")
             }
-            val cleanDub = dubServers.distinctBy { it.name + it.id }.mapIndexed { idx, srv ->
-                val displayName = if (srv.name.isNotBlank()) "Server ${idx + 1} (${srv.name})" else "Server ${idx + 1}"
-                srv.copy(name = displayName)
+            val cleanDub = dubServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
+                srv.copy(name = "Server ${idx + 1}")
             }
 
             val apiWatchUrl = subJson?.optJSONObject("anime")?.optString("watchUrl", "") ?: ""
