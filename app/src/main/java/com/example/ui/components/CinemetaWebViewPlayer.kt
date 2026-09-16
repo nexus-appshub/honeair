@@ -1810,7 +1810,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 if (isVipUser) {
                     false
                 } else if (currentMediaItem?.isPremium == true) {
-                    true
+                    val itemId = currentMediaItem?.imdbId ?: currentMediaItem?.id ?: ""
+                    !com.example.subscription.TemporaryUnlockManager.isItemTemporarilyUnlocked(itemId)
                 } else {
                     false
                 }
@@ -3563,7 +3564,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     items(visibleEpisodes) { ep ->
-                                        val isEpLocked = !isVipUser && (currentMediaItem?.isPremium == true)
+                                        val epItemId = currentMediaItem?.imdbId ?: currentMediaItem?.id ?: imdbId
+                                        val isEpLocked = !isVipUser && (currentMediaItem?.isPremium == true) && !com.example.subscription.TemporaryUnlockManager.isItemTemporarilyUnlocked(epItemId)
                                         val epTitle = if (isAnime && anikotoEpisodes.isNotEmpty()) {
                                             anikotoEpisodes.find { it.number == ep }?.title
                                         } else null
@@ -3580,7 +3582,14 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                 if (currentEpisode != ep) {
                                                     currentEpisode = ep
                                                     if (isEpLocked) {
-                                                        showSubscriptionPlanModal = true
+                                                        viewModel.triggerPremiumContentLock(
+                                                            itemId = epItemId,
+                                                            title = currentMediaItem?.title ?: "Episode $ep",
+                                                            isChannel = false,
+                                                            mediaItem = currentMediaItem,
+                                                            season = currentSeason,
+                                                            episode = ep
+                                                        )
                                                     } else {
                                                         isLoading = true
                                                         hasError = false

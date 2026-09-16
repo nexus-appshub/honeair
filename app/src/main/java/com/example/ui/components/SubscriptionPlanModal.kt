@@ -324,6 +324,7 @@ fun SubscriptionPlanModal(
                                         com.example.ad.StartIoAdManager.showRewardedVideo(
                                             activity = act,
                                             onRewardEarned = {
+                                                com.example.subscription.SubscriptionManager.unlockTemporaryVip(30)
                                                 android.widget.Toast.makeText(context, "🎉 30 Minutes VIP Pass Unlocked!", android.widget.Toast.LENGTH_LONG).show()
                                                 onDismiss()
                                             },
@@ -376,6 +377,7 @@ fun SubscriptionPlanModal(
                                             com.example.ad.StartIoAdManager.showRewardedVideo(
                                                 activity = act,
                                                 onRewardEarned = {
+                                                    com.example.subscription.SubscriptionManager.unlockTemporaryVip(30)
                                                     android.widget.Toast.makeText(context, "🎉 30 Minutes VIP Pass Unlocked!", android.widget.Toast.LENGTH_LONG).show()
                                                     onDismiss()
                                                 },

@@ -82,6 +82,17 @@ object StartIoAdManager {
         return isUserPremiumOverride ?: SubscriptionManager.isVipUser()
     }
 
+    /**
+     * Master Playback Access Checker
+     * Returns true if user is VIP, or item is free, or item has an active 30-min temporary unlock pass.
+     */
+    fun canAccessContent(itemId: String, isItemPremium: Boolean, context: Context? = null): Boolean {
+        if (!isItemPremium) return true
+        if (isPremiumUser()) return true
+        if (com.example.subscription.TemporaryUnlockManager.isItemTemporarilyUnlocked(itemId, context)) return true
+        return false
+    }
+
     fun init(context: Context, appId: String = START_IO_APP_ID, testMode: Boolean = TEST_MODE) {
         if (isPremiumUser()) {
             Log.d(TAG, "VIP user detected. Skipping Start.io SDK initialization.")

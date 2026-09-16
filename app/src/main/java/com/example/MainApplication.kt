@@ -24,6 +24,7 @@ class MainApplication : Application(), ImageLoaderFactory {
         try {
             // Start network booster engine immediately at application level for ultra-fast response
             com.example.network.SmartNetworkBoosterEngine.startEngine(this)
+            com.example.subscription.TemporaryUnlockManager.init(this)
         } catch (e: Throwable) {
             e.printStackTrace()
         }
