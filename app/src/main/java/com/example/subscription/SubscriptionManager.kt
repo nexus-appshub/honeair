@@ -463,6 +463,25 @@ object SubscriptionManager {
         }
     }
 
+    private val _tempRewardUnlockUntilMs = MutableStateFlow(0L)
+    val tempRewardUnlockUntilMs: StateFlow<Long> = _tempRewardUnlockUntilMs.asStateFlow()
+
+    /**
+     * Unlocks temporary VIP access for a specified duration (e.g. 30 minutes)
+     * after watching a rewarded video ad.
+     */
+    fun unlockTemporaryVip(durationMinutes: Int = 30) {
+        val expiryMs = System.currentTimeMillis() + (durationMinutes * 60 * 1000L)
+        _tempRewardUnlockUntilMs.value = expiryMs
+        _isPremium.value = true
+        _isExpired.value = false
+        _subscriptionStatus.value = "VIP Pass ($durationMinutes Mins Unlocked)"
+        _subscriptionPlan.value = "Ad Pass ($durationMinutes Mins)"
+        _expiryDate.value = "Ad Pass Active"
+        _expiryTimestamp.value = expiryMs
+        Log.d(TAG, "Temporary VIP access granted for $durationMinutes minutes until $expiryMs")
+    }
+
     /**
      * Checks if episode playback is allowed.
      * Episode index 0 (Episode 1) is free preview for all users.
@@ -470,14 +489,26 @@ object SubscriptionManager {
      */
     fun isEpisodePlayable(isSeries: Boolean, episodeNum: Int, isPremiumContent: Boolean = false): Boolean {
         if (!isPremiumContent) return true
-        if (_isPremium.value) return true
+        if (isVipUser()) return true
         return false
     }
 
     /**
-     * Returns true if user has active VIP access
+     * Returns true if user has active VIP access (either subscription or 30-min ad reward)
      */
     fun isVipUser(): Boolean {
+        val tempExpiry = _tempRewardUnlockUntilMs.value
+        if (tempExpiry > 0L) {
+            if (System.currentTimeMillis() < tempExpiry) {
+                return true
+            } else {
+                _tempRewardUnlockUntilMs.value = 0L
+                _isPremium.value = false
+                _subscriptionStatus.value = "Free Member"
+                _subscriptionPlan.value = "Free Tier"
+                _expiryDate.value = null
+            }
+        }
         return _isPremium.value
     }
 }

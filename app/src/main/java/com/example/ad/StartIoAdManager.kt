@@ -61,14 +61,16 @@ object StartIoAdManager {
     const val START_IO_PUBLISHER_ID = "110602603"
 
     var TEST_MODE: Boolean = false
-    var isUserPremiumOverride: Boolean? = false
+    var isUserPremiumOverride: Boolean? = null
 
     private var channelChangeCount = 0
     private var lastInterstitialTimeMs = 0L
-    private const val CHANNEL_CHANGE_INTERVAL = 2
-    private const val INTERSTITIAL_COOLDOWN_MS = 30000L
+    private const val CHANNEL_CHANGE_INTERVAL = 1
+    private const val INTERSTITIAL_COOLDOWN_MS = 10000L
 
     private var isInitialized = false
+    private var cachedInterstitial: StartAppAd? = null
+    private var cachedRewardedAd: StartAppAd? = null
 
     var isUserPremium: Boolean
         get() = isPremiumUser()
@@ -97,8 +99,28 @@ object StartIoAdManager {
             StartAppSDK.setTestAdsEnabled(TEST_MODE)
             isInitialized = true
             Log.d(TAG, "Start.io SDK initialized for App ID: $appId (TestMode: ${TEST_MODE})")
+
+            preloadInterstitial(context)
         } catch (e: Throwable) {
             Log.e(TAG, "Error initializing Start.io SDK: ${e.message}", e)
+        }
+    }
+
+    fun preloadInterstitial(context: Context) {
+        if (isPremiumUser()) return
+        try {
+            val ad = StartAppAd(context)
+            ad.loadAd(StartAppAd.AdMode.AUTOMATIC, object : AdEventListener {
+                override fun onReceiveAd(ad: Ad) {
+                    cachedInterstitial = ad as? StartAppAd
+                    Log.d(TAG, "Interstitial ad preloaded successfully.")
+                }
+                override fun onFailedToReceiveAd(ad: Ad?) {
+                    Log.w(TAG, "Failed to preload interstitial: ${ad?.errorMessage}")
+                }
+            })
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error preloading interstitial: ${e.message}")
         }
     }
 
@@ -157,24 +179,51 @@ object StartIoAdManager {
 
         lastInterstitialTimeMs = currentTime
 
-        try {
-            val startAppAd = StartAppAd(activity)
-            startAppAd.loadAd(StartAppAd.AdMode.AUTOMATIC, object : AdEventListener {
-                override fun onReceiveAd(ad: Ad) {
-                    startAppAd.showAd(object : AdDisplayListener {
-                        override fun adHidden(ad: Ad?) { onAdClosed() }
-                        override fun adDisplayed(ad: Ad?) {}
-                        override fun adClicked(ad: Ad?) {}
-                        override fun adNotDisplayed(ad: Ad?) { onAdClosed() }
-                    })
-                }
-
-                override fun onFailedToReceiveAd(ad: Ad?) {
+        val readyAd = cachedInterstitial
+        if (readyAd != null && readyAd.isReady) {
+            Log.d(TAG, "Showing preloaded interstitial ad.")
+            cachedInterstitial = null
+            readyAd.showAd(object : AdDisplayListener {
+                override fun adHidden(ad: Ad?) {
                     onAdClosed()
+                    preloadInterstitial(activity)
+                }
+                override fun adDisplayed(ad: Ad?) {}
+                override fun adClicked(ad: Ad?) {}
+                override fun adNotDisplayed(ad: Ad?) {
+                    onAdClosed()
+                    preloadInterstitial(activity)
                 }
             })
-        } catch (e: Throwable) {
-            onAdClosed()
+        } else {
+            Log.d(TAG, "Preloaded ad not ready, loading dynamically...")
+            try {
+                val startAppAd = StartAppAd(activity)
+                startAppAd.loadAd(StartAppAd.AdMode.AUTOMATIC, object : AdEventListener {
+                    override fun onReceiveAd(ad: Ad) {
+                        startAppAd.showAd(object : AdDisplayListener {
+                            override fun adHidden(ad: Ad?) {
+                                onAdClosed()
+                                preloadInterstitial(activity)
+                            }
+                            override fun adDisplayed(ad: Ad?) {}
+                            override fun adClicked(ad: Ad?) {}
+                            override fun adNotDisplayed(ad: Ad?) {
+                                onAdClosed()
+                                preloadInterstitial(activity)
+                            }
+                        })
+                    }
+
+                    override fun onFailedToReceiveAd(ad: Ad?) {
+                        onAdClosed()
+                        preloadInterstitial(activity)
+                    }
+                })
+            } catch (e: Throwable) {
+                onAdClosed()
+                preloadInterstitial(activity)
+            }
         }
     }
 
@@ -201,12 +250,59 @@ object StartIoAdManager {
 
             startAppAd.setVideoListener(object : VideoListener {
                 override fun onVideoCompleted() {
+                    Log.d(TAG, "Rewarded video completed! Granting 30-min VIP pass.")
                     isRewardGranted = true
+                    SubscriptionManager.unlockTemporaryVip(30)
                     onRewardEarned()
                 }
             })
 
             startAppAd.loadAd(StartAppAd.AdMode.REWARDED_VIDEO, object : AdEventListener {
+                override fun onReceiveAd(ad: Ad) {
+                    startAppAd.showAd(object : AdDisplayListener {
+                        override fun adHidden(ad: Ad?) {
+                            if (!isRewardGranted) {
+                                Log.w(TAG, "Rewarded video closed early.")
+                                onAdFailed()
+                            }
+                        }
+                        override fun adDisplayed(ad: Ad?) {}
+                        override fun adClicked(ad: Ad?) {}
+                        override fun adNotDisplayed(ad: Ad?) {
+                            Log.w(TAG, "Rewarded video failed to display.")
+                            onAdFailed()
+                        }
+                    })
+                }
+
+                override fun onFailedToReceiveAd(ad: Ad?) {
+                    Log.e(TAG, "Failed to load REWARDED_VIDEO, trying AUTOMATIC mode fallback...")
+                    // Fallback to AUTOMATIC video mode
+                    loadFallbackVideoAd(activity, onRewardEarned, onAdFailed)
+                }
+            })
+        } catch (e: Throwable) {
+            Log.e(TAG, "Exception in showRewardedVideo: ${e.message}")
+            onAdFailed()
+        }
+    }
+
+    private fun loadFallbackVideoAd(
+        activity: Activity,
+        onRewardEarned: () -> Unit,
+        onAdFailed: () -> Unit
+    ) {
+        try {
+            var isRewardGranted = false
+            val startAppAd = StartAppAd(activity)
+            startAppAd.setVideoListener(object : VideoListener {
+                override fun onVideoCompleted() {
+                    isRewardGranted = true
+                    SubscriptionManager.unlockTemporaryVip(30)
+                    onRewardEarned()
+                }
+            })
+            startAppAd.loadAd(StartAppAd.AdMode.AUTOMATIC, object : AdEventListener {
                 override fun onReceiveAd(ad: Ad) {
                     startAppAd.showAd(object : AdDisplayListener {
                         override fun adHidden(ad: Ad?) {
@@ -217,7 +313,6 @@ object StartIoAdManager {
                         override fun adNotDisplayed(ad: Ad?) { onAdFailed() }
                     })
                 }
-
                 override fun onFailedToReceiveAd(ad: Ad?) {
                     onAdFailed()
                 }
@@ -319,9 +414,7 @@ fun StartIoBannerView(
     modifier: Modifier = Modifier,
     isMrec: Boolean = false
 ) {
-    val isPremium = SubscriptionManager.isPremium.collectAsState().value || StartIoAdManager.isUserPremium
-
-    if (isPremium) {
+    if (StartIoAdManager.isPremiumUser()) {
         Spacer(modifier = Modifier.size(0.dp))
         return
     }
@@ -348,9 +441,7 @@ fun StartIoBannerView(
                     StartIoAdManager.loadBanner(this, isMrec = isMrec)
                 }
             },
-            update = { frameLayout ->
-                StartIoAdManager.loadBanner(frameLayout, isMrec = isMrec)
-            }
+            update = { /* Do NOT reload banner on recomposition */ }
         )
     }
 }

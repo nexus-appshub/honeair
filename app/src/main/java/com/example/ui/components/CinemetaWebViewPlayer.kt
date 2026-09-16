@@ -1861,20 +1861,55 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
                         Spacer(modifier = Modifier.height(14.dp))
-                        Button(
-                            onClick = { showSubscriptionPlanModal = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.height(42.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.WorkspacePremium,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Upgrade to VIP ($3.99 / ৳399)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Button(
+                                onClick = {
+                                    val act = context as? android.app.Activity
+                                    if (act != null) {
+                                        com.example.ad.StartIoAdManager.showRewardedVideo(
+                                            activity = act,
+                                            onRewardEarned = {
+                                                com.example.subscription.SubscriptionManager.unlockTemporaryVip(30)
+                                                android.widget.Toast.makeText(context, "🎉 30 Minutes VIP Pass Unlocked!", android.widget.Toast.LENGTH_LONG).show()
+                                            },
+                                            onAdFailed = {
+                                                android.widget.Toast.makeText(context, "Video ad not ready. Please try again in a moment.", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007A), contentColor = Color.White),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.height(42.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Watch Ad (30 Mins VIP)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            Button(
+                                onClick = { showSubscriptionPlanModal = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.height(42.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.WorkspacePremium,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Upgrade VIP", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
                         }
                     }
                 }

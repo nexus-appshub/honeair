@@ -569,11 +569,11 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        val isUserVip = viewModel.isUserPremium(userProfile?.email)
-                        if (!isUserVip) {
+                        if (!com.example.ad.StartIoAdManager.isPremiumUser()) {
                             com.example.ad.StartIoBannerView(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .height(50.dp)
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
