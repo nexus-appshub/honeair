@@ -65,8 +65,13 @@ object AdManager {
      */
     fun showInterstitialIfEligible(context: Context, placement: String = "general", onDismiss: () -> Unit) {
         // 1. If user is VIP, immediately skip ads
-        if (SubscriptionManager.isVipUser()) {
+        if (SubscriptionManager.isVipUser() || StartIoAdManager.isPremiumUser()) {
             onDismiss()
+            return
+        }
+
+        if (context is android.app.Activity) {
+            StartIoAdManager.showInterstitial(context, onDismiss)
             return
         }
 

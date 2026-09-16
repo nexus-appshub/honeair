@@ -80,6 +80,12 @@ class MainApplication : Application(), ImageLoaderFactory {
         } catch (e: Throwable) {
             e.printStackTrace()
         }
+
+        try {
+            com.example.ad.StartIoAdManager.init(this)
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
     }
 
     private fun disableSSLCertificateChecking() {

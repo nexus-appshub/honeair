@@ -154,6 +154,7 @@ class MainActivity : ComponentActivity() {
         try {
             enableEdgeToEdge()
             com.example.security.SecurityGuard.applyScreenProtection(this)
+            com.example.ad.StartIoAdManager.showSplashAd(this)
         } catch (e: Throwable) {
             e.printStackTrace()
         }
@@ -569,11 +570,11 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         val isUserVip = viewModel.isUserPremium(userProfile?.email)
-                        if (appControlConfig?.isAdsEnabled == true && !isUserVip) {
-                            NonPremiumAdBanner(
-                                title = appControlConfig?.adTitle ?: "Sponsored: Upgrade to VIP to Remove Ads",
-                                clickUrl = appControlConfig?.adClickUrl ?: "",
-                                onRemoveAdsClick = { viewModel.triggerPremiumPaywall(true) }
+                        if (!isUserVip) {
+                            com.example.ad.StartIoBannerView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
 
@@ -1341,59 +1342,10 @@ fun NonPremiumAdBanner(
     clickUrl: String,
     onRemoveAdsClick: () -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    Surface(
-        color = Color(0xFF18181B),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFF27272A)),
+    com.example.ad.StartIoBannerView(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .clickable {
-                if (clickUrl.isNotBlank()) {
-                    try {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(clickUrl))
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                color = Color(0xFFFF6B00),
-                shape = RoundedCornerShape(4.dp)
-            ) {
-                Text(
-                    text = "SPONSORED",
-                    color = Color.White,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = title.ifBlank { "Sponsored: Upgrade to VIP to Remove Ads" },
-                color = Color.LightGray,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Remove Ads",
-                color = Color(0xFFFFD700),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { onRemoveAdsClick() }
-            )
-        }
-    }
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    )
 }
 

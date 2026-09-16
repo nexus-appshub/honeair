@@ -88,7 +88,7 @@ data class AppControlConfig(
     val premiumPaywallMessage: String = "This content or tab is reserved for Premium Subscribers. Please purchase a subscription to continue.",
     val premiumPaywallButtonText: String = "Buy Subscription Now",
     val premiumPaywallButtonUrl: String = "",
-    val isAdsEnabled: Boolean = false,
+    val isAdsEnabled: Boolean = true,
     val adBannerUrl: String = "",
     val adClickUrl: String = "",
     val adTitle: String = "Sponsored: Upgrade to VIP to Remove Ads",
@@ -788,7 +788,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val premiumPaywallButtonText = json.optString("premiumPaywallButtonText", "Buy Subscription Now")
                             val premiumPaywallButtonUrl = json.optString("premiumPaywallButtonUrl", "")
 
-                            val isAdsEnabled = json.optBoolean("isAdsEnabled", false)
+                            val isAdsEnabled = json.optBoolean("isAdsEnabled", true)
                             val adBannerUrl = json.optString("adBannerUrl", "")
                             val adClickUrl = json.optString("adClickUrl", "")
                             val adTitle = json.optString("adTitle", "Sponsored: Upgrade to VIP to Remove Ads")
