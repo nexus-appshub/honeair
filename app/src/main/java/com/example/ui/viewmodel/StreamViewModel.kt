@@ -1310,19 +1310,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         if (server != null && activeItem != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    var streamRes = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                    val streamRes = com.example.scraper.AnikotoScraper.extractStreamFromServer(
                         server = server,
                         watchUrl = currentServerWatchUrl.ifBlank { activeItem.title },
                         episode = curEp
                     )
-                    if (streamRes == null || streamRes.streamUrl.isBlank()) {
-                        streamRes = com.example.scraper.AnikotoScraper.getStreamByTitle(
-                            title = currentServerWatchUrl.ifBlank { activeItem.title },
-                            season = _activeMediaSeason.value,
-                            episode = curEp,
-                            preferDub = server.type.lowercase() == "dub"
-                        )
-                    }
                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
                         _activeMediaStreamUrl.value = streamRes.streamUrl
                         _activeMediaStreamHeaders.value = streamRes.headers
@@ -1358,11 +1350,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     ?: group.dubServers.firstOrNull()
 
                 _selectedServer.value = matched
-
-                // Auto-extract and set active stream for the matched server (Sub Server 1)
-                if (matched != null) {
-                    selectAnikotoServer(matched, episode)
-                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
@@ -2527,12 +2514,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             _activeMediaEpisode.value = episode
             val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
             val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
-
-            // Reset selected server if changing to a different media item to avoid using stale servers
-            if (_activeMediaItem.value?.id != effectiveItem.id) {
-                _selectedServer.value = null
-                currentServerWatchUrl = ""
-            }
 
             // Check if user selected a specific Anikoto server (SUB or DUB)
             val pickedServer = _selectedServer.value
