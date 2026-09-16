@@ -2961,7 +2961,8 @@ fun HomeScreen(
                                         },
                                         onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                         isSelected = isSelected,
-                                        hasError = hasError
+                                        hasError = hasError,
+                                        isPremium = viewModel.isChannelPremium(channel)
                                     )
                                 }
                                 item {

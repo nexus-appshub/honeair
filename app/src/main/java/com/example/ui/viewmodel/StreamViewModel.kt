@@ -151,6 +151,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _appControlConfig = MutableStateFlow<AppControlConfig?>(
         if (application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE).contains("isAppSuspended")) {
             val p = application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
+            val cachedLiveTvIds = p.getString("premiumLiveTvIds", "")?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
+            val cachedLiveTvCats = p.getString("premiumLiveTvCategories", "")?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
             AppControlConfig(
                 isAppSuspended = p.getBoolean("isAppSuspended", false),
                 suspensionTitle = p.getString("suspensionTitle", "App Under Maintenance") ?: "App Under Maintenance",
@@ -163,7 +165,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 redeemCode = p.getString("redeemCode", "") ?: "",
                 redeemValidityHours = p.getInt("redeemValidityHours", 24),
                 redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L),
-                fancodeValidityHours = p.getInt("fancodeValidityHours", 168)
+                fancodeValidityHours = p.getInt("fancodeValidityHours", 168),
+                isLiveTvLockEnabled = p.getBoolean("isLiveTvLockEnabled", false),
+                premiumLiveTvIds = cachedLiveTvIds,
+                premiumLiveTvCategories = cachedLiveTvCats
             )
         } else null
     )
@@ -794,18 +799,73 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val fancodeValidityHours = json.optInt("fancodeValidityHours", json.optInt("fancode_validity_hours", 168))
 
                             val premiumLiveTvIds = mutableListOf<String>()
-                            val jsonLiveTvIds = json.optJSONArray("premiumLiveTvIds")
-                            if (jsonLiveTvIds != null) {
-                                for (i in 0 until jsonLiveTvIds.length()) {
-                                    premiumLiveTvIds.add(jsonLiveTvIds.optString(i))
+                            val rawLiveTvIds = json.opt("premiumLiveTvIds")
+                                ?: json.opt("premium_live_tv_ids")
+                                ?: json.opt("lockedLiveTvChannels")
+                                ?: json.opt("premiumLiveTv")
+                            when (rawLiveTvIds) {
+                                is org.json.JSONArray -> {
+                                    for (i in 0 until rawLiveTvIds.length()) {
+                                        val item = rawLiveTvIds.optString(i, "").trim()
+                                        if (item.isNotBlank() && item != "null") premiumLiveTvIds.add(item)
+                                    }
+                                }
+                                is org.json.JSONObject -> {
+                                    val keys = rawLiveTvIds.keys()
+                                    while (keys.hasNext()) {
+                                        val key = keys.next()
+                                        val value = rawLiveTvIds.opt(key)
+                                        if (value is Boolean && value) {
+                                            premiumLiveTvIds.add(key.trim())
+                                        } else if (value is String && value.isNotBlank() && value != "null") {
+                                            premiumLiveTvIds.add(value.trim())
+                                        } else {
+                                            premiumLiveTvIds.add(key.trim())
+                                        }
+                                    }
+                                }
+                                is String -> {
+                                    if (rawLiveTvIds.isNotBlank() && rawLiveTvIds != "null") {
+                                        rawLiveTvIds.split(",", ";", "\n").forEach {
+                                            val s = it.trim()
+                                            if (s.isNotBlank()) premiumLiveTvIds.add(s)
+                                        }
+                                    }
                                 }
                             }
 
                             val premiumLiveTvCategories = mutableListOf<String>()
-                            val jsonLiveTvCats = json.optJSONArray("premiumLiveTvCategories")
-                            if (jsonLiveTvCats != null) {
-                                for (i in 0 until jsonLiveTvCats.length()) {
-                                    premiumLiveTvCategories.add(jsonLiveTvCats.optString(i))
+                            val rawLiveTvCats = json.opt("premiumLiveTvCategories")
+                                ?: json.opt("premium_live_tv_categories")
+                                ?: json.opt("lockedLiveTvCategories")
+                            when (rawLiveTvCats) {
+                                is org.json.JSONArray -> {
+                                    for (i in 0 until rawLiveTvCats.length()) {
+                                        val item = rawLiveTvCats.optString(i, "").trim()
+                                        if (item.isNotBlank() && item != "null") premiumLiveTvCategories.add(item)
+                                    }
+                                }
+                                is org.json.JSONObject -> {
+                                    val keys = rawLiveTvCats.keys()
+                                    while (keys.hasNext()) {
+                                        val key = keys.next()
+                                        val value = rawLiveTvCats.opt(key)
+                                        if (value is Boolean && value) {
+                                            premiumLiveTvCategories.add(key.trim())
+                                        } else if (value is String && value.isNotBlank() && value != "null") {
+                                            premiumLiveTvCategories.add(value.trim())
+                                        } else {
+                                            premiumLiveTvCategories.add(key.trim())
+                                        }
+                                    }
+                                }
+                                is String -> {
+                                    if (rawLiveTvCats.isNotBlank() && rawLiveTvCats != "null") {
+                                        rawLiveTvCats.split(",", ";", "\n").forEach {
+                                            val s = it.trim()
+                                            if (s.isNotBlank()) premiumLiveTvCategories.add(s)
+                                        }
+                                    }
                                 }
                             }
 
@@ -900,6 +960,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putInt("redeemValidityHours", redeemValidityHours)
                                     .putLong("redeemExpiryTimestamp", redeemExpiryTimestamp)
                                     .putInt("fancodeValidityHours", fancodeValidityHours)
+                                    .putBoolean("isLiveTvLockEnabled", isLiveTvLockEnabled)
+                                    .putString("premiumLiveTvIds", premiumLiveTvIds.joinToString(","))
+                                    .putString("premiumLiveTvCategories", premiumLiveTvCategories.joinToString(","))
                                     .apply()
                             } catch (e: Throwable) {
                                 Log.e("StreamViewModel", "Error saving control preferences", e)
@@ -3058,44 +3121,63 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         return repository.isFavorite(url)
     }
 
+    fun computeChannelHash(url: String): String {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return ""
+        var e = 0
+        for (i in 0 until trimmed.length) {
+            e = (e shl 5) - e + trimmed[i].code
+        }
+        val absE = if (e == Int.MIN_VALUE) {
+            Int.MAX_VALUE.toLong() + 1L
+        } else {
+            kotlin.math.abs(e.toLong())
+        }
+        return "ch_" + java.lang.Long.toString(absE, 36).take(10)
+    }
+
     fun isChannelPremium(channel: IptvChannel): Boolean {
         val config = _appControlConfig.value ?: return false
-        val cleanName = channel.name.trim()
+        
+        // If master Live TV lock is disabled in admin panel, no live channels are locked
+        if (!config.isLiveTvLockEnabled) {
+            return false
+        }
+
+        // Check individual channel flag from API / playlist source
+        if (channel.isPremium) return true
+
+        val cleanName = channel.name.trim().lowercase()
         val cleanUrl = channel.url.trim()
         val cleanGroup = channel.group.trim().lowercase()
-        val cleanTvgId = channel.tvgId.trim()
+        val cleanTvgId = channel.tvgId.trim().lowercase()
+        val channelHash = computeChannelHash(cleanUrl).lowercase()
         
-        if (config.isLiveTvLockEnabled) {
-            // Check individual channel flag from API
-            if (channel.isPremium) return true
+        // 1. Check if channel ID/hash (ch_xxxxxx), name, URL, or tvgId is in admin's premiumLiveTvIds list
+        if (config.premiumLiveTvIds.isNotEmpty()) {
+            val isLockedByIdOrName = config.premiumLiveTvIds.any { rawId ->
+                val id = rawId.trim().lowercase()
+                if (id.isBlank()) false
+                else {
+                    (channelHash.isNotBlank() && channelHash == id) ||
+                    cleanName == id ||
+                    cleanName.contains(id) ||
+                    id.contains(cleanName) ||
+                    (cleanTvgId.isNotBlank() && (cleanTvgId == id || cleanTvgId.contains(id))) ||
+                    (cleanUrl.isNotBlank() && (cleanUrl.lowercase() == id || cleanUrl.lowercase().contains(id)))
+                }
+            }
+            if (isLockedByIdOrName) return true
+        }
 
-            // 1. Check if group/category is in specific Live TV premium categories (completely separate from movie/anime categories)
-            if (cleanGroup.isNotBlank() && config.premiumLiveTvCategories.any { cleanGroup.contains(it.lowercase()) }) {
-                return true
+        // 2. Check if group/category is in specific Live TV premium categories
+        if (cleanGroup.isNotBlank() && config.premiumLiveTvCategories.isNotEmpty()) {
+            val isLockedByCategory = config.premiumLiveTvCategories.any { rawCat ->
+                val cat = rawCat.trim().lowercase()
+                if (cat.isBlank()) false
+                else cleanGroup == cat || cleanGroup.contains(cat)
             }
-            
-            // 2. Check if channel name, URL, or tvgId matches any specific Live TV premium channel IDs/names
-            if (config.premiumLiveTvIds.any {
-                cleanName.contains(it, ignoreCase = true) ||
-                cleanUrl.contains(it, ignoreCase = true) ||
-                (cleanTvgId.isNotBlank() && cleanTvgId.equals(it.trim(), ignoreCase = true))
-            }) {
-                return true
-            }
-        }
-        // 3. Fallback to standard admin panel lock fields (premiumCategories, lockedTabs, premiumMediaIds)
-        if (cleanGroup.isNotBlank() && config.premiumCategories.any { cleanGroup.contains(it.lowercase()) }) {
-            return true
-        }
-        if (cleanGroup.isNotBlank() && config.lockedTabs.any { cleanGroup.contains(it.lowercase()) }) {
-            return true
-        }
-        if (config.premiumMediaIds.any {
-            cleanName.contains(it, ignoreCase = true) ||
-            cleanUrl.contains(it, ignoreCase = true) ||
-            (cleanTvgId.isNotBlank() && cleanTvgId.equals(it.trim(), ignoreCase = true))
-        }) {
-            return true
+            if (isLockedByCategory) return true
         }
         
         return false
