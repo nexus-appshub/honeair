@@ -2958,7 +2958,14 @@ fun HomeScreen(
                                         isFavorite = isFav,
                                         onFavoriteToggle = { viewModel.toggleFavorite(channel, isFav) },
                                         onClick = {
-                                            viewModel.setActiveChannel(channel)
+                                            val act = context as? android.app.Activity
+                                            if (act != null) {
+                                                com.example.ad.StartIoAdManager.showInterstitial(act) {
+                                                    viewModel.setActiveChannel(channel)
+                                                }
+                                            } else {
+                                                viewModel.setActiveChannel(channel)
+                                            }
                                         },
                                         onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                         isSelected = isSelected,
@@ -2967,6 +2974,13 @@ fun HomeScreen(
                                     )
                                 }
                                 item {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    com.example.ad.StartIoBannerView(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(50.dp)
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     DeveloperNoteFooter()
                                 }

@@ -60,13 +60,13 @@ object StartIoAdManager {
     const val START_IO_APP_ID = "208883567"
     const val START_IO_PUBLISHER_ID = "110602603"
 
-    var TEST_MODE: Boolean = true
+    var TEST_MODE: Boolean = false
     var isUserPremiumOverride: Boolean? = false
 
     private var channelChangeCount = 0
     private var lastInterstitialTimeMs = 0L
-    private const val CHANNEL_CHANGE_INTERVAL = 4
-    private const val INTERSTITIAL_COOLDOWN_MS = 5 * 60 * 1000L
+    private const val CHANNEL_CHANGE_INTERVAL = 2
+    private const val INTERSTITIAL_COOLDOWN_MS = 30000L
 
     private var isInitialized = false
 
@@ -94,9 +94,7 @@ object StartIoAdManager {
             StartAppSDK.enableReturnAds(false)
             StartAppAd.disableSplash()
             
-            if (testMode || TEST_MODE) {
-                StartAppSDK.setTestAdsEnabled(true)
-            }
+            StartAppSDK.setTestAdsEnabled(TEST_MODE)
             isInitialized = true
             Log.d(TAG, "Start.io SDK initialized for App ID: $appId (TestMode: ${TEST_MODE})")
         } catch (e: Throwable) {
@@ -328,15 +326,25 @@ fun StartIoBannerView(
         return
     }
 
+    val bannerHeight = if (isMrec) 250.dp else 50.dp
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .height(bannerHeight)
+            .padding(vertical = 2.dp),
         contentAlignment = Alignment.Center
     ) {
         AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(bannerHeight),
             factory = { ctx ->
                 FrameLayout(ctx).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
                     StartIoAdManager.loadBanner(this, isMrec = isMrec)
                 }
             },
