@@ -136,12 +136,23 @@ object AnikotoScraper {
     fun sanitizePosterUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim()
         if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) return ""
-        return when {
+        if (trimmed.contains("anilist.co") || trimmed.contains("myanimelist.net") || trimmed.contains("tmdb.org")) {
+            return if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
+        }
+        if (trimmed.startsWith("/api/proxy") || trimmed.startsWith("/api/")) {
+            return "$API_BASE_URL$trimmed"
+        }
+        val target = when {
             trimmed.startsWith("//") -> "https:$trimmed"
             trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
             trimmed.startsWith("/") -> "https://anikoto.cz$trimmed"
-            trimmed.contains("anipixcdn.co") || trimmed.contains("anikoto.cz") -> "https://${trimmed.removePrefix("http://").removePrefix("https://").removePrefix("//")}"
             else -> "https://anikoto.cz/$trimmed"
+        }
+        // If image is hosted on anipixcdn.co or anikoto.cz, route through media proxy to prevent 403 Forbidden
+        return if (target.contains("anipixcdn.co") || target.contains("anikoto.cz")) {
+            "$API_BASE_URL/api/proxy?url=${URLEncoder.encode(target, "UTF-8")}&referer=https%3A%2F%2Fanikoto.cz%2F"
+        } else {
+            target
         }
     }
 
@@ -374,7 +385,20 @@ object AnikotoScraper {
             }
         }
 
-        // Tier 3 Fallback: Jikan / MyAnimeList Anime REST API for 100% working high-res posters
+        // Tier 3 Fallback: AniList GraphQL Standard API
+        if (results.isEmpty()) {
+            try {
+                val aniListFormat = if (type?.lowercase() == "movie") "MOVIE" else if (type?.lowercase() == "tv") "TV" else null
+                val aniListItems = AnimePosterEngine.fetchAniListMediaPage(page = page, perPage = 25, format = aniListFormat)
+                if (aniListItems.isNotEmpty()) {
+                    results.addAll(aniListItems)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "AniList fallback error: ${e.message}")
+            }
+        }
+
+        // Tier 4 Fallback: Jikan / MyAnimeList Anime REST API
         if (results.isEmpty()) {
             try {
                 val jikanUrl = if (!keyword.isNullOrBlank()) {
@@ -429,7 +453,7 @@ object AnikotoScraper {
             }
         }
 
-        // Enhance results with AniList GraphQL / Jikan HD posters if any poster is missing or low quality
+        // Enhance results with AniList GraphQL / Jikan HD posters across all items
         AnimePosterEngine.enhanceAnimeItems(results)
     }
 
@@ -742,11 +766,14 @@ object AnikotoScraper {
                 srv.copy(name = displayName)
             }
 
+            val apiWatchUrl = subJson?.optJSONObject("anime")?.optString("watchUrl", "") ?: ""
+            val resolvedWatchUrl = apiWatchUrl.ifBlank { title }
+
             Log.d(TAG, "API returned ${cleanSub.size} SUB servers and ${cleanDub.size} DUB servers for $cleanTitle")
             AnikotoServerGroup(
                 subServers = cleanSub,
                 dubServers = cleanDub,
-                watchUrl = title,
+                watchUrl = resolvedWatchUrl,
                 episodeNum = episode
             )
         } catch (e: Exception) {
@@ -769,23 +796,7 @@ object AnikotoScraper {
             val effectiveEp = if (episode <= 0) 1 else episode
             val cleanKw = watchUrl.removePrefix("anikoto_").trim()
 
-            // If server.streamUrl is a direct HLS or MP4 stream and not a generic API URL
-            if (server.streamUrl.isNotBlank() && (server.streamUrl.endsWith(".m3u8") || server.streamUrl.endsWith(".mp4") || (server.streamUrl.contains("/m3u8") && !server.streamUrl.contains("/api/")))) {
-                val finalUrl = makeAbsoluteUrl(server.streamUrl)
-                val headers = mutableMapOf(
-                    "User-Agent" to DEFAULT_UA,
-                    "Referer" to if (server.referer.isNotBlank()) server.referer else "$API_BASE_URL/"
-                )
-                Log.d(TAG, "extractStreamFromServer returning direct server URL: $finalUrl")
-                return@withContext ScrapedStreamResult(
-                    streamUrl = finalUrl,
-                    headers = headers,
-                    referer = headers["Referer"] ?: "$API_BASE_URL/",
-                    subtitles = emptyList()
-                )
-            }
-
-            // If streamUrl not pre-filled or is an API query, query the stream API with server ID/name and specific episode
+            // Query the stream API with server ID and specific requested episode
             val queryUrl = buildStreamGetUrl(
                 title = if (cleanKw.isNotBlank()) cleanKw else server.id,
                 episode = effectiveEp,
@@ -807,6 +818,22 @@ object AnikotoScraper {
                         subtitles = subtitles
                     )
                 }
+            }
+
+            // Fallback 1: If server.streamUrl is a direct HLS or MP4 stream
+            if (server.streamUrl.isNotBlank() && (server.streamUrl.endsWith(".m3u8") || server.streamUrl.endsWith(".mp4") || (server.streamUrl.contains("/m3u8") && !server.streamUrl.contains("/api/")))) {
+                val finalUrl = makeAbsoluteUrl(server.streamUrl)
+                val headers = mutableMapOf(
+                    "User-Agent" to DEFAULT_UA,
+                    "Referer" to if (server.referer.isNotBlank()) server.referer else "$API_BASE_URL/"
+                )
+                Log.d(TAG, "extractStreamFromServer returning direct server URL: $finalUrl")
+                return@withContext ScrapedStreamResult(
+                    streamUrl = finalUrl,
+                    headers = headers,
+                    referer = headers["Referer"] ?: "$API_BASE_URL/",
+                    subtitles = emptyList()
+                )
             }
 
             // Fallback: Use App Native Scraper directly on server linkId / rawUrl
@@ -967,21 +994,20 @@ object AnikotoScraper {
             .removePrefix("movie_")
             .removePrefix("series_")
             .trim()
+        val epParam = if (episode <= 0) 1 else episode
         val queryParams = mutableListOf<String>()
+
         if (clean.startsWith("http") || clean.contains("/watch/")) {
-            val cleanUrl = if (clean.contains("?")) {
-                val base = clean.substringBefore("?")
-                val existingParams = clean.substringAfter("?").split("&")
-                    .filterNot { it.startsWith("ep=") || it.startsWith("type=") || it.startsWith("server=") }
-                if (existingParams.isNotEmpty()) "$base?${existingParams.joinToString("&")}" else base
+            val base = if (clean.contains("?")) clean.substringBefore("?") else clean
+            val adjustedUrl = if (base.contains(Regex("""/ep-\d+"""))) {
+                base.replace(Regex("""/ep-\d+"""), "/ep-$epParam")
             } else {
-                clean
+                base
             }
-            queryParams.add("url=${URLEncoder.encode(cleanUrl, "UTF-8")}")
+            queryParams.add("url=${URLEncoder.encode(adjustedUrl, "UTF-8")}")
         } else {
             queryParams.add("keyword=${URLEncoder.encode(clean, "UTF-8")}")
         }
-        val epParam = if (episode <= 0) 1 else episode
         queryParams.add("ep=$epParam")
         queryParams.add("type=$type")
         if (!server.isNullOrBlank()) {
@@ -991,16 +1017,16 @@ object AnikotoScraper {
     }
 
     private fun sanitizeSearchTitle(title: String): String {
-        return title
+        val trimmed = title.trim()
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.contains("/watch/")) {
+            return trimmed
+        }
+        return trimmed
             .removePrefix("anikoto_")
             .removePrefix("movie_")
             .removePrefix("series_")
-            .replace("-", " ")
-            .replace(Regex("""\b(?:Season|S)\s*\d+.*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\bPart\s*\d+.*""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\[.*?\]"""), "")
             .replace(Regex("""\(.*?\)"""), "")
-            .replace(Regex("""[:\-–—]"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
     }

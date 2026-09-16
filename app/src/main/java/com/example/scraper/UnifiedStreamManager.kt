@@ -76,20 +76,7 @@ object UnifiedStreamManager {
                 }
                 Log.d(TAG, "Tier 0: Querying In-App Native Scraper & Anime API for $lookupKey (S$season Ep$effectiveEpisode)...")
                 
-                // First try direct in-app native extraction
-                val nativeStream = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
-                    title = lookupKey,
-                    season = season,
-                    episode = effectiveEpisode
-                )
-                if (nativeStream != null && nativeStream.streamUrl.isNotEmpty()) {
-                    Log.d(TAG, "Tier 0: Anime stream resolved via Native In-App Scraper: ${nativeStream.streamUrl}")
-                    streamCache[cacheKey] = nativeStream
-                    saveToRoomCache(context, cacheKey, nativeStream)
-                    return nativeStream
-                }
-
-                // API stream fallback
+                // Priority 1: High-Speed Direct API Stream with Subtitles
                 val animeStream = AnikotoScraper.getStreamByTitle(
                     title = lookupKey,
                     season = season,
@@ -100,6 +87,19 @@ object UnifiedStreamManager {
                     streamCache[cacheKey] = animeStream
                     saveToRoomCache(context, cacheKey, animeStream)
                     return animeStream
+                }
+
+                // Priority 2: In-app native extraction
+                val nativeStream = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
+                    title = lookupKey,
+                    season = season,
+                    episode = effectiveEpisode
+                )
+                if (nativeStream != null && nativeStream.streamUrl.isNotEmpty()) {
+                    Log.d(TAG, "Tier 0: Anime stream resolved via Native In-App Scraper: ${nativeStream.streamUrl}")
+                    streamCache[cacheKey] = nativeStream
+                    saveToRoomCache(context, cacheKey, nativeStream)
+                    return nativeStream
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Tier 0 Anime resolver failed: ${e.message}")

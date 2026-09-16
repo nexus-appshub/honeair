@@ -1,7 +1,10 @@
 package com.example.scraper
 
 import android.util.Log
+import com.example.data.model.MediaItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -24,10 +27,11 @@ data class AnimePosterResult(
 )
 
 /**
- * High-performance Anime Metadata & Poster Engine with Tiered Fallback:
+ * High-performance Anime Metadata & Poster Engine with AniList GraphQL Standard:
  * 1. AniList GraphQL API (Industry-standard HD extraLarge covers + 16:9 bannerImages + UI colors)
- * 2. Jikan API (MyAnimeList v4 large JPG/WebP)
- * 3. In-memory caching for zero redundant network calls and instant UI rendering
+ * 2. Secondary title normalization & fallback search
+ * 3. Jikan API (MyAnimeList v4 large JPG/WebP) fallback
+ * 4. High-performance concurrent memory cache for instant UI rendering across all screens
  */
 object AnimePosterEngine {
     private const val TAG = "AnimePosterEngine"
@@ -38,20 +42,36 @@ object AnimePosterEngine {
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
             .followRedirects(true)
             .build()
     }
 
     /**
-     * Cleans an anime query/title by removing season, dub/sub markers, and episode tags
+     * Cleans an anime query/title by removing tags like [SUB], (DUB), etc. while preserving title specifics
      */
     fun cleanAnimeTitle(title: String): String {
         return title
-            .replace(Regex("""(?i)\b(season\s*\d+|part\s*\d+|cour\s*\d+|s\d+)\b"""), "")
-            .replace(Regex("""(?i)\b(dub|sub|uncensored|tv|movie|special|ova|ona)\b"""), "")
-            .replace(Regex("""[\[\]\(\)\{\}]"""), " ")
+            .removePrefix("anikoto_")
+            .removePrefix("movie_")
+            .removePrefix("series_")
+            .replace(Regex("""\[.*?\]"""), "")
+            .replace(Regex("""\(.*?\)"""), "")
+            .replace(Regex("""(?i)\b(uncensored|dub|sub|bd|fhd|hd)\b"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
+    /**
+     * Secondary fallback cleaning that strips season/part markers for broader search if specific query fails
+     */
+    fun stripSeasonOrPart(title: String): String {
+        return title
+            .replace(Regex("""(?i)\b(?:season|s)\s*\d+.*"""), "")
+            .replace(Regex("""(?i)\bpart\s*\d+.*"""), "")
+            .replace(Regex("""(?i)\bcour\s*\d+.*"""), "")
+            .replace(Regex("""[:\-–—]"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
     }
@@ -66,15 +86,31 @@ object AnimePosterEngine {
         val cacheKey = clean.lowercase()
         memoryCache[cacheKey]?.let { return@withContext it }
 
-        // Tier 1: AniList GraphQL API (ExtraLarge HD Poster + Banner Image)
-        val aniListResult = fetchFromAniList(clean)
+        // Tier 1: AniList GraphQL API with exact cleaned title
+        var aniListResult = fetchFromAniList(clean)
+
+        // If not found and title has colons, hyphens, or subtitle descriptions, try broader title
+        if (aniListResult == null || aniListResult.posterUrl.isBlank()) {
+            val stripped = stripSeasonOrPart(clean)
+            if (stripped.isNotBlank() && !stripped.equals(clean, ignoreCase = true)) {
+                aniListResult = fetchFromAniList(stripped)
+            }
+        }
+
+        // If found from AniList, cache and return immediately
         if (aniListResult != null && aniListResult.posterUrl.isNotBlank()) {
             memoryCache[cacheKey] = aniListResult
             return@withContext aniListResult
         }
 
-        // Tier 2: Jikan / MyAnimeList v4 REST API
-        val jikanResult = fetchFromJikan(clean)
+        // Tier 2: Jikan / MyAnimeList v4 REST API Fallback
+        val jikanResult = fetchFromJikan(clean) ?: run {
+            val stripped = stripSeasonOrPart(clean)
+            if (stripped.isNotBlank() && !stripped.equals(clean, ignoreCase = true)) {
+                fetchFromJikan(stripped)
+            } else null
+        }
+
         if (jikanResult != null && jikanResult.posterUrl.isNotBlank()) {
             memoryCache[cacheKey] = jikanResult
             return@withContext jikanResult
@@ -85,6 +121,7 @@ object AnimePosterEngine {
 
     /**
      * 1. AniList GraphQL API Fetcher
+     * Queries extraLarge and large cover images, bannerImage, color, score, description, year
      */
     private suspend fun fetchFromAniList(animeName: String): AnimePosterResult? = withContext(Dispatchers.IO) {
         try {
@@ -95,10 +132,12 @@ object AnimePosterEngine {
                     title {
                       english
                       romaji
+                      userPreferred
                     }
                     coverImage {
                       extraLarge
                       large
+                      medium
                       color
                     }
                     bannerImage
@@ -129,7 +168,7 @@ object AnimePosterEngine {
 
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    Log.w(TAG, "AniList GraphQL error HTTP: ${response.code}")
+                    Log.w(TAG, "AniList GraphQL error HTTP: ${response.code} for '$animeName'")
                     return@withContext null
                 }
                 val bodyStr = response.body?.string() ?: return@withContext null
@@ -144,30 +183,34 @@ object AnimePosterEngine {
                 val coverObj = media.optJSONObject("coverImage")
                 val extraLargePoster = coverObj?.optString("extraLarge")
                     ?: coverObj?.optString("large")
+                    ?: coverObj?.optString("medium")
                     ?: ""
                 val dominantColor = coverObj?.optString("color", "") ?: ""
                 val banner = media.optString("bannerImage", "")
                 val score = media.optInt("averageScore", 80)
                 val year = media.optInt("seasonYear", 2024).toString()
-                val description = media.optString("description", "")
+                val rawDescription = media.optString("description", "")
+                val cleanDescription = rawDescription.replace(Regex("<.*?>"), "").trim()
 
                 val ratingFormatted = if (score > 0) String.format("%.1f", score / 10.0) else "8.4"
 
-                return@withContext AnimePosterResult(
-                    posterUrl = extraLargePoster,
-                    bannerUrl = banner,
-                    dominantColor = dominantColor,
-                    titleEnglish = englishTitle,
-                    titleRomaji = romajiTitle,
-                    description = description,
-                    rating = ratingFormatted,
-                    year = if (year != "0") year else "2024"
-                )
+                if (extraLargePoster.isNotBlank()) {
+                    return@withContext AnimePosterResult(
+                        posterUrl = extraLargePoster,
+                        bannerUrl = banner,
+                        dominantColor = dominantColor,
+                        titleEnglish = englishTitle,
+                        titleRomaji = romajiTitle,
+                        description = cleanDescription,
+                        rating = ratingFormatted,
+                        year = if (year != "0") year else "2024"
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "AniList GraphQL fetch error for '$animeName': ${e.message}")
-            null
         }
+        null
     }
 
     /**
@@ -206,45 +249,186 @@ object AnimePosterEngine {
                 val year = firstAnime.optInt("year", 2024).toString()
                 val synopsis = firstAnime.optString("synopsis", "")
 
-                return@withContext AnimePosterResult(
-                    posterUrl = poster,
-                    titleEnglish = title,
-                    description = synopsis,
-                    rating = String.format("%.1f", score),
-                    year = if (year != "0") year else "2024"
-                )
+                if (poster.isNotBlank()) {
+                    return@withContext AnimePosterResult(
+                        posterUrl = poster,
+                        titleEnglish = title,
+                        description = synopsis,
+                        rating = String.format("%.1f", score),
+                        year = if (year != "0") year else "2024"
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Jikan REST API fetch error for '$animeName': ${e.message}")
-            null
         }
+        null
     }
 
     /**
-     * Bulk fetch and enhance a list of Anime items with AniList / Jikan posters
+     * Bulk fetch and enhance a list of Anime items with standardized AniList HD posters.
+     * Concurrently fetches AniList GraphQL posters for all items in parallel.
      */
     suspend fun enhanceAnimeItems(items: List<AnikotoAnimeItem>): List<AnikotoAnimeItem> = withContext(Dispatchers.IO) {
-        items.map { item ->
-            val needsBetterPoster = item.posterUrl.isBlank() ||
-                    item.posterUrl.contains("placeholder") ||
-                    item.posterUrl.endsWith("null") ||
-                    item.posterUrl.endsWith("undefined")
+        val jobs = items.map { item ->
+            async {
+                try {
+                    // Query AniList GraphQL for high-resolution standardized poster & banner
+                    val metadata = getAnimePosterAndBanner(item.title)
+                    if (metadata != null && metadata.posterUrl.isNotBlank()) {
+                        item.copy(
+                            posterUrl = metadata.posterUrl,
+                            description = item.description.ifBlank { metadata.description },
+                            rating = if (item.rating.isNotBlank() && item.rating != "8.4") item.rating else metadata.rating,
+                            releaseYear = item.releaseYear.ifBlank { metadata.year }
+                        )
+                    } else {
+                        // Ensure existing poster is properly proxied so it doesn't fail
+                        val safePoster = AnikotoScraper.sanitizePosterUrl(item.posterUrl)
+                        item.copy(posterUrl = safePoster)
+                    }
+                } catch (e: Exception) {
+                    val safePoster = AnikotoScraper.sanitizePosterUrl(item.posterUrl)
+                    item.copy(posterUrl = safePoster)
+                }
+            }
+        }
+        jobs.awaitAll()
+    }
 
-            if (needsBetterPoster || !item.posterUrl.startsWith("http")) {
-                val metadata = getAnimePosterAndBanner(item.title)
-                if (metadata != null && metadata.posterUrl.isNotBlank()) {
-                    item.copy(
-                        posterUrl = metadata.posterUrl,
-                        description = item.description.ifBlank { metadata.description },
-                        rating = item.rating.ifBlank { metadata.rating },
-                        releaseYear = item.releaseYear.ifBlank { metadata.year }
-                    )
+    /**
+     * Enhances a list of generic MediaItem objects with AniList high-resolution posters and descriptions
+     */
+    suspend fun enhanceMediaItems(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.IO) {
+        val jobs = items.map { item ->
+            async {
+                val isAnime = item.id.startsWith("anikoto_") ||
+                        item.category?.contains("Anime", ignoreCase = true) == true ||
+                        item.type.equals("anime", ignoreCase = true)
+                if (isAnime) {
+                    val metadata = getAnimePosterAndBanner(item.title)
+                    if (metadata != null && metadata.posterUrl.isNotBlank()) {
+                        item.copy(
+                            imageUrl = metadata.posterUrl,
+                            description = item.description.ifBlank { metadata.description },
+                            rating = if (item.rating.isNotBlank() && item.rating != "8.4") item.rating else metadata.rating,
+                            year = item.year.ifBlank { metadata.year }
+                        )
+                    } else {
+                        item
+                    }
                 } else {
                     item
                 }
-            } else {
-                item
             }
         }
+        jobs.awaitAll()
+    }
+
+    /**
+     * Directly fetch a page of trending / popular anime directly from AniList GraphQL
+     */
+    suspend fun fetchAniListMediaPage(
+        page: Int = 1,
+        perPage: Int = 25,
+        format: String? = null,
+        sortBy: String = "TRENDING_DESC"
+    ): List<AnikotoAnimeItem> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<AnikotoAnimeItem>()
+        try {
+            val formatParam = if (!format.isNullOrBlank()) ", format: $format" else ""
+            val query = """
+                query (${'$'}page: Int, ${'$'}perPage: Int) {
+                  Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                    media(type: ANIME, sort: [$sortBy, POPULARITY_DESC]$formatParam) {
+                      id
+                      title {
+                        english
+                        romaji
+                        userPreferred
+                      }
+                      coverImage {
+                        extraLarge
+                        large
+                        color
+                      }
+                      bannerImage
+                      averageScore
+                      seasonYear
+                      episodes
+                      format
+                      description(asHtml: false)
+                    }
+                  }
+                }
+            """.trimIndent()
+
+            val requestBodyJson = JSONObject().apply {
+                put("query", query)
+                put("variables", JSONObject().apply {
+                    put("page", page)
+                    put("perPage", perPage)
+                })
+            }
+
+            val requestBody = requestBodyJson.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val request = Request.Builder()
+                .url(ANILIST_GRAPHQL_ENDPOINT)
+                .post(requestBody)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .header("User-Agent", "HomeAirTV/4.6.9 (Android)")
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val bodyStr = response.body?.string() ?: return@withContext emptyList()
+                val json = JSONObject(bodyStr)
+                val data = json.optJSONObject("data") ?: return@withContext emptyList()
+                val pageObj = data.optJSONObject("Page") ?: return@withContext emptyList()
+                val mediaArr = pageObj.optJSONArray("media") ?: return@withContext emptyList()
+
+                for (i in 0 until mediaArr.length()) {
+                    val m = mediaArr.optJSONObject(i) ?: continue
+                    val id = m.optInt("id", 0)
+                    val titleObj = m.optJSONObject("title")
+                    val englishTitle = titleObj?.optString("english", "") ?: ""
+                    val romajiTitle = titleObj?.optString("romaji", "") ?: ""
+                    val userTitle = titleObj?.optString("userPreferred", "") ?: ""
+                    val displayTitle = englishTitle.ifBlank { userTitle.ifBlank { romajiTitle } }
+
+                    val coverObj = m.optJSONObject("coverImage")
+                    val poster = coverObj?.optString("extraLarge") ?: coverObj?.optString("large") ?: ""
+                    val score = m.optInt("averageScore", 80)
+                    val year = m.optInt("seasonYear", 2024).toString()
+                    val episodes = m.optInt("episodes", 12)
+                    val mediaFormat = m.optString("format", "TV")
+                    val rawDesc = m.optString("description", "")
+                    val cleanDesc = rawDesc.replace(Regex("<.*?>"), "").trim()
+
+                    if (displayTitle.isNotBlank() && poster.isNotBlank()) {
+                        results.add(
+                            AnikotoAnimeItem(
+                                id = "al_$id",
+                                title = displayTitle,
+                                posterUrl = poster,
+                                watchUrl = "https://anikoto.cz/watch/$id",
+                                type = if (mediaFormat.equals("MOVIE", ignoreCase = true)) "Movie" else "TV",
+                                subCount = "$episodes",
+                                dubCount = "$episodes",
+                                rating = String.format("%.1f", score / 10.0),
+                                releaseYear = if (year != "0") year else "2024",
+                                description = cleanDesc
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchAniListMediaPage error: ${e.message}")
+        }
+        results
     }
 }

@@ -420,8 +420,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     var showTrailerDialog by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<com.example.data.model.MediaItem?>(null) }
 
-    // Auto-extract stream when user or episode switches the selected Anikoto server (preserves SUB / DUB)
-    LaunchedEffect(selectedServer, currentSeason, currentEpisode) {
+    // Auto-extract stream when user or server group sets the selected Anikoto server (preserves SUB / DUB)
+    LaunchedEffect(selectedServer) {
         val srv = selectedServer
         if (isAnime && srv != null) {
             withContext(Dispatchers.IO) {
@@ -3552,23 +3552,26 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                         FilterChip(
                                             selected = currentEpisode == ep,
                                             onClick = {
-                                                currentEpisode = ep
-                                                if (isEpLocked) {
-                                                    showSubscriptionPlanModal = true
-                                                } else {
-                                                    isLoading = true
-                                                    hasError = false
-                                                    if (isAnime) {
-                                                        val tempItem = currentMediaItem ?: MediaItem(
-                                                            id = imdbId,
-                                                            imdbId = imdbId,
-                                                            title = title,
-                                                            category = "Anime",
-                                                            imageUrl = "",
-                                                            type = type,
-                                                            year = "2024"
-                                                        )
-                                                        viewModel.fetchAnikotoServers(tempItem, currentSeason, ep)
+                                                if (currentEpisode != ep) {
+                                                    currentEpisode = ep
+                                                    if (isEpLocked) {
+                                                        showSubscriptionPlanModal = true
+                                                    } else {
+                                                        isLoading = true
+                                                        hasError = false
+                                                        if (isAnime) {
+                                                            viewModel.selectAnikotoServer(null)
+                                                            val tempItem = currentMediaItem ?: MediaItem(
+                                                                id = imdbId,
+                                                                imdbId = imdbId,
+                                                                title = title,
+                                                                category = "Anime",
+                                                                imageUrl = "",
+                                                                type = type,
+                                                                year = "2024"
+                                                            )
+                                                            viewModel.fetchAnikotoServers(tempItem, currentSeason, ep)
+                                                        }
                                                     }
                                                 }
                                             },

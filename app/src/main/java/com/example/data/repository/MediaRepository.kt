@@ -247,7 +247,8 @@ class MediaRepository {
         addJob("Latest", "movie") { tmdbApi.getTrendingToday(page = it) }
 
         val results = jobs.awaitAll().flatten().filter { it.imageUrl.isNotEmpty() }.distinctBy { it.id }
-        results.sortedWith(
+        val enhanced = com.example.scraper.AnimePosterEngine.enhanceMediaItems(results)
+        enhanced.sortedWith(
             compareByDescending<MediaItem> { it.year.toIntOrNull() ?: 0 }
                 .thenByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
         )
@@ -499,7 +500,8 @@ class MediaRepository {
             )
             fetchedList.addAll(curatedBanglaItems)
             fetchedList.retainAll { it.imageUrl.isNotEmpty() }
-            fetchedList.distinctBy { it.id }
+            val distinct = fetchedList.distinctBy { it.id }
+            com.example.scraper.AnimePosterEngine.enhanceMediaItems(distinct)
         }
 
     suspend fun fetchCastMembers(id: String, type: String): List<com.example.ui.components.CastMember> = withContext(Dispatchers.IO) {
@@ -692,7 +694,12 @@ class MediaRepository {
                 addJob("Series & TV Shows", "series") { tmdbApi.getTrendingTvShows(page = it) }
             }
         }
-        jobs.awaitAll().flatten().filter { it.imageUrl.isNotEmpty() }.distinctBy { it.id }
+        val allItems = jobs.awaitAll().flatten().filter { it.imageUrl.isNotEmpty() }.distinctBy { it.id }
+        if (catLower.contains("anime")) {
+            com.example.scraper.AnimePosterEngine.enhanceMediaItems(allItems)
+        } else {
+            allItems
+        }
     }
 
     suspend fun fetchMoreMediaItems(page: Int, category: String = "All"): List<MediaItem> = coroutineScope {
