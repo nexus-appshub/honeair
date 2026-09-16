@@ -73,60 +73,78 @@ object AnimeDownloader {
     ): AnimeEpisodeDownloadInfo = withContext(Dispatchers.IO) {
         Log.d(TAG, "Resolving anime download streams for '$title' (S${season}E${episode}, Dub: $preferDub)")
 
-        val serverGroup = try {
-            AnikotoScraper.fetchAvailableServers(title = title, season = season, episode = episode)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching anime servers: ${e.message}")
-            null
-        }
-
-        val targetServers = if (preferDub && serverGroup?.dubServers?.isNotEmpty() == true) {
-            serverGroup.dubServers
-        } else if (serverGroup?.subServers?.isNotEmpty() == true) {
-            serverGroup.subServers
-        } else {
-            emptyList()
-        }
-
         val allQualities = mutableListOf<AnimeQualityOption>()
-        var resolvedServerName = if (preferDub) "DUB Server" else "SUB Server"
+        var resolvedServerName = if (preferDub) "DUB Fast Stream" else "SUB Fast Stream"
 
-        for (srv in targetServers) {
-            try {
-                val embedUrl = AnikotoScraper.extractServerEmbedUrl(srv.linkId, serverGroup?.watchUrl ?: "https://anikoto.cz/")
-                if (!embedUrl.isNullOrBlank()) {
-                    val streamRes = AnikotoScraper.extractM3u8AndSubtitlesFromEmbed(embedUrl)
-                    if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
-                        resolvedServerName = srv.name
-                        val parsedQualities = parseHlsMasterQualities(streamRes)
-                        if (parsedQualities.isNotEmpty()) {
-                            allQualities.addAll(parsedQualities)
-                            break
-                        } else {
-                            // Single quality stream fallback
-                            allQualities.add(
-                                AnimeQualityOption(
-                                    resolution = "720p",
-                                    title = "720p HD",
-                                    badge = "DEFAULT QUALITY",
-                                    estimatedSize = "~180 MB",
-                                    streamUrl = streamRes.streamUrl,
-                                    headers = streamRes.headers,
-                                    referer = streamRes.referer,
-                                    serverName = srv.name,
-                                    subtitles = streamRes.subtitles
+        // Tier 1: Deep Universal Anime Download Scraper (Dean Edwards Unpacker + MegaCloud / Megaplay AES Decrypt + Kiwi Mirrors)
+        try {
+            val deepScrapedQualities = com.example.scraper.UniversalAnimeDownloadScraper.resolveAllDownloadableOptions(
+                title = title,
+                season = season,
+                episode = episode,
+                preferDub = preferDub
+            )
+            if (deepScrapedQualities.isNotEmpty()) {
+                allQualities.addAll(deepScrapedQualities)
+                resolvedServerName = deepScrapedQualities.firstOrNull()?.serverName ?: resolvedServerName
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "UniversalAnimeDownloadScraper error: ${e.message}")
+        }
+
+        // Tier 2: Anikoto live server group fallback
+        if (allQualities.isEmpty()) {
+            val serverGroup = try {
+                AnikotoScraper.fetchAvailableServers(title = title, season = season, episode = episode)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching anime servers: ${e.message}")
+                null
+            }
+
+            val targetServers = if (preferDub && serverGroup?.dubServers?.isNotEmpty() == true) {
+                serverGroup.dubServers
+            } else if (serverGroup?.subServers?.isNotEmpty() == true) {
+                serverGroup.subServers
+            } else {
+                emptyList()
+            }
+
+            for (srv in targetServers) {
+                try {
+                    val embedUrl = AnikotoScraper.extractServerEmbedUrl(srv.linkId, serverGroup?.watchUrl ?: "https://anikoto.cz/")
+                    if (!embedUrl.isNullOrBlank()) {
+                        val streamRes = AnikotoScraper.extractM3u8AndSubtitlesFromEmbed(embedUrl)
+                        if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
+                            resolvedServerName = srv.name
+                            val parsedQualities = parseHlsMasterQualities(streamRes)
+                            if (parsedQualities.isNotEmpty()) {
+                                allQualities.addAll(parsedQualities)
+                                break
+                            } else {
+                                allQualities.add(
+                                    AnimeQualityOption(
+                                        resolution = "720p",
+                                        title = "720p HD",
+                                        badge = "DEFAULT QUALITY",
+                                        estimatedSize = "~180 MB",
+                                        streamUrl = streamRes.streamUrl,
+                                        headers = streamRes.headers,
+                                        referer = streamRes.referer,
+                                        serverName = srv.name,
+                                        subtitles = streamRes.subtitles
+                                    )
                                 )
-                            )
-                            break
+                                break
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Server ${srv.name} resolution error: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Server ${srv.name} resolution error: ${e.message}")
             }
         }
 
-        // If no server stream was resolved, fallback to universal getStreamByTitle
+        // Tier 3: Universal getStreamByTitle fallback
         if (allQualities.isEmpty()) {
             try {
                 val fallbackStream = AnikotoScraper.getStreamByTitle(title, season, episode, preferDub)
@@ -163,10 +181,10 @@ object AnimeDownloader {
             }
         }
 
-        // Fallback 5: If still empty, query the high-power UnifiedStreamManager concurrent racing engine!
+        // Tier 4: UnifiedStreamManager concurrent multi-scraper engine
         if (allQualities.isEmpty()) {
             try {
-                Log.d(TAG, "Fallback Tier 5: Querying UnifiedStreamManager for $title (S$season Ep$episode)...")
+                Log.d(TAG, "Fallback Tier 4: Querying UnifiedStreamManager for $title (S$season Ep$episode)...")
                 val unifiedStream = kotlinx.coroutines.runBlocking {
                     com.example.scraper.UnifiedStreamManager.getStream(
                         context = context,
