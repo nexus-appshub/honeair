@@ -692,20 +692,27 @@ object AnikotoScraper {
             val subJson = fetchJson(subUrl)
 
             if (subJson != null) {
+                val selectedStream = subJson.optJSONObject("selectedStream")
+                val defaultSubStreamUrl = selectedStream?.optString("streamUrl", "") ?: ""
+                val defaultSubReferer = selectedStream?.optString("referer", "$API_BASE_URL/") ?: "$API_BASE_URL/"
+
                 val availableServers = subJson.optJSONArray("availableServers")
                 if (availableServers != null) {
                     for (i in 0 until availableServers.length()) {
                         val srvObj = availableServers.optJSONObject(i) ?: continue
                         val srvName = srvObj.optString("name", "Server ${i + 1}")
-                        val srvId = srvObj.optString("server", "HD-1")
+                        val srvId = srvObj.optString("id").ifBlank { srvObj.optString("server", "HD-1") }
                         val audioType = srvObj.optString("audioType", "SUB").uppercase()
-                        val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
+                        var streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
+                        if (streamUrl.isBlank() && i == 0 && audioType == "SUB" && defaultSubStreamUrl.isNotBlank()) {
+                            streamUrl = makeAbsoluteUrl(defaultSubStreamUrl)
+                        }
                         val rawUrl = srvObj.optString("rawUrl", "")
-                        val referer = srvObj.optString("referer", "$API_BASE_URL/")
+                        val referer = srvObj.optString("referer", defaultSubReferer).ifBlank { defaultSubReferer }
 
                         val parsedServer = AnikotoServer(
                             id = srvId,
-                            linkId = streamUrl,
+                            linkId = streamUrl.ifBlank { rawUrl },
                             name = "Server ${i + 1}",
                             type = audioType.lowercase(),
                             streamUrl = streamUrl,
@@ -732,7 +739,7 @@ object AnikotoScraper {
                         for (i in 0 until availableServers.length()) {
                             val srvObj = availableServers.optJSONObject(i) ?: continue
                             val srvName = srvObj.optString("name", "Server ${i + 1}")
-                            val srvId = srvObj.optString("server", "HD-1")
+                            val srvId = srvObj.optString("id").ifBlank { srvObj.optString("server", "HD-1") }
                             val audioType = srvObj.optString("audioType", "DUB").uppercase()
                             val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
                             val rawUrl = srvObj.optString("rawUrl", "")
@@ -742,7 +749,7 @@ object AnikotoScraper {
                                 dubServers.add(
                                     AnikotoServer(
                                         id = srvId,
-                                        linkId = streamUrl,
+                                        linkId = streamUrl.ifBlank { rawUrl },
                                         name = "Server ${dubServers.size + 1}",
                                         type = "dub",
                                         streamUrl = streamUrl,
@@ -794,7 +801,23 @@ object AnikotoScraper {
             val effectiveEp = if (episode <= 0) 1 else episode
             val cleanKw = watchUrl.removePrefix("anikoto_").trim()
 
-            // Query the stream API with server ID and specific requested episode
+            // 0. Priority Direct Stream check: If server.streamUrl is already a direct playable HLS or MP4 stream
+            if (server.streamUrl.isNotBlank() && (server.streamUrl.endsWith(".m3u8") || server.streamUrl.endsWith(".mp4") || (server.streamUrl.contains("/m3u8") && !server.streamUrl.contains("/api/")))) {
+                val finalUrl = makeAbsoluteUrl(server.streamUrl)
+                val headers = mutableMapOf(
+                    "User-Agent" to DEFAULT_UA,
+                    "Referer" to if (server.referer.isNotBlank()) server.referer else "$API_BASE_URL/"
+                )
+                Log.d(TAG, "extractStreamFromServer returning pre-resolved direct server URL: $finalUrl")
+                return@withContext ScrapedStreamResult(
+                    streamUrl = finalUrl,
+                    headers = headers,
+                    referer = headers["Referer"] ?: "$API_BASE_URL/",
+                    subtitles = emptyList()
+                )
+            }
+
+            // 1. Query the stream API with server ID and specific requested episode
             val queryUrl = buildStreamGetUrl(
                 title = if (cleanKw.isNotBlank()) cleanKw else server.id,
                 episode = effectiveEp,
@@ -802,8 +825,22 @@ object AnikotoScraper {
                 server = server.id
             )
             Log.d(TAG, "extractStreamFromServer querying: $queryUrl for Ep $effectiveEp")
-            val json = fetchJson(queryUrl)
-            val selected = json?.optJSONObject("selectedStream")
+            var json = fetchJson(queryUrl)
+            var selected = json?.optJSONObject("selectedStream")
+
+            // 2. Fallback query without server parameter if server-specific parameter returned null
+            if (selected == null) {
+                val fallbackUrl = buildStreamGetUrl(
+                    title = if (cleanKw.isNotBlank()) cleanKw else server.id,
+                    episode = effectiveEp,
+                    type = targetType,
+                    server = null
+                )
+                Log.d(TAG, "extractStreamFromServer server-specific null, retrying default stream URL: $fallbackUrl")
+                json = fetchJson(fallbackUrl)
+                selected = json?.optJSONObject("selectedStream")
+            }
+
             if (selected != null) {
                 val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
                 if (sUrl.isNotBlank()) {
@@ -818,23 +855,7 @@ object AnikotoScraper {
                 }
             }
 
-            // Fallback 1: If server.streamUrl is a direct HLS or MP4 stream
-            if (server.streamUrl.isNotBlank() && (server.streamUrl.endsWith(".m3u8") || server.streamUrl.endsWith(".mp4") || (server.streamUrl.contains("/m3u8") && !server.streamUrl.contains("/api/")))) {
-                val finalUrl = makeAbsoluteUrl(server.streamUrl)
-                val headers = mutableMapOf(
-                    "User-Agent" to DEFAULT_UA,
-                    "Referer" to if (server.referer.isNotBlank()) server.referer else "$API_BASE_URL/"
-                )
-                Log.d(TAG, "extractStreamFromServer returning direct server URL: $finalUrl")
-                return@withContext ScrapedStreamResult(
-                    streamUrl = finalUrl,
-                    headers = headers,
-                    referer = headers["Referer"] ?: "$API_BASE_URL/",
-                    subtitles = emptyList()
-                )
-            }
-
-            // Fallback: Use App Native Scraper directly on server linkId / rawUrl
+            // 3. Fallback: Use App Native Scraper directly on server linkId / rawUrl
             val embedCandidate = server.linkId.ifBlank { server.rawUrl }
             if (embedCandidate.isNotBlank()) {
                 val nativeResolved = UniversalAnimeDownloadScraper.resolveDirectMediaStream(

@@ -27,13 +27,6 @@ class MainApplication : Application(), ImageLoaderFactory {
         } catch (e: Throwable) {
             e.printStackTrace()
         }
-
-        try {
-            // Initialize Start.io Ads SDK with support for non-PlayStore distribution
-            com.example.ad.StartIoAdManager.init(this, testMode = false)
-        } catch (e: Throwable) {
-            e.printStackTrace()
-        }
         
         // Disable SSL certificate checking globally for IPTV streams
         try {
