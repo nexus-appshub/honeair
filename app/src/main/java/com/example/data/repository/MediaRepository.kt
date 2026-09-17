@@ -803,166 +803,205 @@ class MediaRepository {
             // 1. Generate search variations (normalized spelling, corrected typos, and primary tokens)
             val normalizedQuery = java.text.Normalizer.normalize(trimmed, java.text.Normalizer.Form.NFD)
                 .replace(Regex("\\p{M}"), "")
-            val collapsedDuplicates = normalizedQuery.replace(Regex("(?i)(.)\\1+"), "$1")
+                .replace(Regex("[^a-zA-Z0-9]+"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
             val queryWords = trimmed.split(Regex("[\\s_\\-\\.:\\(\\)\\[\\]]+")).filter { it.isNotBlank() }
             val significantTokens = queryWords.filter { it.length > 2 && !it.equals("the", true) && !it.equals("and", true) }
             val primaryToken = significantTokens.firstOrNull() ?: queryWords.firstOrNull() ?: trimmed
 
-            // Common anime/movie typo corrections (e.g. shipudden -> shippuden)
+            // Common anime/movie typo corrections (e.g. shipudden -> shippuden / shippuuden)
             val correctedQuery = trimmed
                 .replace("shipudden", "shippuden", ignoreCase = true)
                 .replace("shippūden", "shippuden", ignoreCase = true)
+                .replace("shippuuden", "shippuden", ignoreCase = true)
                 .replace("onepeice", "one piece", ignoreCase = true)
                 .replace("jujutsu kaisen", "jujutsu", ignoreCase = true)
 
             val searchQueriesToTry = linkedSetOf(trimmed, correctedQuery, normalizedQuery).toList()
 
-            // 2. Query TMDB with queries
-            val tmdbResults = mutableListOf<TmdbMediaResult>()
-            for (q in searchQueriesToTry) {
-                val list = if (type == "movie") {
-                    tmdbApi.searchMovies(query = q).results ?: emptyList()
-                } else if (type == "series" || type == "tv") {
-                    tmdbApi.searchTvShows(query = q).results ?: emptyList()
-                } else {
-                    val m = tmdbApi.searchMovies(query = q).results ?: emptyList()
-                    val t = tmdbApi.searchTvShows(query = q).results ?: emptyList()
-                    m + t
-                }
-                if (list.isNotEmpty()) {
-                    tmdbResults.addAll(list)
-                    break
-                }
-            }
+            coroutineScope {
+                // 2. Query TMDB concurrently
+                val tmdbDeferred = async(Dispatchers.IO) {
+                    val tmdbResults = mutableListOf<TmdbMediaResult>()
+                    try {
+                        for (q in searchQueriesToTry) {
+                            try {
+                                val list = if (type == "movie") {
+                                    tmdbApi.searchMovies(query = q).results ?: emptyList()
+                                } else if (type == "series" || type == "tv") {
+                                    tmdbApi.searchTvShows(query = q).results ?: emptyList()
+                                } else {
+                                    val m = try { tmdbApi.searchMovies(query = q).results ?: emptyList() } catch (_: Exception) { emptyList() }
+                                    val t = try { tmdbApi.searchTvShows(query = q).results ?: emptyList() } catch (_: Exception) { emptyList() }
+                                    m + t
+                                }
+                                if (list.isNotEmpty()) {
+                                    tmdbResults.addAll(list)
+                                    break
+                                }
+                            } catch (_: Exception) {}
+                        }
 
-            // If TMDB still has 0 results and we have a primary token (e.g. "naruto" from "naruto shipudden"), query TMDB with primary token
-            if (tmdbResults.isEmpty() && primaryToken != trimmed && primaryToken.length >= 3) {
-                val list = if (type == "movie") {
-                    tmdbApi.searchMovies(query = primaryToken).results ?: emptyList()
-                } else if (type == "series" || type == "tv") {
-                    tmdbApi.searchTvShows(query = primaryToken).results ?: emptyList()
-                } else {
-                    val m = tmdbApi.searchMovies(query = primaryToken).results ?: emptyList()
-                    val t = tmdbApi.searchTvShows(query = primaryToken).results ?: emptyList()
-                    m + t
-                }
-                tmdbResults.addAll(list)
-            }
+                        // If TMDB still has 0 results and we have a primary token, query TMDB with primary token
+                        if (tmdbResults.isEmpty() && primaryToken != trimmed && primaryToken.length >= 3) {
+                            try {
+                                val list = if (type == "movie") {
+                                    tmdbApi.searchMovies(query = primaryToken).results ?: emptyList()
+                                } else if (type == "series" || type == "tv") {
+                                    tmdbApi.searchTvShows(query = primaryToken).results ?: emptyList()
+                                } else {
+                                    val m = try { tmdbApi.searchMovies(query = primaryToken).results ?: emptyList() } catch (_: Exception) { emptyList() }
+                                    val t = try { tmdbApi.searchTvShows(query = primaryToken).results ?: emptyList() } catch (_: Exception) { emptyList() }
+                                    m + t
+                                }
+                                tmdbResults.addAll(list)
+                            } catch (_: Exception) {}
+                        }
 
-            val mappedTmdb = tmdbResults.take(30).map { result ->
-                val requestedType = if (type == "movie" || type == "series" || type == "tv") type else "auto"
-                mapToMediaItem(result, "Search", requestedType) 
-            }
-            
-            // 3. Query Cinemeta Catalog (Stremio Official Meta Catalog - instant and comprehensive for anime, movies & series)
-            val cinemetaResults = try {
-                val cinemetaItems = mutableListOf<MediaItem>()
-                val client = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-
-                val queryCandidates = linkedSetOf(trimmed, correctedQuery, primaryToken).filter { it.isNotBlank() }
-                for (searchCand in queryCandidates) {
-                    val encoded = java.net.URLEncoder.encode(searchCand, "UTF-8")
-                    val typesToFetch = when (type) {
-                        "movie" -> listOf("movie")
-                        "series", "tv" -> listOf("series")
-                        else -> listOf("series", "movie")
+                        tmdbResults.take(30).map { result ->
+                            val requestedType = if (type == "movie" || type == "series" || type == "tv") type else "auto"
+                            mapToMediaItem(result, "Search", requestedType)
+                        }
+                    } catch (_: Exception) {
+                        emptyList()
                     }
+                }
 
-                    for (cType in typesToFetch) {
-                        val cinemetaUrl = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$encoded.json"
-                        val req = okhttp3.Request.Builder().url(cinemetaUrl).build()
-                        client.newCall(req).execute().use { resp ->
-                            if (resp.isSuccessful) {
-                                val bodyStr = resp.body?.string() ?: ""
-                                val json = org.json.JSONObject(bodyStr)
-                                val metas = json.optJSONArray("metas")
-                                if (metas != null) {
-                                    for (i in 0 until metas.length()) {
-                                        val m = metas.getJSONObject(i)
-                                        val mId = m.optString("id")
-                                        val mName = m.optString("name")
-                                        val mType = m.optString("type", cType)
-                                        val mPoster = m.optString("poster")
-                                        val mYear = m.optString("year", "")
-                                        val mRating = m.optString("imdbRating", "8.2")
-                                        val mDesc = m.optString("description", "")
-                                        val isSeries = mType == "series" || mType == "tv"
-                                        if (mName.isNotBlank()) {
-                                            cinemetaItems.add(
-                                                MediaItem(
-                                                    id = mId,
-                                                    title = mName,
-                                                    category = if (isSeries) "Anime & Series" else "Movies",
-                                                    imageUrl = mPoster.ifBlank { "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
-                                                    rating = mRating.ifBlank { "8.0" },
-                                                    year = mYear.take(4).ifBlank { "2024" },
-                                                    description = mDesc,
-                                                    streamUrl = "",
-                                                    episodes = if (isSeries) "All Episodes" else "",
-                                                    isStreamable = true,
-                                                    imdbId = mId,
-                                                    type = if (isSeries) "series" else "movie"
-                                                )
-                                            )
+                // 3. Query Cinemeta Catalog in parallel
+                val cinemetaDeferred = async(Dispatchers.IO) {
+                    try {
+                        val cinemetaItems = mutableListOf<MediaItem>()
+                        val client = okhttp3.OkHttpClient.Builder()
+                            .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                            .build()
+
+                        val queryCandidates = linkedSetOf(trimmed, correctedQuery, primaryToken).filter { it.isNotBlank() }
+                        for (searchCand in queryCandidates) {
+                            val encoded = java.net.URLEncoder.encode(searchCand, "UTF-8")
+                            val typesToFetch = when (type) {
+                                "movie" -> listOf("movie")
+                                "series", "tv" -> listOf("series")
+                                else -> listOf("series", "movie")
+                            }
+
+                            for (cType in typesToFetch) {
+                                try {
+                                    val cinemetaUrl = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$encoded.json"
+                                    val req = okhttp3.Request.Builder().url(cinemetaUrl).build()
+                                    client.newCall(req).execute().use { resp ->
+                                        if (resp.isSuccessful) {
+                                            val bodyStr = resp.body?.string() ?: ""
+                                            val json = org.json.JSONObject(bodyStr)
+                                            val metas = json.optJSONArray("metas")
+                                            if (metas != null) {
+                                                for (i in 0 until metas.length()) {
+                                                    val m = metas.getJSONObject(i)
+                                                    val mId = m.optString("id")
+                                                    val mName = m.optString("name")
+                                                    val mType = m.optString("type", cType)
+                                                    val mPoster = m.optString("poster")
+                                                    val mYear = m.optString("year", "")
+                                                    val mRating = m.optString("imdbRating", "8.2")
+                                                    val mDesc = m.optString("description", "")
+                                                    val isSeries = mType == "series" || mType == "tv"
+                                                    if (mName.isNotBlank()) {
+                                                        cinemetaItems.add(
+                                                            MediaItem(
+                                                                id = mId,
+                                                                title = mName,
+                                                                category = if (isSeries) "Anime & Series" else "Movies",
+                                                                imageUrl = mPoster.ifBlank { "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
+                                                                rating = mRating.ifBlank { "8.0" },
+                                                                year = mYear.take(4).ifBlank { "2024" },
+                                                                description = mDesc,
+                                                                streamUrl = "",
+                                                                episodes = if (isSeries) "All Episodes" else "",
+                                                                isStreamable = true,
+                                                                imdbId = mId,
+                                                                type = if (isSeries) "series" else "movie"
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
-                                }
+                                } catch (_: Exception) {}
                             }
+                            if (cinemetaItems.isNotEmpty()) break
                         }
+                        cinemetaItems
+                    } catch (_: Exception) {
+                        emptyList()
                     }
-                    if (cinemetaItems.isNotEmpty()) break
                 }
-                cinemetaItems
-            } catch (e: Exception) {
-                emptyList()
-            }
 
-            // 4. Query Anikoto to guarantee accurate matching for anime titles
-            val anikotoResults = try {
-                var rawAnime = com.example.scraper.AnikotoScraper.searchOrFilterAnime(keyword = trimmed)
-                if (rawAnime.isEmpty() && correctedQuery != trimmed) {
-                    rawAnime = com.example.scraper.AnikotoScraper.searchOrFilterAnime(keyword = correctedQuery)
-                }
-                if (rawAnime.isEmpty()) {
-                    rawAnime = com.example.scraper.AnikotoScraper.getLiveSuggestions(trimmed)
-                }
-                if (rawAnime.isEmpty() && primaryToken != trimmed && primaryToken.length >= 3) {
-                    rawAnime = com.example.scraper.AnikotoScraper.searchOrFilterAnime(keyword = primaryToken)
-                }
-                rawAnime.filter { item ->
-                    val isMovie = item.type.lowercase().contains("movie")
-                    when (type) {
-                        "movie" -> isMovie
-                        "series", "tv" -> !isMovie
-                        else -> true
+                // 4. Query Anikoto Scraper in parallel (including shippuden variations)
+                val anikotoDeferred = async(Dispatchers.IO) {
+                    try {
+                        val animeCandidates = linkedSetOf(
+                            trimmed,
+                            correctedQuery,
+                            "naruto shippuuden",
+                            primaryToken
+                        ).filter { it.isNotBlank() }
+
+                        var rawAnime = emptyList<com.example.scraper.AnikotoAnimeItem>()
+                        for (cand in animeCandidates) {
+                            try {
+                                val found = com.example.scraper.AnikotoScraper.searchOrFilterAnime(keyword = cand)
+                                if (found.isNotEmpty()) {
+                                    rawAnime = found
+                                    break
+                                }
+                            } catch (_: Exception) {}
+                        }
+
+                        if (rawAnime.isEmpty()) {
+                            try {
+                                rawAnime = com.example.scraper.AnikotoScraper.getLiveSuggestions(trimmed)
+                            } catch (_: Exception) {}
+                        }
+
+                        rawAnime.filter { item ->
+                            val isMovie = item.type.lowercase().contains("movie")
+                            when (type) {
+                                "movie" -> isMovie
+                                "series", "tv" -> !isMovie
+                                else -> true
+                            }
+                        }.map { item ->
+                            val isMovie = item.type.lowercase().contains("movie")
+                            val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
+                            MediaItem(
+                                id = "anikoto_${item.id}",
+                                title = item.title,
+                                category = if (isMovie) "Anime Movies" else "Anime Series",
+                                imageUrl = poster.ifBlank { if (isMovie) "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80" else "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
+                                rating = if (item.rating.isNotBlank()) item.rating else "8.3",
+                                year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
+                                description = item.description,
+                                streamUrl = item.watchUrl,
+                                episodes = if (!isMovie) item.episodesInfo else "",
+                                isStreamable = true,
+                                imdbId = "anikoto_${item.id}",
+                                type = if (isMovie) "movie" else "series"
+                            )
+                        }
+                    } catch (_: Exception) {
+                        emptyList()
                     }
-                }.map { item ->
-                    val isMovie = item.type.lowercase().contains("movie")
-                    val poster = com.example.scraper.AnikotoScraper.sanitizePosterUrl(item.posterUrl)
-                    MediaItem(
-                        id = "anikoto_${item.id}",
-                        title = item.title,
-                        category = if (isMovie) "Anime Movies" else "Anime Series",
-                        imageUrl = poster.ifBlank { if (isMovie) "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=500&q=80" else "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
-                        rating = if (item.rating.isNotBlank()) item.rating else "8.3",
-                        year = if (item.releaseYear.isNotBlank()) item.releaseYear else "2024",
-                        description = item.description,
-                        streamUrl = item.watchUrl,
-                        episodes = if (!isMovie) item.episodesInfo else "",
-                        isStreamable = true,
-                        imdbId = "anikoto_${item.id}",
-                        type = if (isMovie) "movie" else "series"
-                    )
                 }
-            } catch (e: Exception) {
-                emptyList()
-            }
 
-            // Combine all sources: Anikoto (Anime prioritized) + Cinemeta + TMDB
-            (anikotoResults + cinemetaResults + mappedTmdb).distinctBy { it.id }
+                val anikotoResults = anikotoDeferred.await()
+                val cinemetaResults = cinemetaDeferred.await()
+                val tmdbResults = tmdbDeferred.await()
+
+                // Combine all sources: Anikoto (Anime prioritized) + Cinemeta + TMDB
+                (anikotoResults + cinemetaResults + tmdbResults).distinctBy { it.id }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()

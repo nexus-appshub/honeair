@@ -234,6 +234,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _mediaSearchQuery = MutableStateFlow("")
     val mediaSearchQuery: StateFlow<String> = _mediaSearchQuery.asStateFlow()
 
+    private val _isSearchingMedia = MutableStateFlow(false)
+    val isSearchingMedia: StateFlow<Boolean> = _isSearchingMedia.asStateFlow()
+
     val latestReleases: StateFlow<List<MediaItem>> = mediaState.map { state ->
         if (state is UiState.Success) {
             val list = state.data
@@ -2110,9 +2113,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     .replace(Regex("\\p{M}"), "")
                     .lowercase(java.util.Locale.ROOT)
                     .replace(Regex("[^a-z0-9]+"), " ")
+                    .replace(Regex("\\s+"), " ")
                     .trim()
 
-                val collapsedQ = normQ.replace(Regex("(?i)(.)\\1+"), "$1")
+                val collapsedQ = normQ.replace(Regex("(?i)(.)\\1+"), "$1").replace(Regex("\\s+"), " ").trim()
                 val queryWords = normQ.split(" ").filter { it.length >= 2 }
                 val significantWords = queryWords.filter { it.length > 2 && it != "the" && it != "and" }
                 val queryTokensToMatch = if (significantWords.isNotEmpty()) significantWords else queryWords
@@ -2122,12 +2126,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         .replace(Regex("\\p{M}"), "")
                         .lowercase(java.util.Locale.ROOT)
                         .replace(Regex("[^a-z0-9]+"), " ")
+                        .replace(Regex("\\s+"), " ")
                         .trim()
-                    val collapsedTitle = normTitle.replace(Regex("(?i)(.)\\1+"), "$1")
+                    val collapsedTitle = normTitle.replace(Regex("(?i)(.)\\1+"), "$1").replace(Regex("\\s+"), " ").trim()
                     val titleWords = normTitle.split(" ").filter { it.isNotBlank() }
                     val collapsedTitleWords = collapsedTitle.split(" ").filter { it.isNotBlank() }
 
                     var score = 0
+
+                    // Direct Search category booster (item returned directly by active search engine)
+                    if (item.category == "Search" || item.id.startsWith("anikoto_") && q.isNotBlank()) {
+                        score += 300
+                    }
 
                     // Full phrase match
                     if (normTitle == normQ) {
@@ -2136,9 +2146,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         score += 1800
                     } else if (normTitle.contains(normQ)) {
                         score += 1400
+                    } else if (collapsedTitle == collapsedQ) {
+                        score += 2200
+                    } else if (collapsedTitle.startsWith(collapsedQ)) {
+                        score += 1700
                     } else if (collapsedTitle.contains(collapsedQ)) {
-                        // Catches e.g. "naruto shipudden" matching "naruto shippuden"
-                        score += 1200
+                        // Catches e.g. "naruto shipudden" matching "naruto shippuden" or "naruto: shippuuden"
+                        score += 1500
                     }
 
                     // Token-level scoring
@@ -2149,35 +2163,35 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
                         for (tw in titleWords) {
                             if (tw == qw) {
-                                tokenScore = maxOf(tokenScore, 300)
+                                tokenScore = maxOf(tokenScore, 350)
                             } else if (tw.startsWith(qw)) {
-                                tokenScore = maxOf(tokenScore, 240)
+                                tokenScore = maxOf(tokenScore, 260)
                             } else if (tw.contains(qw) || qw.contains(tw)) {
-                                tokenScore = maxOf(tokenScore, 180)
+                                tokenScore = maxOf(tokenScore, 200)
                             }
                         }
 
-                        // Check collapsed tokens (e.g. shipudden -> shipuden matches shippuden -> shipuden)
-                        if (tokenScore < 250) {
+                        // Check collapsed tokens (e.g. shipudden -> shipuden matches shippuden -> shipuden or shippuuden -> shipuden)
+                        if (tokenScore < 280) {
                             for (ctw in collapsedTitleWords) {
                                 if (ctw == qwCollapsed || ctw.startsWith(qwCollapsed)) {
-                                    tokenScore = maxOf(tokenScore, 250)
+                                    tokenScore = maxOf(tokenScore, 280)
                                 } else if (ctw.contains(qwCollapsed) || qwCollapsed.contains(ctw)) {
-                                    tokenScore = maxOf(tokenScore, 190)
+                                    tokenScore = maxOf(tokenScore, 210)
                                 }
                             }
                         }
 
-                        // Levenshtein edit distance for typo tolerance (e.g. 1 letter off)
+                        // Levenshtein edit distance for typo tolerance (e.g. 1-2 letters off)
                         if (tokenScore < 200 && qw.length >= 4) {
                             for (tw in titleWords) {
                                 val dist = kotlin.math.abs(tw.length - qw.length)
                                 if (dist <= 2) {
                                     val editDist = calculateEditDistance(qw, tw)
                                     if (editDist <= 1) {
-                                        tokenScore = maxOf(tokenScore, 200)
+                                        tokenScore = maxOf(tokenScore, 220)
                                     } else if (editDist <= 2 && qw.length >= 6) {
-                                        tokenScore = maxOf(tokenScore, 150)
+                                        tokenScore = maxOf(tokenScore, 170)
                                     }
                                 }
                             }
@@ -2195,11 +2209,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
 
                     // Filter condition:
-                    // If multiple significant query words exist, require at least 1 strong token match or full match
+                    // If multiple significant query words exist, match if any token matched or high score achieved
                     val isMatch = if (queryTokensToMatch.size > 1) {
-                        score >= 1200 || (matchedTokensCount >= 1 && score >= 240)
+                        score >= 200 || matchedTokensCount >= 1
                     } else if (queryTokensToMatch.isNotEmpty()) {
-                        score >= 150
+                        score >= 120 || matchedTokensCount >= 1
                     } else {
                         score > 0
                     }
@@ -2396,19 +2410,38 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (trimmed.isNotEmpty()) {
             searchJob = viewModelScope.launch {
-                try {
-                    val movies = mediaRepository.searchMedia(trimmed, "movie")
-                    val series = mediaRepository.searchMedia(trimmed, "series")
-                    val results = (movies + series).distinctBy { it.id }
-                    if (results.isNotEmpty()) {
-                        val currentData = (_mediaState.value as? UiState.Success)?.data ?: emptyList()
-                        val merged = (results + currentData).distinctBy { it.id }
-                        _mediaState.value = UiState.Success(merged)
-                    }
-                } catch (e: Exception) {
-                    Log.e("StreamViewModel", "Error fetching search results", e)
-                }
+                kotlinx.coroutines.delay(280)
+                executeMediaSearch(trimmed)
             }
+        } else {
+            _isSearchingMedia.value = false
+        }
+    }
+
+    fun triggerImmediateMediaSearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isNotBlank()) {
+            _mediaSearchQuery.value = trimmed
+            searchJob?.cancel()
+            searchJob = viewModelScope.launch {
+                executeMediaSearch(trimmed)
+            }
+        }
+    }
+
+    private suspend fun executeMediaSearch(trimmed: String) {
+        _isSearchingMedia.value = true
+        try {
+            val results = mediaRepository.searchMedia(trimmed, "all")
+            if (results.isNotEmpty()) {
+                val currentData = (_mediaState.value as? UiState.Success)?.data ?: emptyList()
+                val merged = (results + currentData).distinctBy { it.id }
+                _mediaState.value = UiState.Success(merged)
+            }
+        } catch (e: Exception) {
+            Log.e("StreamViewModel", "Error fetching search results", e)
+        } finally {
+            _isSearchingMedia.value = false
         }
     }
 
@@ -2620,56 +2653,65 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val effectiveStartPos = startPositionMs ?: getMediaPlaybackProgress(watchProgressKey).first
         _mediaPlaybackStartPosition.value = if (effectiveStartPos > 0L) effectiveStartPos else null
 
+        val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
+        val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
+
+        // Crucial: Set active media item IMMEDIATELY and synchronously on current thread!
+        // This ensures PlayerScreen renders CinemetaWebViewPlayer instantly with 0ms delay without getting stuck on "Launching AIR Player"
+        _activeChannel.value = null
+        _activeMediaItem.value = effectiveItem
+        _activeMediaSeason.value = season
+        _activeMediaEpisode.value = episode
+        _activeMediaStreamUrl.value = null
+        _activeMediaStreamHeaders.value = emptyMap()
+        addMediaToHistory(effectiveItem)
+
+        val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
+            title = effectiveItem.title,
+            category = effectiveItem.category,
+            type = effectiveItem.type,
+            id = effectiveItem.id
+        )
+        if (!isAnime) {
+            _selectedServer.value = null
+        }
+
         viewModelScope.launch {
-            _activeMediaSeason.value = season
-            _activeMediaEpisode.value = episode
-            val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
-            val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
-
-            // Check if user selected a specific Anikoto server (SUB or DUB)
-            val pickedServer = _selectedServer.value
-            if (pickedServer != null) {
-                val serverStream = com.example.scraper.AnikotoScraper.extractStreamFromServer(
-                    server = pickedServer,
-                    watchUrl = currentServerWatchUrl.ifEmpty { effectiveItem.title },
-                    episode = episode
-                )
-                if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
-                    _activeChannel.value = null
-                    _activeMediaItem.value = effectiveItem
-                    _activeMediaStreamUrl.value = serverStream.streamUrl
-                    _activeMediaStreamHeaders.value = serverStream.headers
-                    _isPlayerPlaying.value = true
-                    addMediaToHistory(effectiveItem)
-                    return@launch
-                }
-            }
-
             // Check if stream is already pre-scraped / cached in background for instant launch!
             val cachedStream = com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, season, episode)
             if (cachedStream != null && cachedStream.streamUrl.isNotBlank()) {
-                _activeChannel.value = null
-                _activeMediaItem.value = effectiveItem
                 _activeMediaStreamUrl.value = cachedStream.streamUrl
                 _activeMediaStreamHeaders.value = cachedStream.headers
                 _isPlayerPlaying.value = true
-                addMediaToHistory(effectiveItem)
                 return@launch
             }
 
-            val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
-                title = effectiveItem.title,
-                category = effectiveItem.category,
-                type = effectiveItem.type,
-                id = effectiveItem.id
-            )
+            // Check if user selected a specific Anikoto server (SUB or DUB) for anime
+            val pickedServer = _selectedServer.value
+            if (isAnime && pickedServer != null) {
+                try {
+                    val serverStream = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                        server = pickedServer,
+                        watchUrl = currentServerWatchUrl.ifEmpty { effectiveItem.title },
+                        episode = episode
+                    )
+                    if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
+                        _activeMediaStreamUrl.value = serverStream.streamUrl
+                        _activeMediaStreamHeaders.value = serverStream.headers
+                        _isPlayerPlaying.value = true
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
 
             val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
                                effectiveItem.type.equals("tv", ignoreCase = true) ||
                                (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
 
-            // Immediately launch background scraper in parallel
-            val scraperJob = viewModelScope.launch(Dispatchers.IO) {
+            // Launch background parallel scraper
+            launch(Dispatchers.IO) {
                 try {
                     val streamResult = com.example.scraper.UnifiedStreamManager.getStream(
                         context = getApplication(),
@@ -2694,12 +2736,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     e.printStackTrace()
                 }
             }
-
-            _activeChannel.value = null
-            _activeMediaItem.value = effectiveItem
-            _activeMediaStreamUrl.value = null
-            _activeMediaStreamHeaders.value = emptyMap()
-            addMediaToHistory(effectiveItem)
         }
     }
 

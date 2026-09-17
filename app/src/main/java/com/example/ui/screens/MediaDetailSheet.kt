@@ -389,33 +389,12 @@ fun MediaDetailSheet(
                             }
                         }
 
-                        // Center Play Trailer Button Overlay
+                        // Center Play Stream Button Overlay
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clickable {
-                                    val ytId = youtubeTrailerId
-                                    val targetUrl = if (!ytId.isNullOrBlank()) {
-                                        "https://www.youtube.com/watch?v=$ytId"
-                                    } else {
-                                        "https://www.youtube.com/results?search_query=" + android.net.Uri.encode("${item.title} official trailer")
-                                    }
-                                    try {
-                                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(targetUrl)).apply {
-                                            setPackage("com.google.android.youtube")
-                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        try {
-                                            val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(targetUrl)).apply {
-                                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            }
-                                            context.startActivity(fallbackIntent)
-                                        } catch (ex: Exception) {
-                                            // ignore
-                                        }
-                                    }
+                                    onPlayStream(selectedSeason, selectedEpisode)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -428,9 +407,9 @@ fun MediaDetailSheet(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Play Trailer",
+                                    contentDescription = "Play Stream",
                                     tint = NeonCyan,
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                 )
                             }
                         }

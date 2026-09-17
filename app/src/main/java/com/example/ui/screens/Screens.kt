@@ -3736,20 +3736,54 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
     val playerChipBg = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
     val playerBorderColor = if (isDark) Color.Gray.copy(alpha = 0.3f) else Color(0xFFE5E5EA)
 
+    LaunchedEffect(activeChannel, activeMediaItem) {
+        if (activeChannel == null && activeMediaItem == null) {
+            kotlinx.coroutines.delay(3500)
+            if (activeChannel == null && activeMediaItem == null) {
+                val history = viewModel.mediaWatchHistory.value
+                val firstHistory = history.firstOrNull()
+                if (firstHistory != null) {
+                    viewModel.playMediaItem(firstHistory, 1, 1)
+                } else {
+                    onBackPress()
+                }
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(playerBgColor)
     ) {
         if (activeChannel == null && activeMediaItem == null) {
-            // Player loading state while auto-launching stream
-            Column(
+            // Player loading state while auto-launching stream with quick back navigation
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .statusBarsPadding()
             ) {
+                IconButton(
+                    onClick = onBackPress,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp)
+                        .size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "Back",
+                        tint = NeonCyan
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
                 CircularProgressIndicator(
                     color = NeonCyan,
                     modifier = Modifier.size(44.dp),
@@ -3802,7 +3836,8 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                     )
                 }
             }
-        } else if (activeMediaItem != null) {
+        }
+    } else if (activeMediaItem != null) {
             val item = activeMediaItem!!
             val allMedia = ((mediaState as? UiState.Success<*>)?.data as? List<*>)?.filterIsInstance<MediaItem>() ?: emptyList()
             com.example.ui.components.CinemetaWebViewPlayer(
@@ -8434,6 +8469,7 @@ fun MediaHubScreen(
     val filteredItems by viewModel.filteredMediaItems.collectAsState()
     val selectedCategory by viewModel.selectedMediaCategory.collectAsState()
     val searchQuery by viewModel.mediaSearchQuery.collectAsState()
+    val isSearchingMedia by viewModel.isSearchingMedia.collectAsState()
     val selectedAudioIndex by viewModel.audioIndex.collectAsState()
     val mediaWatchHistory by viewModel.mediaWatchHistory.collectAsState()
     val mediaFavorites by viewModel.mediaFavorites.collectAsState()
@@ -8602,10 +8638,21 @@ fun MediaHubScreen(
                                     )
                                 }
 
+                                val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
                                 BasicTextField(
                                     value = searchQuery,
                                     onValueChange = { viewModel.setMediaSearchQuery(it) },
                                     singleLine = true,
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                        imeAction = androidx.compose.ui.text.input.ImeAction.Search
+                                    ),
+                                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                        onSearch = {
+                                            viewModel.triggerImmediateMediaSearch(searchQuery)
+                                            keyboardController?.hide()
+                                        }
+                                    ),
                                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = TextPrimary, fontSize = 15.sp),
                                     cursorBrush = SolidColor(NeonCyan),
                                     decorationBox = { innerTextField ->
@@ -8626,6 +8673,16 @@ fun MediaHubScreen(
                                     },
                                     modifier = Modifier.weight(1f).padding(start = 8.dp)
                                 )
+
+                                if (isSearchingMedia) {
+                                    CircularProgressIndicator(
+                                        color = NeonCyan,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .padding(end = 4.dp)
+                                    )
+                                }
 
                                 if (searchQuery.isNotEmpty()) {
                                     IconButton(
@@ -8902,10 +8959,41 @@ fun MediaHubScreen(
                     if (!isMultiRowTab) {
                         // Display Grid view for specific search query or single genre chip selection
                         if (filteredItems.isEmpty()) {
-                            EmptyStateView(
-                                title = "No Results Found",
-                                tip = "Try another search term or select 'All' to browse categories."
-                            )
+                            if (isSearchingMedia) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = NeonCyan,
+                                            modifier = Modifier.size(36.dp),
+                                            strokeWidth = 3.dp
+                                        )
+                                        Text(
+                                            text = "Searching for \"$searchQuery\"...",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = TextPrimary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "Scanning TMDB, Anime & Cloud servers",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                }
+                            } else {
+                                EmptyStateView(
+                                    title = "No Results Found",
+                                    tip = "Try another search term or select 'All' to browse categories."
+                                )
+                            }
                         } else {
                             Column(
                                 modifier = Modifier

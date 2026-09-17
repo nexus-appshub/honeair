@@ -90,6 +90,8 @@ fun OfflineVideoPlayerScreen(
     var currentPosition by remember { mutableLongStateOf(0L) }
     var totalDuration by remember { mutableLongStateOf(0L) }
     var resizeMode by remember { mutableIntStateOf(androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    var playbackError by remember { mutableStateOf<String?>(null) }
+    var useSoftwareFallback by remember { mutableStateOf(false) }
 
     // Display title cleaned from filename
     val displayTitle = remember(currentFile) {
@@ -100,11 +102,11 @@ fun OfflineVideoPlayerScreen(
             .ifBlank { currentFile.name }
     }
 
-    // Hardware-accelerated Renderers Factory
-    val renderersFactory = remember {
+    // Hardware-accelerated Renderers Factory with intelligent fallback
+    val renderersFactory = remember(useSoftwareFallback) {
         val sharedPrefs = context.getSharedPreferences("stream_app_prefs", Context.MODE_PRIVATE)
-        val userDecoderIndex = sharedPrefs.getInt("setting_decoder_index", 0)
-        val isHwAccel = sharedPrefs.getBoolean("setting_hardware_accel", true)
+        val userDecoderIndex = if (useSoftwareFallback) 2 else sharedPrefs.getInt("setting_decoder_index", 0)
+        val isHwAccel = if (useSoftwareFallback) false else sharedPrefs.getBoolean("setting_hardware_accel", true)
         SmartNetworkBoosterEngine.createRenderersFactory(
             context = context,
             decoderMode = userDecoderIndex,
@@ -112,21 +114,96 @@ fun OfflineVideoPlayerScreen(
         )
     }
 
-    // Create ExoPlayer instance
-    val exoPlayer = remember {
+    // Create ExoPlayer instance with DefaultExtractorsFactory supporting progressive MP4, TS, MKV, and WebM extractors
+    // Create ExoPlayer instance with DefaultExtractorsFactory supporting progressive MP4, TS, MKV, and WebM extractors
+    val exoPlayer = remember(renderersFactory) {
+        val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory()
+            .setConstantBitrateSeekingEnabled(true)
+            .setTsExtractorFlags(
+                androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS or
+                androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
+                androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_IGNORE_SPLICE_INFO_STREAM
+            )
+            .setFragmentedMp4ExtractorFlags(androidx.media3.extractor.mp4.FragmentedMp4Extractor.FLAG_WORKAROUND_IGNORE_TFDT_BOX)
+
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+            context,
+            extractorsFactory
+        )
+
         ExoPlayer.Builder(context, renderersFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .setHandleAudioBecomingNoisy(true)
             .build()
     }
 
-    // Load video file into player
+    var detectedMime by remember(currentFile) { mutableStateOf<String?>(null) }
+
+    // Sniff file header bytes: if first byte is 0x47, it is MPEG-TS (even if file extension is .mp4)
     LaunchedEffect(currentFile) {
-        if (currentFile.exists()) {
-            val mediaItem = MediaItem.fromUri(Uri.fromFile(currentFile))
-            exoPlayer.setMediaItem(mediaItem)
+        try {
+            if (currentFile.exists() && currentFile.length() > 0L) {
+                java.io.FileInputStream(currentFile).use { fis ->
+                    val header = ByteArray(188)
+                    val read = fis.read(header)
+                    if (read > 0 && header[0] == 0x47.toByte()) {
+                        detectedMime = androidx.media3.common.MimeTypes.VIDEO_MP2T
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    // Load video file into player with explicit MIME detection and local subtitle attachment
+    LaunchedEffect(currentFile, detectedMime, exoPlayer) {
+        playbackError = null
+        if (!currentFile.exists() || currentFile.length() <= 0L) {
+            playbackError = "Downloaded video file not found or empty."
+            isBuffering = false
+            return@LaunchedEffect
+        }
+        try {
+            val uri = Uri.fromFile(currentFile)
+            val mediaItemBuilder = MediaItem.Builder().setUri(uri)
+            if (detectedMime != null) {
+                mediaItemBuilder.setMimeType(detectedMime)
+            }
+
+            // Check for sidecar subtitle files (.srt, .vtt, .ass) in same folder
+            val parent = currentFile.parentFile
+            if (parent != null) {
+                val base = currentFile.nameWithoutExtension
+                val subFile = listOf(
+                    File(parent, "$base.srt"),
+                    File(parent, "$base.vtt"),
+                    File(parent, "$base.ass")
+                ).firstOrNull { it.exists() && it.length() > 0 }
+
+                if (subFile != null) {
+                    val subMime = when (subFile.extension.lowercase()) {
+                        "srt" -> androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
+                        "vtt" -> androidx.media3.common.MimeTypes.TEXT_VTT
+                        "ass" -> androidx.media3.common.MimeTypes.TEXT_SSA
+                        else -> androidx.media3.common.MimeTypes.TEXT_VTT
+                    }
+                    mediaItemBuilder.setSubtitleConfigurations(
+                        listOf(
+                            MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(subFile))
+                                .setMimeType(subMime)
+                                .setLanguage("en")
+                                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                                .build()
+                        )
+                    )
+                }
+            }
+
+            exoPlayer.setMediaItem(mediaItemBuilder.build())
             exoPlayer.prepare()
             exoPlayer.playWhenReady = true
+        } catch (e: Exception) {
+            playbackError = "Error initializing playback: ${e.message}"
             isBuffering = false
         }
     }
@@ -154,11 +231,23 @@ fun OfflineVideoPlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 isBuffering = (state == Player.STATE_BUFFERING)
+                if (state == Player.STATE_READY) {
+                    playbackError = null
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                exoPlayer.prepare()
-                exoPlayer.play()
+                android.util.Log.e("OfflineVideoPlayer", "Playback error on ${currentFile.name}: ${error.message}", error)
+                isBuffering = false
+                if (detectedMime != null) {
+                    // Self-healing fallback: Try playing without forcing the sniffed MIME type
+                    detectedMime = null
+                } else if (!useSoftwareFallback) {
+                    // Seamless automatic fallback to software decoder mode on hardware codec issue
+                    useSoftwareFallback = true
+                } else {
+                    playbackError = "Playback error: ${error.message ?: "Format or codec issue"}"
+                }
             }
         }
         exoPlayer.addListener(listener)
@@ -257,20 +346,80 @@ fun OfflineVideoPlayerScreen(
                 },
                 onBack = { isFullscreen = false }
             )
+
+            if (playbackError != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.85f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Error",
+                            tint = Color(0xFFFF5252),
+                            modifier = Modifier.size(44.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Playback Error",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = playbackError ?: "Unable to decode video format",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.LightGray,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = {
+                                    useSoftwareFallback = true
+                                    playbackError = null
+                                    exoPlayer.prepare()
+                                    exoPlayer.play()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry with SW Codec")
+                            }
+                            OutlinedButton(
+                                onClick = { isFullscreen = false },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                            ) {
+                                Text("Exit Fullscreen")
+                            }
+                        }
+                    }
+                }
+            }
         }
     } else {
         // Portrait Mode with Clean Edge-to-Edge System Inset Padding
         Scaffold(
-            modifier = modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding(),
+            modifier = modifier.fillMaxSize(),
+            contentWindowInsets = WindowInsets(0.dp),
             containerColor = Color(0xFF0B0D14)
         ) { paddingValues ->
+            val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            val effectiveTopPadding = if (statusBarTop > 0.dp) statusBarTop + 4.dp else 32.dp
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
+                    .padding(top = effectiveTopPadding)
+                    .navigationBarsPadding()
             ) {
                 // 1. Compact 16:9 Video Player Viewport
                 Box(
@@ -335,6 +484,64 @@ fun OfflineVideoPlayerScreen(
                         },
                         onBack = onBack
                     )
+
+                    if (playbackError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.85f))
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = "Error",
+                                    tint = Color(0xFFFF5252),
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Playback Error",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = playbackError ?: "Unable to decode video format",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.LightGray,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            useSoftwareFallback = true
+                                            playbackError = null
+                                            exoPlayer.prepare()
+                                            exoPlayer.play()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Retry SW Codec")
+                                    }
+                                    OutlinedButton(
+                                        onClick = onBack,
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                                    ) {
+                                        Text("Back")
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // 2. Video Storyline, Metadata & Offline Controls Card
@@ -576,6 +783,10 @@ fun CompactOfflinePlayerControls(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
+                    .then(
+                        if (isFullscreen) Modifier.statusBarsPadding().displayCutoutPadding()
+                        else Modifier
+                    )
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween

@@ -313,7 +313,7 @@ object UnifiedStreamManager {
 
             var winningStream: ScrapedStreamResult? = null
             try {
-                winningStream = kotlinx.coroutines.withTimeoutOrNull(28000L) {
+                winningStream = kotlinx.coroutines.withTimeoutOrNull(55000L) {
                     resultChannel.receive()
                 }
             } catch (_: Exception) {}

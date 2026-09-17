@@ -942,7 +942,7 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                         .fillMaxWidth()
                         .align(Alignment.TopCenter)
                         .then(
-                            if (isFullScreen) Modifier.statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)
+                            if (isFullScreen) Modifier.statusBarsPadding().displayCutoutPadding().padding(horizontal = 8.dp, vertical = 6.dp)
                             else Modifier.padding(start = 12.dp, top = 6.dp, end = 12.dp, bottom = 2.dp)
                         ),
                     verticalAlignment = Alignment.CenterVertically,

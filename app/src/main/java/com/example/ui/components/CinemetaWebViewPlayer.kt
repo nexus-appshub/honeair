@@ -83,6 +83,7 @@ import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.NeonPurple
 import com.example.download.MediaDownloader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -256,6 +257,9 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     var mainScrapedVideoUrl by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf<String?>(null) }
     var mainScrapedHeaders by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf<Map<String, String>?>(null) }
     var isScrapingDirectStream by remember { mutableStateOf(false) }
+    var directScrapeSecondsRemaining by remember(imdbId, currentSeason, currentEpisode) { androidx.compose.runtime.mutableIntStateOf(60) }
+    var directScrapeAttemptCount by remember(imdbId, currentSeason, currentEpisode) { androidx.compose.runtime.mutableIntStateOf(0) }
+    var directScrapeStatusText by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf("Scanning 12+ cloud streams in parallel...") }
     var useExoPlayer by remember(nativeStreamUrl) { mutableStateOf(true) }
 
     val anikotoSeasons by viewModel.anikotoSeasons.collectAsState()
@@ -292,8 +296,18 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             cat.contains("natok", ignoreCase = true) || isEpisodic
         }
     }
-    val isNativeMatching = (!isSeries && currentSeason == season && currentEpisode == episode)
-    val effectiveNativeUrl = if (isNativeMatching) nativeStreamUrl else null
+    val isNativeMatching = (currentSeason == season && currentEpisode == episode)
+    val effectiveNativeUrl = if (isNativeMatching && !nativeStreamUrl.isNullOrBlank()) nativeStreamUrl else null
+
+    LaunchedEffect(nativeStreamUrl, currentSeason, currentEpisode) {
+        if (!nativeStreamUrl.isNullOrBlank() && currentSeason == season && currentEpisode == episode) {
+            capturedVideoUrl = nativeStreamUrl
+            customScrapedHeaders = nativeHeaders
+            useExoPlayer = true
+            isScrapingDirectStream = false
+            directScrapeSecondsRemaining = 0
+        }
+    }
 
     val isAnime = remember(currentMediaItem, title, type) {
         com.example.scraper.AnimePosterEngine.isAnime(
@@ -304,8 +318,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
         )
     }
 
-    // Automatic In-App Scraping to enable ExoPlayer playback immediately
-    LaunchedEffect(imdbId, title, currentSeason, currentEpisode, isAnime) {
+    // Automatic In-App Scraping to enable ExoPlayer playback immediately on Server 0
+    LaunchedEffect(imdbId, title, currentSeason, currentEpisode, isAnime, directScrapeAttemptCount) {
         if (isAnime) {
             val tempItem = currentMediaItem ?: MediaItem(
                 id = imdbId,
@@ -322,6 +336,15 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             viewModel.selectAnikotoServer(null)
         }
 
+        if (!effectiveNativeUrl.isNullOrBlank()) {
+            capturedVideoUrl = effectiveNativeUrl
+            customScrapedHeaders = nativeHeaders
+            useExoPlayer = true
+            isScrapingDirectStream = false
+            directScrapeSecondsRemaining = 0
+            return@LaunchedEffect
+        }
+
         val cached = com.example.scraper.UnifiedStreamManager.getCachedStream(imdbId, currentSeason, currentEpisode)
         if (cached != null && cached.streamUrl.isNotBlank()) {
             capturedVideoUrl = cached.streamUrl
@@ -331,35 +354,99 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             activeSubtitles = cached.subtitles
             useExoPlayer = true
             isScrapingDirectStream = false
+            directScrapeSecondsRemaining = 0
         } else {
             isScrapingDirectStream = true
+            directScrapeSecondsRemaining = 60
+
+            // Live 60-second countdown timer ticker
+            val tickerJob = scope.launch {
+                while (directScrapeSecondsRemaining > 0 && capturedVideoUrl.isNullOrBlank()) {
+                    delay(1000)
+                    directScrapeSecondsRemaining--
+                }
+            }
+
+            // Continuous parallel scraping loop across all cloud engines for up to 5 minutes (300 seconds)
             withContext(Dispatchers.IO) {
-                try {
-                    val result = com.example.scraper.UnifiedStreamManager.getStream(
-                        context = context,
-                        title = title,
-                        tmdbId = imdbId,
-                        isTv = isSeries,
-                        season = currentSeason,
-                        episode = currentEpisode,
-                        isAnime = isAnime
-                    )
-                    if (result != null && result.streamUrl.isNotBlank()) {
+                val loopStartTime = System.currentTimeMillis()
+                var iteration = 1
+                while (capturedVideoUrl.isNullOrBlank() && (System.currentTimeMillis() - loopStartTime) < 300000L) {
+                    try {
                         withContext(Dispatchers.Main) {
-                            capturedVideoUrl = result.streamUrl
-                            customScrapedHeaders = result.headers
-                            mainScrapedVideoUrl = result.streamUrl
-                            mainScrapedHeaders = result.headers
-                            activeSubtitles = result.subtitles
-                            useExoPlayer = true
+                            directScrapeStatusText = if (directScrapeSecondsRemaining > 0) {
+                                when (iteration % 4) {
+                                    1 -> "Scanning 12+ cloud streams in parallel (VidLink, VidSrc, AutoEmbed)..."
+                                    2 -> "Racing deep extractors (VidRock, VidNest, MovieBox)..."
+                                    3 -> "Querying high-speed direct relays & mirrors..."
+                                    else -> "Aggressive parallel scraping active... Attempting direct HD stream"
+                                }
+                            } else {
+                                "Extended Deep Scan Active... Finding alternative direct cloud relays (Attempt $iteration)..."
+                            }
                         }
+
+                        val result = com.example.scraper.UnifiedStreamManager.getStream(
+                            context = context,
+                            title = title,
+                            tmdbId = imdbId,
+                            isTv = isSeries,
+                            season = currentSeason,
+                            episode = currentEpisode,
+                            isAnime = isAnime
+                        )
+                        if (result != null && result.streamUrl.isNotBlank()) {
+                            withContext(Dispatchers.Main) {
+                                capturedVideoUrl = result.streamUrl
+                                customScrapedHeaders = result.headers
+                                mainScrapedVideoUrl = result.streamUrl
+                                mainScrapedHeaders = result.headers
+                                activeSubtitles = result.subtitles
+                                useExoPlayer = true
+                                isScrapingDirectStream = false
+                                directScrapeSecondsRemaining = 0
+                            }
+                            break
+                        }
+
+                        // For anime, also directly probe high-speed Anikoto / universal endpoints
+                        if (isAnime) {
+                            val animeRes = com.example.scraper.AnikotoScraper.getStreamByTitle(
+                                title = title,
+                                season = currentSeason,
+                                episode = currentEpisode,
+                                preferDub = false
+                            )
+                            if (animeRes != null && animeRes.streamUrl.isNotBlank()) {
+                                withContext(Dispatchers.Main) {
+                                    capturedVideoUrl = animeRes.streamUrl
+                                    customScrapedHeaders = animeRes.headers
+                                    mainScrapedVideoUrl = animeRes.streamUrl
+                                    mainScrapedHeaders = animeRes.headers
+                                    activeSubtitles = animeRes.subtitles
+                                    useExoPlayer = true
+                                    isScrapingDirectStream = false
+                                    directScrapeSecondsRemaining = 0
+                                }
+                                break
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                } finally {
-                    withContext(Dispatchers.Main) {
-                        isScrapingDirectStream = false
+
+                    iteration++
+                    val elapsed = System.currentTimeMillis() - loopStartTime
+                    if (elapsed < 298000L && capturedVideoUrl.isNullOrBlank()) {
+                        delay(2000)
+                    } else {
+                        break
                     }
+                }
+
+                withContext(Dispatchers.Main) {
+                    tickerJob.cancel()
+                    isScrapingDirectStream = false
                 }
             }
         }
@@ -1018,8 +1105,9 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
+                    .padding(top = 12.dp)
                     .padding(horizontal = 16.dp)
-                    .padding(top = 8.dp, bottom = 4.dp)
+                    .padding(bottom = 8.dp)
             ) {
             AnimatedContent(
                 targetState = isSearchExpanded || localSearchQuery.isNotEmpty(),
@@ -1258,77 +1346,9 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         subtitles = activeSubtitles,
                         onFullScreenToggle = { onFullScreenChange(!isFullScreen) },
                         onPlaybackError = { _ ->
-                            // Auto-fallback: If current direct stream fails or errors, automatically race through sub-servers (Delta, Sigma, Prime, VidRock, VidSrc, etc.)
-                            if (!isAnime) {
-                                scope.launch(Dispatchers.IO) {
-                                    withContext(Dispatchers.Main) {
-                                        isLoading = true
-                                    }
-                                    val fallbackResult = com.example.scraper.UnifiedStreamManager.getStream(
-                                        context = context,
-                                        title = title,
-                                        tmdbId = imdbId,
-                                        isTv = isSeries,
-                                        season = currentSeason,
-                                        episode = currentEpisode,
-                                        isAnime = false
-                                    )
-                                    withContext(Dispatchers.Main) {
-                                        if (fallbackResult != null && fallbackResult.streamUrl.isNotBlank() && fallbackResult.streamUrl != playableDirectUrl) {
-                                            capturedVideoUrl = fallbackResult.streamUrl
-                                            customScrapedHeaders = fallbackResult.headers
-                                            if (fallbackResult.subtitles.isNotEmpty()) {
-                                                activeSubtitles = fallbackResult.subtitles
-                                            }
-                                            useExoPlayer = true
-                                            isLoading = false
-                                            hasError = false
-                                        } else {
-                                            // Do NOT auto-fallback to next server automatically. Show error on Server 0.
-                                            isLoading = false
-                                            hasError = true
-                                        }
-                                    }
-                                }
-                            } else {
-                                // For anime auto-failover: Switch to backup playable anime server on error
-                                scope.launch(Dispatchers.IO) {
-                                    val currentServers = (viewModel?.availableSubServers?.value ?: emptyList()) + (viewModel?.availableDubServers?.value ?: emptyList())
-                                    val nextServer = currentServers.firstOrNull { 
-                                        it.streamUrl.isNotBlank() && 
-                                        it.streamUrl != playableDirectUrl && 
-                                        !it.name.contains("Mirror", ignoreCase = true) && 
-                                        !it.id.contains("p", ignoreCase = true) &&
-                                        !it.streamUrl.contains("pahe", ignoreCase = true)
-                                    }
-                                    if (nextServer != null) {
-                                        withContext(Dispatchers.Main) {
-                                            viewModel?.selectAnikotoServer(nextServer, currentEpisode)
-                                        }
-                                    } else {
-                                        val nextRes = com.example.scraper.AnikotoScraper.getStreamByTitle(
-                                            title = title,
-                                            episode = currentEpisode,
-                                            preferDub = false
-                                        )
-                                        withContext(Dispatchers.Main) {
-                                            if (nextRes != null && nextRes.streamUrl.isNotBlank() && nextRes.streamUrl != playableDirectUrl) {
-                                                capturedVideoUrl = nextRes.streamUrl
-                                                customScrapedHeaders = nextRes.headers
-                                                if (nextRes.subtitles.isNotEmpty()) {
-                                                    activeSubtitles = nextRes.subtitles
-                                                }
-                                                useExoPlayer = true
-                                                isLoading = false
-                                                hasError = false
-                                            } else {
-                                                isLoading = false
-                                                hasError = true
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            // Server 0 strict direct scraper: on playback error, restart 60-second parallel scraping for alternate stream
+                            capturedVideoUrl = null
+                            directScrapeAttemptCount++
                         },
                         onBack = onClosePlayer,
                         isSeries = isSeries,
@@ -1412,29 +1432,68 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             .background(SpaceBlack),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (isScrapingDirectStream) {
+                        if (isScrapingDirectStream || directScrapeSecondsRemaining > 0) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
                                 modifier = Modifier.padding(24.dp)
                             ) {
-                                CircularProgressIndicator(
-                                    color = NeonCyan,
-                                    modifier = Modifier.size(42.dp),
-                                    strokeWidth = 3.dp
+                                Box(contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(
+                                        color = NeonCyan,
+                                        modifier = Modifier.size(56.dp),
+                                        strokeWidth = 3.5.dp
+                                    )
+                                    Text(
+                                        text = if (directScrapeSecondsRemaining > 0) "${directScrapeSecondsRemaining}s" else "...",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = NeonCyan
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Direct Native Player (Server 0)",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = directScrapeStatusText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Scraping 12+ cloud streams in parallel for up to 60s...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = NeonCyan.copy(alpha = 0.85f)
                                 )
                                 Spacer(modifier = Modifier.height(14.dp))
-                                Text(
-                                    text = "Connecting to fast stream...",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
-                                        letterSpacing = 0.5.sp
-                                    ),
-                                    color = TextPrimary
-                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    listOf("VidLink", "VidSrc", "AutoEmbed", "VidRock", "VidNest", "MovieBox").forEach { badge ->
+                                        Surface(
+                                            color = DeepSlate,
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = BorderStroke(1.dp, BorderColor)
+                                        ) {
+                                            Text(
+                                                text = badge,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                                color = TextSecondary,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         } else {
-                            // Recovery / Server Selector UI if initial scrape is empty or user wants to pick server
+                            // Only displayed after the FULL 60 seconds have elapsed without finding a stream
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
@@ -1450,7 +1509,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = if (isAnime) "Select Streaming Server" else "Stream Server Ready",
+                                    text = if (isAnime) "Select Streaming Server" else "Server 0 Parallel Scrape Complete",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
@@ -1458,7 +1517,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = if (isAnime) "Tap any server below to play in HD" else "Select a server or switch to web player",
+                                    text = if (isAnime) "Tap any server below to play in HD" else "Direct HLS not found on Server 0 after 60s scan. You can retry scraping or switch to Server 1 web player.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
@@ -1517,46 +1576,18 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 ) {
                                     Button(
                                         onClick = {
-                                            isScrapingDirectStream = true
-                                            scope.launch(Dispatchers.IO) {
-                                                try {
-                                                    val res = com.example.scraper.UnifiedStreamManager.getStream(
-                                                        context = context,
-                                                        title = title,
-                                                        tmdbId = imdbId,
-                                                        isTv = isSeries,
-                                                        season = currentSeason,
-                                                        episode = currentEpisode,
-                                                        isAnime = isAnime
-                                                    )
-                                                    if (res != null && res.streamUrl.isNotBlank()) {
-                                                        withContext(Dispatchers.Main) {
-                                                            capturedVideoUrl = res.streamUrl
-                                                            customScrapedHeaders = res.headers
-                                                            mainScrapedVideoUrl = res.streamUrl
-                                                            mainScrapedHeaders = res.headers
-                                                            activeSubtitles = res.subtitles
-                                                            useExoPlayer = true
-                                                        }
-                                                    }
-                                                } catch (_: Exception) {}
-                                                finally {
-                                                    withContext(Dispatchers.Main) {
-                                                        isScrapingDirectStream = false
-                                                    }
-                                                }
-                                            }
+                                            directScrapeAttemptCount++
                                         },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = DeepSlate,
-                                            contentColor = TextPrimary
+                                            containerColor = NeonCyan,
+                                            contentColor = SpaceBlack
                                         ),
                                         shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.testTag("player_retry_scrape_btn")
                                     ) {
                                         Icon(Icons.Default.Refresh, contentDescription = "Retry", modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Retry", style = MaterialTheme.typography.bodySmall)
+                                        Text("Retry 60s Scrape", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
                                     }
 
                                     if (!isAnime) {
@@ -1566,15 +1597,15 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                 useExoPlayer = false
                                             },
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = NeonCyan,
-                                                contentColor = SpaceBlack
+                                                containerColor = DeepSlate,
+                                                contentColor = TextPrimary
                                             ),
                                             shape = RoundedCornerShape(12.dp),
                                             modifier = Modifier.testTag("player_switch_web_btn")
                                         ) {
                                             Text(
                                                 "Server 1 (Web)",
-                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                                style = MaterialTheme.typography.bodySmall
                                             )
                                         }
                                     }
