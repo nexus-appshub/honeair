@@ -88,7 +88,7 @@ data class AppControlConfig(
     val premiumPaywallMessage: String = "This content or tab is reserved for Premium Subscribers. Please purchase a subscription to continue.",
     val premiumPaywallButtonText: String = "Buy Subscription Now",
     val premiumPaywallButtonUrl: String = "",
-    val isAdsEnabled: Boolean = true,
+    val isAdsEnabled: Boolean = false,
     val adBannerUrl: String = "",
     val adClickUrl: String = "",
     val adTitle: String = "Sponsored: Upgrade to VIP to Remove Ads",
@@ -187,24 +187,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 val mappedData = state.data.map { item ->
                     val cleanId = item.id.trim()
                     val cleanTitle = item.title.trim()
-                    val cleanCategory = item.category.trim()
-                    val cleanType = item.type.trim()
+                    val cleanCategory = item.category.trim().lowercase()
                     
-                    val isExplicitlyLocked = item.isPremium || 
+                    val isPrem = item.isPremium || 
                                  premiumIdsFromDb.contains(cleanId) ||
                                  (cleanId.isNotBlank() && configPremiumIds.any { it.isNotBlank() && it.equals(cleanId, ignoreCase = true) }) ||
-                                 (cleanTitle.isNotBlank() && configPremiumIds.any { it.isNotBlank() && it.equals(cleanTitle, ignoreCase = true) })
-                    
-                    val isCategoryLocked = isCategoryOrTypeLocked(
-                        itemId = cleanId,
-                        itemTitle = cleanTitle,
-                        itemType = cleanType,
-                        itemCategory = cleanCategory,
-                        configPremiumCats = configPremiumCats,
-                        configLockedTabs = configLockedTabs
-                    )
-                    
-                    val isPrem = isExplicitlyLocked || isCategoryLocked
+                                 (cleanTitle.isNotBlank() && configPremiumIds.any { it.isNotBlank() && it.equals(cleanTitle, ignoreCase = true) }) ||
+                                 (cleanCategory.isNotBlank() && (configPremiumCats.any { it.isNotBlank() && it.equals(cleanCategory, ignoreCase = true) } || configLockedTabs.any { it.isNotBlank() && it.equals(cleanCategory, ignoreCase = true) }))
                                  
                     if (isPrem) {
                         item.copy(isPremium = true)
@@ -382,88 +371,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _showPremiumPaywall = MutableStateFlow(false)
     val showPremiumPaywall: StateFlow<Boolean> = _showPremiumPaywall.asStateFlow()
-
-    private val _contentLockState = MutableStateFlow<com.example.ui.components.ContentLockState?>(null)
-    val contentLockState: StateFlow<com.example.ui.components.ContentLockState?> = _contentLockState.asStateFlow()
-
-    fun triggerPremiumContentLock(
-        itemId: String,
-        title: String,
-        isChannel: Boolean = false,
-        channel: IptvChannel? = null,
-        mediaItem: MediaItem? = null,
-        season: Int = 1,
-        episode: Int = 1
-    ) {
-        _contentLockState.value = com.example.ui.components.ContentLockState(
-            itemId = itemId,
-            title = title,
-            isChannel = isChannel,
-            channel = channel,
-            mediaItem = mediaItem,
-            season = season,
-            episode = episode
-        )
-    }
-
-    fun dismissContentLock() {
-        _contentLockState.value = null
-    }
-
-    /**
-     * Strict Category and Type Scoped Lock Checker
-     * Guarantees that locking Anime ONLY affects items with type="anime" or category containing "Anime",
-     * leaving Movies and Series unaffected unless their respective flags are explicitly enabled.
-     */
-    fun isCategoryOrTypeLocked(
-        itemId: String = "",
-        itemTitle: String = "",
-        itemType: String = "",
-        itemCategory: String = "",
-        configPremiumCats: List<String> = emptyList(),
-        configLockedTabs: List<String> = emptyList()
-    ): Boolean {
-        if (configPremiumCats.isEmpty() && configLockedTabs.isEmpty()) return false
-
-        val typeLower = itemType.trim().lowercase()
-        val catLower = itemCategory.trim().lowercase()
-        val idLower = itemId.trim().lowercase()
-
-        // Identify content category/type accurately
-        val isAnimeItem = typeLower == "anime" ||
-                catLower.contains("anime") ||
-                idLower.startsWith("anikoto_") ||
-                com.example.scraper.AnimePosterEngine.isAnime(title = itemTitle, category = itemCategory, type = itemType, id = itemId)
-
-        val isMovieItem = !isAnimeItem && (typeLower == "movie" || catLower.contains("movie") || catLower.contains("cinema"))
-
-        val isSeriesItem = !isAnimeItem && !isMovieItem && (typeLower == "series" || typeLower == "tv" || catLower.contains("series") || catLower.contains("tv") || catLower.contains("drama") || catLower.contains("natok"))
-
-        // Check locks in config
-        val isAnimeLockedInConfig = configPremiumCats.any { it.trim().equals("anime", ignoreCase = true) || it.trim() == "4" } ||
-                configLockedTabs.any { it.trim().equals("anime", ignoreCase = true) || it.trim() == "4" }
-
-        val isMoviesLockedInConfig = configPremiumCats.any { it.trim().equals("movies", ignoreCase = true) || it.trim().equals("movie", ignoreCase = true) || it.trim() == "1" } ||
-                configLockedTabs.any { it.trim().equals("movies", ignoreCase = true) || it.trim().equals("movie", ignoreCase = true) || it.trim() == "1" }
-
-        val isSeriesLockedInConfig = configPremiumCats.any { it.trim().equals("series", ignoreCase = true) || it.trim().equals("tv", ignoreCase = true) || it.trim() == "2" } ||
-                configLockedTabs.any { it.trim().equals("series", ignoreCase = true) || it.trim().equals("tv", ignoreCase = true) || it.trim() == "2" }
-
-        if (isAnimeItem) {
-            return isAnimeLockedInConfig || configPremiumCats.any { catLower.isNotBlank() && catLower == it.trim().lowercase() }
-        }
-        if (isMovieItem) {
-            return isMoviesLockedInConfig || configPremiumCats.any { catLower.isNotBlank() && catLower == it.trim().lowercase() }
-        }
-        if (isSeriesItem) {
-            return isSeriesLockedInConfig || configPremiumCats.any { catLower.isNotBlank() && catLower == it.trim().lowercase() }
-        }
-
-        return catLower.isNotBlank() && (
-            configPremiumCats.any { it.trim().lowercase() == catLower } ||
-            configLockedTabs.any { it.trim().lowercase() == catLower }
-        )
-    }
 
     private val _isRedeemActive = MutableStateFlow(false)
     val isRedeemActive: StateFlow<Boolean> = _isRedeemActive.asStateFlow()
@@ -730,7 +637,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         mediaId: String?,
         title: String?,
         category: String?,
-        type: String? = null,
         episodeNum: Int = 1,
         userEmail: String?
     ): Boolean {
@@ -740,34 +646,23 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
         val cleanMediaId = mediaId?.trim() ?: ""
         val cleanTitle = title?.trim() ?: ""
-        val cleanCategory = category?.trim() ?: ""
-        val cleanType = type?.trim() ?: ""
+        val cleanCategory = category?.trim()?.lowercase() ?: ""
 
-        val effectiveItemId = if (cleanMediaId.isNotBlank()) cleanMediaId else cleanTitle
-
-        val isMediaExplicitlyLocked = (cleanMediaId.isNotBlank() && config.premiumMediaIds.contains(cleanMediaId)) ||
+        val isMediaLocked = (cleanMediaId.isNotBlank() && config.premiumMediaIds.contains(cleanMediaId)) ||
                 (cleanTitle.isNotBlank() && config.premiumMediaIds.any { cleanTitle.contains(it, ignoreCase = true) })
 
-        val isCategoryLocked = isCategoryOrTypeLocked(
-            itemId = cleanMediaId,
-            itemTitle = cleanTitle,
-            itemType = cleanType,
-            itemCategory = cleanCategory,
-            configPremiumCats = config.premiumCategories,
-            configLockedTabs = config.lockedTabs
-        )
+        val isCategoryLocked = cleanCategory.isNotBlank() && 
+                (config.premiumCategories.contains(cleanCategory) || config.lockedTabs.contains(cleanCategory))
 
-        val isLocked = isMediaExplicitlyLocked || isCategoryLocked || (config.freeEpisodeLimit > 0 && episodeNum > config.freeEpisodeLimit)
-
-        if (isLocked) {
-            if (com.example.subscription.TemporaryUnlockManager.isItemTemporarilyUnlocked(effectiveItemId, getApplication())) {
-                return true
+        if (episodeNum > config.freeEpisodeLimit) {
+            if (isMediaLocked || isCategoryLocked || config.isPremiumRequired) {
+                triggerPremiumPaywall(true)
+                return false
             }
-            triggerPremiumContentLock(
-                itemId = effectiveItemId,
-                title = cleanTitle.ifBlank { "Premium Content" },
-                isChannel = false
-            )
+        }
+
+        if (isMediaLocked || (isCategoryLocked && config.isPremiumRequired)) {
+            triggerPremiumPaywall(true)
             return false
         }
 
@@ -893,7 +788,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val premiumPaywallButtonText = json.optString("premiumPaywallButtonText", "Buy Subscription Now")
                             val premiumPaywallButtonUrl = json.optString("premiumPaywallButtonUrl", "")
 
-                            val isAdsEnabled = json.optBoolean("isAdsEnabled", true)
+                            val isAdsEnabled = json.optBoolean("isAdsEnabled", false)
                             val adBannerUrl = json.optString("adBannerUrl", "")
                             val adClickUrl = json.optString("adClickUrl", "")
                             val adTitle = json.optString("adTitle", "Sponsored: Upgrade to VIP to Remove Ads")
@@ -1436,8 +1331,14 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isFetchingServers.value = true
             try {
+                val targetTitleOrSlug = when {
+                    item.id.isNotBlank() && (item.id.startsWith("anikoto_") || (item.id.contains("-") && item.id.any { it.isDigit() })) -> item.id
+                    !item.imdbId.isNullOrBlank() && (item.imdbId!!.startsWith("anikoto_") || (item.imdbId!!.contains("-") && item.imdbId!!.any { it.isDigit() })) -> item.imdbId!!
+                    item.title.isNotBlank() -> item.title
+                    else -> item.id
+                }
                 val group = com.example.scraper.AnikotoScraper.fetchAvailableServers(
-                    title = item.title,
+                    title = targetTitleOrSlug,
                     season = season,
                     episode = episode
                 )
@@ -1869,14 +1770,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 triggerPremiumPaywall(true)
                 return
             }
-            if (mediaItem != null && !checkContentAccess(
-                mediaId = mediaItem.id,
-                title = mediaItem.title,
-                category = mediaItem.category,
-                type = mediaItem.type,
-                episodeNum = episode,
-                userEmail = currentEmail
-            )) {
+            if (mediaItem != null && !checkContentAccess(mediaItem.id, mediaItem.title, mediaItem.category, episode, currentEmail)) {
                 return
             }
         }
@@ -2607,7 +2501,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 mediaId = item.imdbId ?: item.id,
                 title = item.title,
                 category = item.category,
-                type = item.type,
                 episodeNum = episode,
                 userEmail = currentEmail
             )) {
@@ -3128,17 +3021,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         if (channel != null) {
             val currentEmail = _userProfile.value?.email
             if (!isUserPremium(currentEmail)) {
+                // Live TV specific channel and category lock (completely isolated from movie/anime locks)
                 if (isChannelPremium(channel)) {
-                    val itemId = channel.url.ifBlank { channel.name }
-                    if (!com.example.subscription.TemporaryUnlockManager.isItemTemporarilyUnlocked(itemId, getApplication())) {
-                        triggerPremiumContentLock(
-                            itemId = itemId,
-                            title = channel.name,
-                            isChannel = true,
-                            channel = channel
-                        )
-                        return
-                    }
+                    triggerPremiumPaywall(true)
+                    return
                 }
             }
         }

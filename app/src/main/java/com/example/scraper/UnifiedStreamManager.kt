@@ -65,8 +65,14 @@ object UnifiedStreamManager {
         Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime)")
 
         // 0. High-Speed Anime Native & API Resolver (Direct Native Extraction + HLS M3U8)
-        if (isAnime || tmdbId.startsWith("anikoto_")) {
+        if (isAnime || tmdbId.startsWith("anikoto_") || (tmdbId.contains("-") && tmdbId.any { it.isDigit() })) {
             try {
+                val slugKey = when {
+                    tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
+                    tmdbId.contains("-") && (tmdbId.any { it.isDigit() } || tmdbId.length > 5) -> tmdbId
+                    title.contains("-") && title.any { it.isDigit() } && !title.contains(" ") -> title
+                    else -> ""
+                }
                 val lookupKey = if (title.startsWith("http") || title.contains("anikoto.cz") || title.contains("/watch/")) {
                     title
                 } else if (cleanTitle.isNotBlank()) {
@@ -74,14 +80,25 @@ object UnifiedStreamManager {
                 } else {
                     title
                 }
-                Log.d(TAG, "Tier 0: Querying In-App Native Scraper & Anime API for $lookupKey (S$season Ep$effectiveEpisode)...")
+                Log.d(TAG, "Tier 0: Querying In-App Native Scraper & Anime API for $lookupKey / slug: $slugKey (S$season Ep$effectiveEpisode)...")
                 
                 // Priority 1: High-Speed Direct API Stream with Subtitles
-                val animeStream = AnikotoScraper.getStreamByTitle(
-                    title = lookupKey,
-                    season = season,
-                    episode = effectiveEpisode
-                )
+                var animeStream = if (slugKey.isNotBlank()) {
+                    AnikotoScraper.getStreamByTitle(
+                        title = slugKey,
+                        season = season,
+                        episode = effectiveEpisode
+                    )
+                } else null
+
+                if (animeStream == null || animeStream.streamUrl.isEmpty()) {
+                    animeStream = AnikotoScraper.getStreamByTitle(
+                        title = lookupKey,
+                        season = season,
+                        episode = effectiveEpisode
+                    )
+                }
+
                 if (animeStream != null && animeStream.streamUrl.isNotEmpty()) {
                     Log.d(TAG, "Tier 0: Anime stream resolved successfully via API: ${animeStream.streamUrl}")
                     streamCache[cacheKey] = animeStream
@@ -90,8 +107,9 @@ object UnifiedStreamManager {
                 }
 
                 // Priority 2: In-app native extraction
+                val nativeTarget = if (slugKey.isNotBlank()) slugKey else lookupKey
                 val nativeStream = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
-                    title = lookupKey,
+                    title = nativeTarget,
                     season = season,
                     episode = effectiveEpisode
                 )
@@ -142,6 +160,7 @@ object UnifiedStreamManager {
             }
         }
 
+        var effectiveSeason = season
         if (finalTmdbId.startsWith("anikoto_") || (!finalTmdbId.all { it.isDigit() } && cleanTitle.isNotBlank())) {
             try {
                 val slug = if (finalTmdbId.startsWith("anikoto_")) finalTmdbId.substringAfter("anikoto_") else ""
@@ -149,26 +168,43 @@ object UnifiedStreamManager {
                 if (cleanQuery.isEmpty()) {
                     cleanQuery = cleanTitle
                 }
-                Log.d(TAG, "Resolving TMDB ID for title query: $cleanQuery")
-                var firstResult = if (effectiveIsTv) {
-                    com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanQuery).results?.firstOrNull()
-                } else {
-                    com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = cleanQuery).results?.firstOrNull()
+
+                // Extract season number from title if season == 1
+                val detectedSeasonMatch = Regex("""(?i)(?:season|s)\s*(\d+)""").find("$cleanTitle $cleanQuery")
+                val detectedSeason = detectedSeasonMatch?.groupValues?.get(1)?.toIntOrNull()
+                if (detectedSeason != null && detectedSeason > 1 && season == 1) {
+                    effectiveSeason = detectedSeason
+                    Log.d(TAG, "Detected Season $effectiveSeason from title")
                 }
-                if (firstResult == null) {
+
+                // Strip season / arc noise from cleanQuery for better TMDB hit rate
+                val baseQuery = cleanQuery.replace(Regex("""(?i)(?:season|part|cour|arc|s)\s*\d+.*"""), "").trim()
+                val words = baseQuery.split(" ").filter { it.isNotBlank() }
+                val shortBaseQuery = if (words.size >= 2) words.take(2).joinToString(" ") else baseQuery
+
+                val queriesToTry = listOf(cleanQuery, baseQuery, cleanTitle, shortBaseQuery).filter { it.isNotBlank() }.distinct()
+                
+                var firstResult: com.example.data.network.TmdbMediaResult? = null
+                for (q in queriesToTry) {
+                    Log.d(TAG, "Resolving TMDB ID for title query: $q")
                     firstResult = if (effectiveIsTv) {
-                        com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = cleanQuery).results?.firstOrNull()?.also { effectiveIsTv = false }
+                        com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = q).results?.firstOrNull()
                     } else {
-                        com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanQuery).results?.firstOrNull()?.also { effectiveIsTv = true }
+                        com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = q).results?.firstOrNull()
                     }
+                    if (firstResult == null) {
+                        firstResult = if (effectiveIsTv) {
+                            com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = q).results?.firstOrNull()?.also { effectiveIsTv = false }
+                        } else {
+                            com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = q).results?.firstOrNull()?.also { effectiveIsTv = true }
+                        }
+                    }
+                    if (firstResult != null) break
                 }
-                if (firstResult == null && cleanTitle.isNotBlank() && cleanQuery != cleanTitle) {
-                    firstResult = com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = cleanTitle).results?.firstOrNull()?.also { effectiveIsTv = true }
-                        ?: com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = cleanTitle).results?.firstOrNull()?.also { effectiveIsTv = false }
-                }
+
                 if (firstResult != null) {
                     finalTmdbId = firstResult.id.toString()
-                    Log.d(TAG, "Resolved TMDB ID from query $cleanQuery -> $finalTmdbId (isTv: $effectiveIsTv)")
+                    Log.d(TAG, "Resolved TMDB ID from search -> $finalTmdbId (isTv: $effectiveIsTv, season: $effectiveSeason)")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to search TMDB ID for $cleanTitle: ${e.message}")
@@ -187,7 +223,7 @@ object UnifiedStreamManager {
                     val res = VidLinkNativeScraper.extractStream(
                         tmdbId = finalTmdbId,
                         isTv = effectiveIsTv,
-                        season = season,
+                        season = effectiveSeason,
                         episode = episode,
                         imdbId = resolvedImdbId
                     )
@@ -206,7 +242,7 @@ object UnifiedStreamManager {
                     val res = VidSrcNativeScraper.extractStream(
                         tmdbId = finalTmdbId,
                         isTv = effectiveIsTv,
-                        season = season,
+                        season = effectiveSeason,
                         episode = episode,
                         imdbId = resolvedImdbId
                     )
@@ -225,7 +261,7 @@ object UnifiedStreamManager {
                     val res = AutoEmbedNativeScraper.extractStream(
                         tmdbId = finalTmdbId,
                         isTv = effectiveIsTv,
-                        season = season,
+                        season = effectiveSeason,
                         episode = episode,
                         imdbId = resolvedImdbId
                     )
@@ -244,7 +280,7 @@ object UnifiedStreamManager {
                     val res = VidnestNativeScraper.extractStream(
                         tmdbId = finalTmdbId,
                         isTv = effectiveIsTv,
-                        season = season,
+                        season = effectiveSeason,
                         episode = episode
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
@@ -262,7 +298,7 @@ object UnifiedStreamManager {
                     val res = VidrockNativeScraper.extractStream(
                         tmdbId = finalTmdbId,
                         isTv = effectiveIsTv,
-                        season = season,
+                        season = effectiveSeason,
                         episode = episode
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
@@ -301,7 +337,7 @@ object UnifiedStreamManager {
                 if (!subjectId.isNullOrEmpty()) {
                     val res = MovieBoxNativeScraper.getStreamInfo(
                         subjectId = subjectId,
-                        season = if (effectiveIsTv) season else 0,
+                        season = if (effectiveIsTv) effectiveSeason else 0,
                         episode = if (effectiveIsTv) episode else 0
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
@@ -321,7 +357,7 @@ object UnifiedStreamManager {
                     context = context,
                     tmdbId = "$finalTmdbId",
                     isTv = effectiveIsTv,
-                    season = season,
+                    season = effectiveSeason,
                     episode = episode,
                     imdbId = resolvedImdbId
                 )
@@ -338,7 +374,7 @@ object UnifiedStreamManager {
             // Fallback 3: Stream Cloud Relay
             try {
                 Log.d(TAG, "Tier 4: Querying Fallback Stream Scraper...")
-                val fallback = queryFallbackApi(finalTmdbId, effectiveIsTv, season, episode)
+                val fallback = queryFallbackApi(finalTmdbId, effectiveIsTv, effectiveSeason, episode)
                 if (fallback != null) {
                     Log.d(TAG, "Tier 4: Fallback stream resolved successfully!")
                     streamCache[cacheKey] = fallback

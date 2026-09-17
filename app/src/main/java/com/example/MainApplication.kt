@@ -24,7 +24,6 @@ class MainApplication : Application(), ImageLoaderFactory {
         try {
             // Start network booster engine immediately at application level for ultra-fast response
             com.example.network.SmartNetworkBoosterEngine.startEngine(this)
-            com.example.subscription.TemporaryUnlockManager.init(this)
         } catch (e: Throwable) {
             e.printStackTrace()
         }
@@ -78,12 +77,6 @@ class MainApplication : Application(), ImageLoaderFactory {
 
         try {
             AppUpdateWorker.schedulePeriodicCheck(this)
-        } catch (e: Throwable) {
-            e.printStackTrace()
-        }
-
-        try {
-            com.example.ad.StartIoAdManager.init(this)
         } catch (e: Throwable) {
             e.printStackTrace()
         }

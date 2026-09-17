@@ -2459,19 +2459,10 @@ fun HomeScreen(
                     }
                 }
 
-                // 4. Developer Footer & Poster Banner
+                // 4. Developer Footer
                 item {
                     Spacer(modifier = Modifier.height(10.dp))
                     DeveloperNoteFooter(modifier = Modifier.padding(horizontal = 20.dp))
-                    Spacer(modifier = Modifier.height(14.dp))
-                    if (!com.example.ad.StartIoAdManager.isPremiumUser()) {
-                        com.example.ad.StartIoBannerView(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            isMrec = true
-                        )
-                    }
                     Spacer(modifier = Modifier.height(80.dp))
                 }
             }
@@ -2967,14 +2958,7 @@ fun HomeScreen(
                                         isFavorite = isFav,
                                         onFavoriteToggle = { viewModel.toggleFavorite(channel, isFav) },
                                         onClick = {
-                                            val act = context as? android.app.Activity
-                                            if (act != null) {
-                                                com.example.ad.StartIoAdManager.showInterstitial(act) {
-                                                    viewModel.setActiveChannel(channel)
-                                                }
-                                            } else {
-                                                viewModel.setActiveChannel(channel)
-                                            }
+                                            viewModel.setActiveChannel(channel)
                                         },
                                         onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                         isSelected = isSelected,

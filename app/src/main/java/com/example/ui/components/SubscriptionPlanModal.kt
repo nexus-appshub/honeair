@@ -46,7 +46,6 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.WorkspacePremium
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -311,92 +310,6 @@ fun SubscriptionPlanModal(
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
-
-                    // 🎬 Watch Video Ad for 30-Min Free VIP Pass
-                    if (!isPremium) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable {
-                                    val act = context as? android.app.Activity
-                                    if (act != null) {
-                                        com.example.ad.StartIoAdManager.showRewardedVideo(
-                                            activity = act,
-                                            onRewardEarned = {
-                                                com.example.subscription.SubscriptionManager.unlockTemporaryVip(30)
-                                                android.widget.Toast.makeText(context, "🎉 30 Minutes VIP Pass Unlocked!", android.widget.Toast.LENGTH_LONG).show()
-                                                onDismiss()
-                                            },
-                                            onAdFailed = {
-                                                android.widget.Toast.makeText(context, "Video ad not ready. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E102E)),
-                            border = BorderStroke(1.5.dp, Color(0xFFFF007A))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(Color(0xFFFF007A).copy(alpha = 0.2f), CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "Watch Ad",
-                                        tint = Color(0xFFFF007A),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Watch 1 Ad = 30 Mins VIP Free",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        text = "Unlock all VIP channels & 4K movies for 30 minutes!",
-                                        fontSize = 11.sp,
-                                        color = Color.LightGray
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Button(
-                                    onClick = {
-                                        val act = context as? android.app.Activity
-                                        if (act != null) {
-                                            com.example.ad.StartIoAdManager.showRewardedVideo(
-                                                activity = act,
-                                                onRewardEarned = {
-                                                    com.example.subscription.SubscriptionManager.unlockTemporaryVip(30)
-                                                    android.widget.Toast.makeText(context, "🎉 30 Minutes VIP Pass Unlocked!", android.widget.Toast.LENGTH_LONG).show()
-                                                    onDismiss()
-                                                },
-                                                onAdFailed = {
-                                                    android.widget.Toast.makeText(context, "Video ad not ready. Please try again.", android.widget.Toast.LENGTH_SHORT).show()
-                                                }
-                                            )
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007A)),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text("Unlock", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
 
                     val safeIndex = selectedPlanIndex.coerceIn(0, (plans.size - 1).coerceAtLeast(0))
                     val chosenPlan = plans[safeIndex]

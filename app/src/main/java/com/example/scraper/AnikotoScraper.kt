@@ -682,71 +682,91 @@ object AnikotoScraper {
     ): AnikotoServerGroup = withContext(Dispatchers.IO) {
         try {
             val cleanTitle = sanitizeSearchTitle(title)
-            Log.d(TAG, "Fetching available SUB / DUB servers via API for: $cleanTitle (Ep $episode)")
+            val rawClean = title.removePrefix("anikoto_").removePrefix("movie_").removePrefix("series_").trim()
+            val effectiveEp = if (episode <= 0) 1 else episode
+            Log.d(TAG, "Fetching available SUB / DUB servers via API for: $cleanTitle (raw: $rawClean, Ep $effectiveEp)")
 
             val subServers = mutableListOf<AnikotoServer>()
             val dubServers = mutableListOf<AnikotoServer>()
+            var resolvedWatchUrl = ""
 
-            // Query SUB servers
-            val subUrl = buildStreamGetUrl(title = cleanTitle, episode = episode, type = "sub")
-            val subJson = fetchJson(subUrl)
+            val isSlug = rawClean.contains("-") && (rawClean.any { it.isDigit() } || rawClean.length > 5)
+            val queriesToTry = mutableListOf<String>()
 
-            if (subJson != null) {
-                val availableServers = subJson.optJSONArray("availableServers")
-                if (availableServers != null) {
-                    for (i in 0 until availableServers.length()) {
-                        val srvObj = availableServers.optJSONObject(i) ?: continue
-                        val srvName = srvObj.optString("name", "Server ${i + 1}")
-                        val srvId = srvObj.optString("server", "HD-1")
-                        val audioType = srvObj.optString("audioType", "SUB").uppercase()
-                        val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
-                        val rawUrl = srvObj.optString("rawUrl", "")
-                        val referer = srvObj.optString("referer", "$API_BASE_URL/")
-
-                        val parsedServer = AnikotoServer(
-                            id = srvId,
-                            linkId = streamUrl,
-                            name = "Server ${i + 1}",
-                            type = audioType.lowercase(),
-                            streamUrl = streamUrl,
-                            rawUrl = rawUrl,
-                            referer = referer
-                        )
-
-                        if (audioType == "DUB") {
-                            dubServers.add(parsedServer)
-                        } else {
-                            subServers.add(parsedServer)
-                        }
-                    }
-                }
+            if (rawClean.startsWith("http") || rawClean.contains("/watch/")) {
+                queriesToTry.add(rawClean)
+            } else if (isSlug) {
+                queriesToTry.add("https://anikoto.cz/watch/$rawClean?ep=$effectiveEp")
+                queriesToTry.add(rawClean)
+            }
+            queriesToTry.add(cleanTitle)
+            if (season > 1) {
+                queriesToTry.add("$cleanTitle Season $season")
+            }
+            val baseFranchise = cleanTitle.substringBefore(":").substringBefore("-").trim()
+            if (baseFranchise.isNotBlank() && baseFranchise != cleanTitle) {
+                if (season > 1) queriesToTry.add("$baseFranchise Season $season")
+                queriesToTry.add(baseFranchise)
+            }
+            if (rawClean != cleanTitle && !queriesToTry.contains(rawClean)) {
+                queriesToTry.add(rawClean)
             }
 
-            // Query DUB servers if none found in first response
-            if (dubServers.isEmpty()) {
-                val dubUrl = buildStreamGetUrl(title = cleanTitle, episode = episode, type = "dub")
-                val dubJson = fetchJson(dubUrl)
-                if (dubJson != null) {
-                    val availableServers = dubJson.optJSONArray("availableServers")
-                    if (availableServers != null) {
+            for (queryCandidate in queriesToTry) {
+                if (subServers.isNotEmpty() && dubServers.isNotEmpty()) break
+
+                // Query SUB servers
+                val subUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "sub")
+                val subJson = fetchJson(subUrl)
+
+                if (subJson != null) {
+                    if (resolvedWatchUrl.isBlank()) {
+                        val animeWatch = subJson.optJSONObject("anime")?.optString("watchUrl", "") ?: ""
+                        if (animeWatch.isNotBlank()) resolvedWatchUrl = animeWatch
+                    }
+
+                    val availableServers = subJson.optJSONArray("availableServers")
+                    if (availableServers != null && availableServers.length() > 0) {
                         for (i in 0 until availableServers.length()) {
                             val srvObj = availableServers.optJSONObject(i) ?: continue
                             val srvName = srvObj.optString("name", "Server ${i + 1}")
-                            val srvId = srvObj.optString("server", "HD-1")
-                            val audioType = srvObj.optString("audioType", "DUB").uppercase()
+                            val srvId = srvObj.optString("server", "HD-${i + 1}")
+                            val audioType = srvObj.optString("audioType", "SUB").uppercase()
                             val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
                             val rawUrl = srvObj.optString("rawUrl", "")
                             val referer = srvObj.optString("referer", "$API_BASE_URL/")
 
+                            val parsedServer = AnikotoServer(
+                                id = srvId,
+                                linkId = streamUrl.ifBlank { rawUrl },
+                                name = "Server ${i + 1}",
+                                type = audioType.lowercase(),
+                                streamUrl = streamUrl,
+                                rawUrl = rawUrl,
+                                referer = referer
+                            )
+
                             if (audioType == "DUB") {
-                                dubServers.add(
+                                dubServers.add(parsedServer)
+                            } else {
+                                subServers.add(parsedServer)
+                            }
+                        }
+                    } else {
+                        // If availableServers array is empty but selectedStream is returned
+                        val selected = subJson.optJSONObject("selectedStream")
+                        if (selected != null) {
+                            val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
+                            if (sUrl.isNotBlank()) {
+                                val referer = selected.optString("referer", "$API_BASE_URL/")
+                                subServers.add(
                                     AnikotoServer(
-                                        id = srvId,
-                                        linkId = streamUrl,
-                                        name = "Server ${dubServers.size + 1}",
-                                        type = "dub",
-                                        streamUrl = streamUrl,
-                                        rawUrl = rawUrl,
+                                        id = "HD-1",
+                                        linkId = sUrl,
+                                        name = "Server 1",
+                                        type = "sub",
+                                        streamUrl = sUrl,
+                                        rawUrl = sUrl,
                                         referer = referer
                                     )
                                 )
@@ -754,6 +774,103 @@ object AnikotoScraper {
                         }
                     }
                 }
+
+                // Query DUB servers if needed
+                if (dubServers.isEmpty()) {
+                    val dubUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "dub")
+                    val dubJson = fetchJson(dubUrl)
+                    if (dubJson != null) {
+                        val availableServers = dubJson.optJSONArray("availableServers")
+                        if (availableServers != null && availableServers.length() > 0) {
+                            for (i in 0 until availableServers.length()) {
+                                val srvObj = availableServers.optJSONObject(i) ?: continue
+                                val srvId = srvObj.optString("server", "HD-${i + 1}")
+                                val audioType = srvObj.optString("audioType", "DUB").uppercase()
+                                val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
+                                val rawUrl = srvObj.optString("rawUrl", "")
+                                val referer = srvObj.optString("referer", "$API_BASE_URL/")
+
+                                if (audioType == "DUB") {
+                                    dubServers.add(
+                                        AnikotoServer(
+                                            id = srvId,
+                                            linkId = streamUrl.ifBlank { rawUrl },
+                                            name = "Server ${dubServers.size + 1}",
+                                            type = "dub",
+                                            streamUrl = streamUrl,
+                                            rawUrl = rawUrl,
+                                            referer = referer
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback: Search provider directly if still empty
+            if (subServers.isEmpty() && dubServers.isEmpty()) {
+                try {
+                    val searchResults = searchOrFilterAnime(keyword = cleanTitle)
+                    val matchedItem = searchResults.firstOrNull()
+                    if (matchedItem != null && matchedItem.watchUrl.isNotBlank()) {
+                        resolvedWatchUrl = matchedItem.watchUrl
+                        val searchUrl = buildStreamGetUrl(title = matchedItem.watchUrl, episode = effectiveEp, type = "sub")
+                        val sJson = fetchJson(searchUrl)
+                        if (sJson != null) {
+                            val availableServers = sJson.optJSONArray("availableServers")
+                            if (availableServers != null) {
+                                for (i in 0 until availableServers.length()) {
+                                    val srvObj = availableServers.optJSONObject(i) ?: continue
+                                    val srvId = srvObj.optString("server", "HD-${i + 1}")
+                                    val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
+                                    val rawUrl = srvObj.optString("rawUrl", "")
+                                    val referer = srvObj.optString("referer", "$API_BASE_URL/")
+                                    subServers.add(
+                                        AnikotoServer(
+                                            id = srvId,
+                                            linkId = streamUrl.ifBlank { rawUrl },
+                                            name = "Server ${i + 1}",
+                                            type = "sub",
+                                            streamUrl = streamUrl,
+                                            rawUrl = rawUrl,
+                                            referer = referer
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Search fallback for servers error: ${e.message}")
+                }
+            }
+
+            // Ensure at least fallback servers exist so UI is always interactive
+            if (subServers.isEmpty()) {
+                subServers.add(
+                    AnikotoServer(
+                        id = "HD-1",
+                        linkId = "HD-1",
+                        name = "Server 1",
+                        type = "sub",
+                        streamUrl = "",
+                        rawUrl = "",
+                        referer = "$API_BASE_URL/"
+                    )
+                )
+                subServers.add(
+                    AnikotoServer(
+                        id = "HD-2",
+                        linkId = "HD-2",
+                        name = "Server 2",
+                        type = "sub",
+                        streamUrl = "",
+                        rawUrl = "",
+                        referer = "$API_BASE_URL/"
+                    )
+                )
             }
 
             // Distinct and name servers nicely without bracketed names (e.g. Server 1, Server 2)
@@ -764,19 +881,21 @@ object AnikotoScraper {
                 srv.copy(name = "Server ${idx + 1}")
             }
 
-            val apiWatchUrl = subJson?.optJSONObject("anime")?.optString("watchUrl", "") ?: ""
-            val resolvedWatchUrl = apiWatchUrl.ifBlank { title }
-
-            Log.d(TAG, "API returned ${cleanSub.size} SUB servers and ${cleanDub.size} DUB servers for $cleanTitle")
+            val finalWatchUrl = resolvedWatchUrl.ifBlank { title }
+            Log.d(TAG, "API resolved ${cleanSub.size} SUB servers and ${cleanDub.size} DUB servers for $cleanTitle")
             AnikotoServerGroup(
                 subServers = cleanSub,
                 dubServers = cleanDub,
-                watchUrl = resolvedWatchUrl,
+                watchUrl = finalWatchUrl,
                 episodeNum = episode
             )
         } catch (e: Exception) {
             Log.e(TAG, "fetchAvailableServers error: ${e.message}", e)
-            AnikotoServerGroup(emptyList(), emptyList(), "", episode)
+            val fallbackSub = listOf(
+                AnikotoServer(id = "HD-1", linkId = "HD-1", name = "Server 1", type = "sub", referer = "$API_BASE_URL/"),
+                AnikotoServer(id = "HD-2", linkId = "HD-2", name = "Server 2", type = "sub", referer = "$API_BASE_URL/")
+            )
+            AnikotoServerGroup(fallbackSub, emptyList(), title, episode)
         }
     }
 
@@ -877,38 +996,65 @@ object AnikotoScraper {
             val audioType = if (preferDub) "dub" else "sub"
             val cleanTitle = sanitizeSearchTitle(title)
             val rawClean = title.removePrefix("anikoto_").removePrefix("movie_").removePrefix("series_").trim()
-            Log.d(TAG, "Initiating Anime API stream fetch for: $cleanTitle (S$season Ep $effectiveEp, audio: $audioType)")
+            Log.d(TAG, "Initiating High-Power Anime API stream fetch for: $cleanTitle (S$season Ep $effectiveEp, audio: $audioType)")
 
-            // Step 1: Query API with clean title
-            val apiUrl = buildStreamGetUrl(title = cleanTitle, episode = effectiveEp, type = audioType)
-            var json = fetchJson(apiUrl)
+            // Candidate 1: Direct Slug or Watch URL
+            val isSlug = rawClean.contains("-") && (rawClean.any { it.isDigit() } || rawClean.length > 5)
+            val directWatchUrl = if (rawClean.startsWith("http") || rawClean.contains("/watch/")) {
+                rawClean
+            } else if (isSlug) {
+                "https://anikoto.cz/watch/$rawClean?ep=$effectiveEp"
+            } else null
 
-            // Step 2: If season > 1, try query with season appended if cleanTitle stripped it
+            var json: JSONObject? = null
+
+            // 1. Try with direct watch url if available
+            if (directWatchUrl != null) {
+                val slugApiUrl = buildStreamGetUrl(title = directWatchUrl, episode = effectiveEp, type = audioType)
+                json = fetchJson(slugApiUrl)
+            }
+
+            // 2. Query API with clean title
+            if (json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) {
+                val apiUrl = buildStreamGetUrl(title = cleanTitle, episode = effectiveEp, type = audioType)
+                json = fetchJson(apiUrl)
+            }
+
+            // 3. If season > 1, try query with season appended
             if ((json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) && season > 1) {
                 val seasonTitle = "$cleanTitle Season $season"
                 val seasonUrl = buildStreamGetUrl(title = seasonTitle, episode = effectiveEp, type = audioType)
-                json = fetchJson(seasonUrl)
+                val sJson = fetchJson(seasonUrl)
+                if (sJson != null && sJson.optBoolean("success") == true) {
+                    json = sJson
+                }
             }
 
-            // Step 3: Try raw uncleaned title if different
+            // 4. Try raw uncleaned title if different
             if (json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) {
                 if (rawClean != cleanTitle && rawClean.isNotBlank()) {
                     val rawUrl = buildStreamGetUrl(title = rawClean, episode = effectiveEp, type = audioType)
-                    json = fetchJson(rawUrl)
+                    val rJson = fetchJson(rawUrl)
+                    if (rJson != null && rJson.optBoolean("success") == true) {
+                        json = rJson
+                    }
                 }
             }
 
-            // Step 4: Fallback with first two words (base franchise name)
+            // 5. Try base title before colon ':' or dash '-'
             if (json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) {
-                val fallbackWords = cleanTitle.split(" ").filter { it.isNotBlank() }
-                if (fallbackWords.size > 2) {
-                    val fallbackTitle = fallbackWords.take(2).joinToString(" ")
-                    val fallbackUrl = buildStreamGetUrl(title = fallbackTitle, episode = effectiveEp, type = audioType)
-                    json = fetchJson(fallbackUrl)
+                val baseFranchise = cleanTitle.substringBefore(":").substringBefore("-").trim()
+                if (baseFranchise.isNotBlank() && baseFranchise != cleanTitle) {
+                    val baseTitleQuery = if (season > 1) "$baseFranchise Season $season" else baseFranchise
+                    val baseApiUrl = buildStreamGetUrl(title = baseTitleQuery, episode = effectiveEp, type = audioType)
+                    val bJson = fetchJson(baseApiUrl)
+                    if (bJson != null && bJson.optBoolean("success") == true) {
+                        json = bJson
+                    }
                 }
             }
 
-            // Step 5: Perform Anime Search to find exact watchUrl / slug on the provider
+            // 6. Perform Anime Search to find exact watchUrl / slug on the provider
             if (json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) {
                 try {
                     val searchResults = searchOrFilterAnime(keyword = cleanTitle)
@@ -916,10 +1062,9 @@ object AnikotoScraper {
                     if (matchedItem != null && matchedItem.watchUrl.isNotBlank()) {
                         Log.d(TAG, "Search fallback matched anime watchUrl: ${matchedItem.watchUrl}")
                         val searchUrl = buildStreamGetUrl(title = matchedItem.watchUrl, episode = effectiveEp, type = audioType)
-                        json = fetchJson(searchUrl)
-                        if ((json == null || json.optBoolean("success") != true) && effectiveEp == 1) {
-                            val searchUrlEp1 = buildStreamGetUrl(title = matchedItem.watchUrl, episode = 1, type = audioType)
-                            json = fetchJson(searchUrlEp1)
+                        val sJson = fetchJson(searchUrl)
+                        if (sJson != null && sJson.optBoolean("success") == true) {
+                            json = sJson
                         }
                     }
                 } catch (e: Exception) {
@@ -927,14 +1072,7 @@ object AnikotoScraper {
                 }
             }
 
-            // Step 6: For Episode 1, if preferred audio type returned null, try alternate audio type (sub/dub)
-            if ((json == null || json.optBoolean("success") != true || json.optJSONObject("selectedStream") == null) && effectiveEp == 1) {
-                val altType = if (audioType == "sub") "dub" else "sub"
-                val altUrl = buildStreamGetUrl(title = cleanTitle, episode = 1, type = altType)
-                json = fetchJson(altUrl)
-            }
-
-            // Step 7: Parse valid json response
+            // 7. Parse valid selectedStream from JSON response
             if (json != null && json.optBoolean("success") == true) {
                 val selectedStream = json.optJSONObject("selectedStream")
                 if (selectedStream != null) {
@@ -956,15 +1094,35 @@ object AnikotoScraper {
                         )
                     }
                 }
+
+                // Check availableServers inside JSON response
+                val availableServers = json.optJSONArray("availableServers")
+                if (availableServers != null && availableServers.length() > 0) {
+                    for (i in 0 until availableServers.length()) {
+                        val sObj = availableServers.optJSONObject(i) ?: continue
+                        val rawStream = sObj.optString("streamUrl", "").ifBlank { sObj.optString("rawUrl", "") }
+                        if (rawStream.isNotBlank()) {
+                            val resolvedUrl = makeAbsoluteUrl(rawStream)
+                            val referer = sObj.optString("referer", "$API_BASE_URL/")
+                            Log.d(TAG, "Anime Stream resolved via availableServers array: $resolvedUrl")
+                            return@withContext ScrapedStreamResult(
+                                streamUrl = resolvedUrl,
+                                headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer),
+                                referer = referer,
+                                subtitles = emptyList()
+                            )
+                        }
+                    }
+                }
             }
 
-            // Step 8: Extract from available servers directly if API endpoint returned no direct selectedStream
+            // 8. Extract from available servers directly via fetchAvailableServers
             try {
                 val serverGroup = fetchAvailableServers(title = cleanTitle, season = season, episode = effectiveEp)
-                val firstServer = serverGroup.subServers.firstOrNull() ?: serverGroup.dubServers.firstOrNull()
-                if (firstServer != null) {
+                val allServers = (serverGroup.subServers + serverGroup.dubServers).distinctBy { it.id.ifBlank { it.streamUrl } }
+                for (srv in allServers) {
                     val serverStream = extractStreamFromServer(
-                        server = firstServer,
+                        server = srv,
                         watchUrl = cleanTitle,
                         episode = effectiveEp
                     )
@@ -986,6 +1144,13 @@ object AnikotoScraper {
         null
     }
 
+    private fun isAnikotoSlug(text: String): Boolean {
+        val clean = text.trim().lowercase()
+        if (clean.contains(" ") || clean.contains(":") || clean.contains("?") || clean.contains("/")) return false
+        // e.g. "solo-leveling-season-2-19413" or "one-piece-100"
+        return Regex("""^[a-z0-9]+(?:-[a-z0-9]+)*-\d+$""").matches(clean)
+    }
+
     private fun buildStreamGetUrl(title: String, episode: Int, type: String, server: String? = null): String {
         val clean = title
             .removePrefix("anikoto_")
@@ -1003,6 +1168,10 @@ object AnikotoScraper {
                 base
             }
             queryParams.add("url=${URLEncoder.encode(adjustedUrl, "UTF-8")}")
+        } else if (isAnikotoSlug(clean)) {
+            val watchUrl = "https://anikoto.cz/watch/$clean?ep=$epParam"
+            queryParams.add("url=${URLEncoder.encode(watchUrl, "UTF-8")}")
+            queryParams.add("animeId=${URLEncoder.encode(clean, "UTF-8")}")
         } else {
             queryParams.add("keyword=${URLEncoder.encode(clean, "UTF-8")}")
         }

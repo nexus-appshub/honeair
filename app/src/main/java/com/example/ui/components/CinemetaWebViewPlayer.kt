@@ -65,6 +65,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1371,32 +1372,181 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         // Never auto switch away from Server 0 while scraping is active or during playback.
                     }
 
-                    // Direct Native ExoPlayer Loading State (Fast responsive loader with manual switch option)
+                    // Direct Native ExoPlayer Loading State & Stream Recovery UI
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(SpaceBlack),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(24.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                color = NeonCyan,
-                                modifier = Modifier.size(42.dp),
-                                strokeWidth = 3.dp
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Text(
-                                text = "hey almost done...",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    letterSpacing = 0.5.sp
-                                ),
-                                color = TextPrimary
-                            )
+                        if (isScrapingDirectStream) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier.padding(24.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    color = NeonCyan,
+                                    modifier = Modifier.size(42.dp),
+                                    strokeWidth = 3.dp
+                                )
+                                Spacer(modifier = Modifier.height(14.dp))
+                                Text(
+                                    text = "Connecting to fast stream...",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 0.5.sp
+                                    ),
+                                    color = TextPrimary
+                                )
+                            }
+                        } else {
+                            // Recovery / Server Selector UI if initial scrape is empty or user wants to pick server
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .padding(horizontal = 24.dp, vertical = 16.dp)
+                                    .fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayCircle,
+                                    contentDescription = "Stream",
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = if (isAnime) "Select Streaming Server" else "Stream Server Ready",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = if (isAnime) "Tap any server below to play in HD" else "Select a server or switch to web player",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                if (isAnime && (subServers.isNotEmpty() || dubServers.isNotEmpty())) {
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentPadding = PaddingValues(horizontal = 8.dp)
+                                    ) {
+                                        val allSrvs = (subServers + dubServers).distinctBy { it.id.ifBlank { it.streamUrl } }
+                                        items(allSrvs) { srv ->
+                                            val isSel = selectedServer?.id == srv.id && selectedServer?.type == srv.type
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = if (isSel) NeonCyan.copy(alpha = 0.25f) else DeepSlate,
+                                                border = BorderStroke(
+                                                    1.dp,
+                                                    if (isSel) NeonCyan else BorderColor
+                                                ),
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        viewModel.selectAnikotoServer(srv)
+                                                    }
+                                                    .testTag("in_player_server_${srv.name}")
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = srv.name,
+                                                        style = MaterialTheme.typography.bodySmall.copy(
+                                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                                        ),
+                                                        color = if (isSel) NeonCyan else TextPrimary
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "(${srv.type.uppercase()})",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = if (isSel) NeonCyan.copy(alpha = 0.8f) else TextSecondary
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            isScrapingDirectStream = true
+                                            scope.launch(Dispatchers.IO) {
+                                                try {
+                                                    val res = com.example.scraper.UnifiedStreamManager.getStream(
+                                                        context = context,
+                                                        title = title,
+                                                        tmdbId = imdbId,
+                                                        isTv = isSeries,
+                                                        season = currentSeason,
+                                                        episode = currentEpisode,
+                                                        isAnime = isAnime
+                                                    )
+                                                    if (res != null && res.streamUrl.isNotBlank()) {
+                                                        withContext(Dispatchers.Main) {
+                                                            capturedVideoUrl = res.streamUrl
+                                                            customScrapedHeaders = res.headers
+                                                            mainScrapedVideoUrl = res.streamUrl
+                                                            mainScrapedHeaders = res.headers
+                                                            activeSubtitles = res.subtitles
+                                                            useExoPlayer = true
+                                                        }
+                                                    }
+                                                } catch (_: Exception) {}
+                                                finally {
+                                                    withContext(Dispatchers.Main) {
+                                                        isScrapingDirectStream = false
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = DeepSlate,
+                                            contentColor = TextPrimary
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.testTag("player_retry_scrape_btn")
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = "Retry", modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Retry", style = MaterialTheme.typography.bodySmall)
+                                    }
+
+                                    if (!isAnime) {
+                                        Button(
+                                            onClick = {
+                                                currentServerIndex = 1
+                                                useExoPlayer = false
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = NeonCyan,
+                                                contentColor = SpaceBlack
+                                            ),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.testTag("player_switch_web_btn")
+                                        ) {
+                                            Text(
+                                                "Server 1 (Web)",
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1810,8 +1960,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 if (isVipUser) {
                     false
                 } else if (currentMediaItem?.isPremium == true) {
-                    val itemId = currentMediaItem?.imdbId ?: currentMediaItem?.id ?: ""
-                    !com.example.subscription.TemporaryUnlockManager.isItemTemporarilyUnlocked(itemId)
+                    true
                 } else {
                     false
                 }
@@ -1862,55 +2011,20 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             modifier = Modifier.padding(horizontal = 16.dp)
                         )
                         Spacer(modifier = Modifier.height(14.dp))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Button(
+                            onClick = { showSubscriptionPlanModal = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(42.dp)
                         ) {
-                            Button(
-                                onClick = {
-                                    val act = context as? android.app.Activity
-                                    if (act != null) {
-                                        com.example.ad.StartIoAdManager.showRewardedVideo(
-                                            activity = act,
-                                            onRewardEarned = {
-                                                com.example.subscription.SubscriptionManager.unlockTemporaryVip(30)
-                                                android.widget.Toast.makeText(context, "🎉 30 Minutes VIP Pass Unlocked!", android.widget.Toast.LENGTH_LONG).show()
-                                            },
-                                            onAdFailed = {
-                                                android.widget.Toast.makeText(context, "Video ad not ready. Please try again in a moment.", android.widget.Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF007A), contentColor = Color.White),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.height(42.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Watch Ad (30 Mins VIP)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-
-                            Button(
-                                onClick = { showSubscriptionPlanModal = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.height(42.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.WorkspacePremium,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Upgrade VIP", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
+                            Icon(
+                                imageVector = Icons.Default.WorkspacePremium,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Upgrade to VIP ($3.99 / ৳399)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
@@ -3564,8 +3678,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     items(visibleEpisodes) { ep ->
-                                        val epItemId = currentMediaItem?.imdbId ?: currentMediaItem?.id ?: imdbId
-                                        val isEpLocked = !isVipUser && (currentMediaItem?.isPremium == true) && !com.example.subscription.TemporaryUnlockManager.isItemTemporarilyUnlocked(epItemId)
+                                        val isEpLocked = !isVipUser && (currentMediaItem?.isPremium == true)
                                         val epTitle = if (isAnime && anikotoEpisodes.isNotEmpty()) {
                                             anikotoEpisodes.find { it.number == ep }?.title
                                         } else null
@@ -3582,14 +3695,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                 if (currentEpisode != ep) {
                                                     currentEpisode = ep
                                                     if (isEpLocked) {
-                                                        viewModel.triggerPremiumContentLock(
-                                                            itemId = epItemId,
-                                                            title = currentMediaItem?.title ?: "Episode $ep",
-                                                            isChannel = false,
-                                                            mediaItem = currentMediaItem,
-                                                            season = currentSeason,
-                                                            episode = ep
-                                                        )
+                                                        showSubscriptionPlanModal = true
                                                     } else {
                                                         isLoading = true
                                                         hasError = false
