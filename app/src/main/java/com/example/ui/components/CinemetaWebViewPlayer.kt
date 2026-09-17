@@ -1451,46 +1451,32 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "Direct Native Player (Server 0)",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
+                                var tickerText by remember { mutableStateOf("Finding the absolute best stream for you...") }
+                                LaunchedEffect(Unit) {
+                                    val messages = listOf(
+                                        "Finding the absolute best stream for you...",
+                                        "Hey, almost done...",
+                                        "Getting closer...",
+                                        "Hang tight, optimizing video buffers...",
+                                        "Almost ready to play...",
+                                        "Securing high-speed direct pipeline...",
+                                        "Polishing pixels and preparing playback..."
                                     )
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = directScrapeStatusText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Scraping 12+ cloud streams in parallel for up to 60s...",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = NeonCyan.copy(alpha = 0.85f)
-                                )
-                                Spacer(modifier = Modifier.height(14.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    listOf("VidLink", "VidSrc", "AutoEmbed", "VidRock", "VidNest", "MovieBox").forEach { badge ->
-                                        Surface(
-                                            color = DeepSlate,
-                                            shape = RoundedCornerShape(6.dp),
-                                            border = BorderStroke(1.dp, BorderColor)
-                                        ) {
-                                            Text(
-                                                text = badge,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                                color = TextSecondary,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                            )
-                                        }
+                                    var idx = 0
+                                    while (true) {
+                                        kotlinx.coroutines.delay(3000)
+                                        idx = (idx + 1) % messages.size
+                                        tickerText = messages[idx]
                                     }
                                 }
+                                Text(
+                                    text = tickerText,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Medium,
+                                        color = TextPrimary
+                                    ),
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         } else {
                             // Only displayed after the FULL 60 seconds have elapsed without finding a stream
