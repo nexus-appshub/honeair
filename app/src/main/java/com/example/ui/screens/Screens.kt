@@ -6561,7 +6561,9 @@ fun SettingsScreen(
 
     val isPremium by SubscriptionManager.isPremium.collectAsState()
     val isRedeemActive by viewModel.isRedeemActive.collectAsState()
-    val effectiveIsPremium = isPremium || isRedeemActive
+    val isExpired by SubscriptionManager.isExpired.collectAsState()
+    val isLifetime = SubscriptionManager.isLifetimeUser(profile?.email)
+    val effectiveIsPremium = viewModel.isUserPremium(profile?.email)
     val redeemPlanName = if (isRedeemActive) viewModel.getRedeemPlanName() else ""
 
     var showSignInSheetInSettings by remember { mutableStateOf(false) }
@@ -7317,7 +7319,13 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("All Live Channels, 4K Movies & VidSrc Player Active", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(if (isRedeemActive) "Promo Pass Activated" else "Renewal: Lifetime Pass Active", color = Color.LightGray, fontSize = 12.sp)
+                            val planExpiryText = when {
+                                isRedeemActive -> "Promo Pass Activated"
+                                isLifetime -> "Renewal: Lifetime Pass Active"
+                                SubscriptionManager.expiryDate.value != null -> "Renewal: Valid until ${SubscriptionManager.expiryDate.value}"
+                                else -> "VIP Plan Active"
+                            }
+                            Text(planExpiryText, color = Color.LightGray, fontSize = 12.sp)
                         }
                     }
                 } else {

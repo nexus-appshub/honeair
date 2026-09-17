@@ -66,6 +66,7 @@ object SubscriptionManager {
     val vipConfig: StateFlow<VipConfigResponse?> = _vipConfig.asStateFlow()
 
     private val remotePremiumEmails = mutableSetOf<String>()
+    private val remotePremiumUsersMap = java.util.concurrent.ConcurrentHashMap<String, PremiumUserInfo>()
     private var freeEpisodeLimit: Int = 1
 
     init {
@@ -280,19 +281,47 @@ object SubscriptionManager {
             val premiumEmailsList = mutableListOf<String>()
             val puArr = json.optJSONArray("premiumUsers")
             if (puArr != null) {
+                remotePremiumUsersMap.clear()
                 for (i in 0 until puArr.length()) {
-                    val emailStr = when (val item = puArr.get(i)) {
+                    when (val item = puArr.get(i)) {
                         is JSONObject -> {
-                            val status = item.optString("status", "active")
-                            if (status.equals("active", ignoreCase = true) || item.optBoolean("isLifetime", false)) {
-                                item.optString("email", "")
-                            } else ""
+                            val email = item.optString("email", "").trim().lowercase()
+                            if (email.isNotBlank()) {
+                                val status = item.optString("status", "active")
+                                val isLifetime = item.optBoolean("isLifetime", false)
+                                val plan = item.optString("planName", item.optString("plan", "VIP Plan"))
+                                val expDate = item.optString("expiresAt", item.optString("expiryDate", item.optString("validUntil", ""))).ifBlank { null }
+                                val expTs = if (item.has("expiresAtTimestamp")) item.optLong("expiresAtTimestamp") else null
+
+                                val expired = if (isLifetime) {
+                                    false
+                                } else if (status.equals("expired", ignoreCase = true)) {
+                                    true
+                                } else {
+                                    isDateExpired(expDate, expTs)
+                                }
+
+                                val userInfo = PremiumUserInfo(
+                                    email = email,
+                                    isLifetime = isLifetime,
+                                    planName = plan,
+                                    expiryDate = expDate,
+                                    expiryTimestamp = expTs,
+                                    isExpired = expired
+                                )
+                                remotePremiumUsersMap[email] = userInfo
+                                if (!expired) {
+                                    premiumEmailsList.add(email)
+                                }
+                            }
                         }
-                        is String -> item
-                        else -> ""
-                    }
-                    if (emailStr.isNotBlank()) {
-                        premiumEmailsList.add(emailStr.trim().lowercase())
+                        is String -> {
+                            val email = item.trim().lowercase()
+                            if (email.isNotBlank()) {
+                                remotePremiumUsersMap[email] = PremiumUserInfo(email = email, isLifetime = false, planName = "VIP Plan")
+                                premiumEmailsList.add(email)
+                            }
+                        }
                     }
                 }
             }
@@ -400,13 +429,79 @@ object SubscriptionManager {
 
     private fun recomputeStatus(email: String?, uid: String?) {
         val cleanEmail = email?.trim()?.lowercase()
-        val isPrem = cleanEmail != null && synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
-        _isPremium.value = isPrem
-        _isExpired.value = false
-        _expiryTimestamp.value = null
-        _subscriptionStatus.value = if (isPrem) "VIP Premium Active" else "Free Member"
-        _subscriptionPlan.value = if (isPrem) "VIP Plan" else "Free Tier"
-        _expiryDate.value = if (isPrem) "Lifetime Access" else null
+        if (cleanEmail.isNullOrBlank()) {
+            _isPremium.value = false
+            _isExpired.value = false
+            _expiryTimestamp.value = null
+            _subscriptionStatus.value = "Free Member"
+            _subscriptionPlan.value = "Free Tier"
+            _expiryDate.value = null
+            return
+        }
+
+        val userInfo = remotePremiumUsersMap[cleanEmail]
+        val inRemoteList = synchronized(remotePremiumEmails) { remotePremiumEmails.contains(cleanEmail) }
+
+        if (userInfo != null) {
+            if (userInfo.isLifetime) {
+                _isPremium.value = true
+                _isExpired.value = false
+                _expiryTimestamp.value = null
+                _subscriptionStatus.value = "VIP Premium Active"
+                _subscriptionPlan.value = "Lifetime VIP"
+                _expiryDate.value = "Lifetime Access"
+            } else if (userInfo.isExpired || isDateExpired(userInfo.expiryDate, userInfo.expiryTimestamp)) {
+                // Expired! Revert to Free Tier!
+                _isPremium.value = false
+                _isExpired.value = true
+                _expiryTimestamp.value = userInfo.expiryTimestamp
+                _subscriptionStatus.value = "Subscription Expired"
+                _subscriptionPlan.value = "Free Tier"
+                _expiryDate.value = userInfo.expiryDate ?: "Expired"
+            } else if (inRemoteList) {
+                // Active VIP plan with valid expiry date
+                _isPremium.value = true
+                _isExpired.value = false
+                _expiryTimestamp.value = userInfo.expiryTimestamp
+                _subscriptionStatus.value = "VIP Premium Active"
+                _subscriptionPlan.value = userInfo.planName
+                _expiryDate.value = userInfo.expiryDate ?: "Active Subscription"
+            } else {
+                _isPremium.value = false
+                _isExpired.value = false
+                _expiryTimestamp.value = null
+                _subscriptionStatus.value = "Free Member"
+                _subscriptionPlan.value = "Free Tier"
+                _expiryDate.value = null
+            }
+        } else if (inRemoteList) {
+            // Found in remote email list without explicit metadata - DO NOT assume lifetime!
+            _isPremium.value = true
+            _isExpired.value = false
+            _expiryTimestamp.value = null
+            _subscriptionStatus.value = "VIP Premium Active"
+            _subscriptionPlan.value = "VIP Plan"
+            _expiryDate.value = "Active Subscription"
+        } else {
+            // Free Tier
+            _isPremium.value = false
+            _isExpired.value = false
+            _expiryTimestamp.value = null
+            _subscriptionStatus.value = "Free Member"
+            _subscriptionPlan.value = "Free Tier"
+            _expiryDate.value = null
+        }
+    }
+
+    fun isLifetimeUser(email: String?): Boolean {
+        val clean = email?.trim()?.lowercase() ?: return false
+        return remotePremiumUsersMap[clean]?.isLifetime == true
+    }
+
+    fun hasValidPaidSubscription(email: String?): Boolean {
+        val clean = email?.trim()?.lowercase() ?: return false
+        val user = remotePremiumUsersMap[clean] ?: return false
+        return user.isLifetime || (!user.isExpired && !isDateExpired(user.expiryDate, user.expiryTimestamp))
     }
 
     /**
@@ -478,7 +573,16 @@ object SubscriptionManager {
      * Returns true if user has active VIP access
      */
     fun isVipUser(): Boolean {
-        return _isPremium.value
+        return _isPremium.value && !_isExpired.value
     }
 }
+
+data class PremiumUserInfo(
+    val email: String,
+    val isLifetime: Boolean = false,
+    val planName: String = "VIP Plan",
+    val expiryDate: String? = null,
+    val expiryTimestamp: Long? = null,
+    val isExpired: Boolean = false
+)
 

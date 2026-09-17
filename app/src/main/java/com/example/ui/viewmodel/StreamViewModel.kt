@@ -624,13 +624,34 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun isUserPremium(userEmail: String?): Boolean {
-        if (com.example.subscription.SubscriptionManager.isVipUser()) return true
-        if (isRedeemCodeActive(userEmail)) return true
-        val config = _appControlConfig.value
         val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
-        if (cleanEmail.isBlank()) return false
-        if (cleanEmail.contains("admin")) return true
-        return config?.premiumEmails?.any { it.trim().equals(cleanEmail, ignoreCase = true) } == true
+        if (cleanEmail.isNotBlank() && cleanEmail.contains("admin")) return true
+
+        // 1. Check if user currently has an active redeem code
+        if (isRedeemCodeActive(cleanEmail)) return true
+
+        // 2. Check if a redeem code was previously used and has now expired
+        val savedUser = sharedPrefs.getString("redeem_unlocked_user", "")?.trim()?.lowercase() ?: ""
+        val unlockedUntil = sharedPrefs.getLong("redeem_unlocked_until", 0L)
+        val hasRedeemRecord = (savedUser.isNotBlank() && (cleanEmail.isBlank() || savedUser == cleanEmail) && unlockedUntil > 0L)
+        val isRedeemExpired = hasRedeemRecord && (System.currentTimeMillis() >= unlockedUntil)
+
+        if (isRedeemExpired && !com.example.subscription.SubscriptionManager.isLifetimeUser(cleanEmail)) {
+            if (!com.example.subscription.SubscriptionManager.hasValidPaidSubscription(cleanEmail)) {
+                return false
+            }
+        }
+
+        // 3. Check SubscriptionManager VIP state
+        if (com.example.subscription.SubscriptionManager.isVipUser()) return true
+
+        // 4. Remote appControl config
+        if (cleanEmail.isNotBlank()) {
+            val config = _appControlConfig.value
+            return config?.premiumEmails?.any { it.trim().equals(cleanEmail, ignoreCase = true) } == true
+        }
+
+        return false
     }
 
     fun checkContentAccess(
@@ -2084,45 +2105,110 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
-                // Search across all items starting from 1 character to any length
-                val cleanQ = q.replace(cleanRegex, "")
-                val queryWords = q.split(Regex("[\\s_\\-\\.:\\(\\)\\[\\]]+")).filter { it.isNotBlank() }
-                val nonStopQueryWords = queryWords.filter { it.length > 2 && it != "the" && it != "and" && it != "all" }
+                // Smart, diacritic-tolerant, typo-tolerant search across all media
+                val normQ = java.text.Normalizer.normalize(q, java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{M}"), "")
+                    .lowercase(java.util.Locale.ROOT)
+                    .replace(Regex("[^a-z0-9]+"), " ")
+                    .trim()
 
-                list = list.filter { item ->
-                    val title = item.title.lowercase()
-                    val titleClean = title.replace(cleanRegex, "")
+                val collapsedQ = normQ.replace(Regex("(?i)(.)\\1+"), "$1")
+                val queryWords = normQ.split(" ").filter { it.length >= 2 }
+                val significantWords = queryWords.filter { it.length > 2 && it != "the" && it != "and" }
+                val queryTokensToMatch = if (significantWords.isNotEmpty()) significantWords else queryWords
 
-                    // Exact full query match (highest priority, always include)
-                    val fullMatch = title.contains(q) || (cleanQ.isNotBlank() && titleClean.contains(cleanQ))
+                list = list.mapNotNull { item ->
+                    val normTitle = java.text.Normalizer.normalize(item.title, java.text.Normalizer.Form.NFD)
+                        .replace(Regex("\\p{M}"), "")
+                        .lowercase(java.util.Locale.ROOT)
+                        .replace(Regex("[^a-z0-9]+"), " ")
+                        .trim()
+                    val collapsedTitle = normTitle.replace(Regex("(?i)(.)\\1+"), "$1")
+                    val titleWords = normTitle.split(" ").filter { it.isNotBlank() }
+                    val collapsedTitleWords = collapsedTitle.split(" ").filter { it.isNotBlank() }
 
-                    // Word-based match: if we have non-stop query words, ALL of them must be present in the title
-                    val wordMatch = if (nonStopQueryWords.isNotEmpty()) {
-                        nonStopQueryWords.all { word -> 
-                            title.contains(word) || titleClean.contains(word.replace(cleanRegex, ""))
+                    var score = 0
+
+                    // Full phrase match
+                    if (normTitle == normQ) {
+                        score += 2500
+                    } else if (normTitle.startsWith(normQ)) {
+                        score += 1800
+                    } else if (normTitle.contains(normQ)) {
+                        score += 1400
+                    } else if (collapsedTitle.contains(collapsedQ)) {
+                        // Catches e.g. "naruto shipudden" matching "naruto shippuden"
+                        score += 1200
+                    }
+
+                    // Token-level scoring
+                    var matchedTokensCount = 0
+                    for (qw in queryTokensToMatch) {
+                        val qwCollapsed = qw.replace(Regex("(?i)(.)\\1+"), "$1")
+                        var tokenScore = 0
+
+                        for (tw in titleWords) {
+                            if (tw == qw) {
+                                tokenScore = maxOf(tokenScore, 300)
+                            } else if (tw.startsWith(qw)) {
+                                tokenScore = maxOf(tokenScore, 240)
+                            } else if (tw.contains(qw) || qw.contains(tw)) {
+                                tokenScore = maxOf(tokenScore, 180)
+                            }
                         }
+
+                        // Check collapsed tokens (e.g. shipudden -> shipuden matches shippuden -> shipuden)
+                        if (tokenScore < 250) {
+                            for (ctw in collapsedTitleWords) {
+                                if (ctw == qwCollapsed || ctw.startsWith(qwCollapsed)) {
+                                    tokenScore = maxOf(tokenScore, 250)
+                                } else if (ctw.contains(qwCollapsed) || qwCollapsed.contains(ctw)) {
+                                    tokenScore = maxOf(tokenScore, 190)
+                                }
+                            }
+                        }
+
+                        // Levenshtein edit distance for typo tolerance (e.g. 1 letter off)
+                        if (tokenScore < 200 && qw.length >= 4) {
+                            for (tw in titleWords) {
+                                val dist = kotlin.math.abs(tw.length - qw.length)
+                                if (dist <= 2) {
+                                    val editDist = calculateEditDistance(qw, tw)
+                                    if (editDist <= 1) {
+                                        tokenScore = maxOf(tokenScore, 200)
+                                    } else if (editDist <= 2 && qw.length >= 6) {
+                                        tokenScore = maxOf(tokenScore, 150)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (tokenScore > 0) {
+                            matchedTokensCount++
+                            score += tokenScore
+                        }
+                    }
+
+                    // Secondary description search bonus
+                    if (item.description.contains(normQ, ignoreCase = true) || item.description.contains(collapsedQ, ignoreCase = true)) {
+                        score += 150
+                    }
+
+                    // Filter condition:
+                    // If multiple significant query words exist, require at least 1 strong token match or full match
+                    val isMatch = if (queryTokensToMatch.size > 1) {
+                        score >= 1200 || (matchedTokensCount >= 1 && score >= 240)
+                    } else if (queryTokensToMatch.isNotEmpty()) {
+                        score >= 150
                     } else {
-                        // Fallback: if all words are very short, require all of them
-                        queryWords.all { word -> 
-                            title.contains(word)
-                        }
+                        score > 0
                     }
 
-                    fullMatch || wordMatch
-                }.sortedByDescending { item ->
-                    val title = item.title.lowercase()
-                    val titleClean = title.replace(cleanRegex, "")
-                    when {
-                        title == q -> 1000
-                        title.startsWith(q) -> 800
-                        titleClean.startsWith(cleanQ) -> 750
-                        title.contains(q) -> 600
-                        else -> {
-                            val matchCount = queryWords.count { title.contains(it) }
-                            100 + matchCount * 10
-                        }
-                    }
-                }
+                    if (isMatch) Pair(item, score) else null
+                }.sortedWith(
+                    compareByDescending<Pair<MediaItem, Int>> { it.second }
+                        .thenByDescending { it.first.rating.toDoubleOrNull() ?: 0.0 }
+                ).map { it.first }
             }
             if (category.lowercase().contains("anime") && q.isBlank()) {
                 list = sortAnimeList(list)
@@ -2167,6 +2253,23 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             score
         }
         return sortedNonMature + mature
+    }
+
+    private fun calculateEditDistance(s1: String, s2: String): Int {
+        if (s1 == s2) return 0
+        if (s1.isEmpty()) return s2.length
+        if (s2.isEmpty()) return s1.length
+        val dp = IntArray(s2.length + 1) { it }
+        for (i in 1..s1.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..s2.length) {
+                val temp = dp[j]
+                dp[j] = if (s1[i - 1] == s2[j - 1]) prev else 1 + minOf(prev, dp[j], dp[j - 1])
+                prev = temp
+            }
+        }
+        return dp[s2.length]
     }
 
     fun loadMediaItems(forceRefresh: Boolean = false) {

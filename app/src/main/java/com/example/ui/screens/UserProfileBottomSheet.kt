@@ -80,7 +80,7 @@ fun UserProfileBottomSheet(
     val isRedeemActive by viewModel.isRedeemActive.collectAsState()
     val redeemExpiry = if (isRedeemActive) viewModel.getRedeemUnlockExpiry() else 0L
     val redeemPlanName = if (isRedeemActive) viewModel.getRedeemPlanName() else ""
-    val effectiveIsPremium = isPremium || isRedeemActive
+    val effectiveIsPremium = (viewModel.isUserPremium(profile?.email) || isRedeemActive) && !isExpired
     var showPlanModal by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
@@ -151,7 +151,7 @@ fun UserProfileBottomSheet(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = when {
-                        isPremium -> Color(0xFF1B3828)
+                        effectiveIsPremium -> Color(0xFF1B3828)
                         isExpired -> Color(0xFF351C1C)
                         else -> Color(0xFF241C35)
                     }
@@ -159,7 +159,7 @@ fun UserProfileBottomSheet(
                 border = BorderStroke(
                     1.dp,
                     when {
-                        isPremium -> Color(0xFF4CAF50)
+                        effectiveIsPremium -> Color(0xFF4CAF50)
                         isExpired -> Color(0xFFFF4444).copy(alpha = 0.6f)
                         else -> Color(0xFFFFD700).copy(alpha = 0.5f)
                     }
@@ -181,7 +181,7 @@ fun UserProfileBottomSheet(
                                     .size(34.dp)
                                     .background(
                                         when {
-                                            isPremium -> Color(0xFF4CAF50)
+                                            effectiveIsPremium -> Color(0xFF4CAF50)
                                             isExpired -> Color(0xFFFF4444)
                                             else -> Color(0xFFFFD700)
                                         },
@@ -210,7 +210,7 @@ fun UserProfileBottomSheet(
                                 Text(
                                     text = when {
                                         isRedeemActive -> "VIP Active ($redeemPlanName)"
-                                        isPremium -> "VIP Premium Active"
+                                        effectiveIsPremium -> "VIP Premium Active"
                                         isExpired -> "Subscription Expired"
                                         else -> "Free Plan"
                                     },
