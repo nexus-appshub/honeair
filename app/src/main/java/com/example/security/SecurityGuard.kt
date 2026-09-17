@@ -51,16 +51,21 @@ object SecurityGuard {
     }
 
     /**
-     * Enables FLAG_SECURE on the Activity window to prevent screenshots, screen recording, and screen sharing.
+     * Allows screenshots and screen recording across the app by explicitly clearing FLAG_SECURE.
      */
     fun applyScreenProtection(activity: Activity) {
         try {
-            activity.window.setFlags(
-                WindowManager.LayoutParams.FLAG_SECURE,
-                WindowManager.LayoutParams.FLAG_SECURE
-            )
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting FLAG_SECURE", e)
+            Log.e(TAG, "Error clearing FLAG_SECURE", e)
+        }
+    }
+
+    fun allowScreenCapture(activity: Activity) {
+        try {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing FLAG_SECURE", e)
         }
     }
 

@@ -1332,8 +1332,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             _isFetchingServers.value = true
             try {
                 val targetTitleOrSlug = when {
-                    item.id.isNotBlank() && (item.id.startsWith("anikoto_") || (item.id.contains("-") && item.id.any { it.isDigit() })) -> item.id
-                    !item.imdbId.isNullOrBlank() && (item.imdbId!!.startsWith("anikoto_") || (item.imdbId!!.contains("-") && item.imdbId!!.any { it.isDigit() })) -> item.imdbId!!
+                    item.id.startsWith("anikoto_") -> item.id
+                    item.id.startsWith("al_") || item.id.startsWith("mal_") || item.id.startsWith("tmdb_") -> item.title.ifBlank { item.id }
+                    !item.imdbId.isNullOrBlank() && item.imdbId!!.startsWith("anikoto_") -> item.imdbId!!
                     item.title.isNotBlank() -> item.title
                     else -> item.id
                 }
@@ -1346,12 +1347,14 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 _availableDubServers.value = group.dubServers
                 currentServerWatchUrl = group.watchUrl
 
-                // Auto-select server while preserving user's current SUB / DUB and server preference across episodes!
+                // Auto-select server while prioritizing direct playable streams (HD-1, HD-2, Vidstream, etc.)
                 val current = _selectedServer.value
                 val isDub = current?.type?.lowercase() == "dub"
                 val targetServers = if (isDub) group.dubServers else group.subServers
-                val matched = targetServers.find { it.name.equals(current?.name, ignoreCase = true) }
-                    ?: targetServers.firstOrNull()
+                val matched = targetServers.find { it.name.equals(current?.name, ignoreCase = true) && !it.name.contains("Mirror") && !it.id.contains("p") }
+                    ?: targetServers.firstOrNull { !it.name.contains("Mirror") && !it.id.contains("p") }
+                    ?: group.subServers.firstOrNull { !it.name.contains("Mirror") && !it.id.contains("p") }
+                    ?: group.dubServers.firstOrNull { !it.name.contains("Mirror") && !it.id.contains("p") }
                     ?: group.subServers.firstOrNull()
                     ?: group.dubServers.firstOrNull()
 
@@ -2420,9 +2423,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 val watchUrl = if (item.streamUrl != null && item.streamUrl!!.isNotBlank() && item.streamUrl!!.contains("anikoto.cz")) {
                     item.streamUrl!!
                 } else {
-                    val searchResults = com.example.scraper.AnikotoScraper.searchOrFilterAnime(keyword = item.title)
-                    val matched = searchResults.firstOrNull()
-                    matched?.watchUrl ?: ""
+                    val resolved = com.example.scraper.AnikotoScraper.resolveAnikotoWatchUrl(item.title)
+                    resolved ?: ""
                 }
 
                 if (watchUrl.isNotBlank()) {

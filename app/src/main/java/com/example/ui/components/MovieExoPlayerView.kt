@@ -204,8 +204,9 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
 
     // Initialize and maintain ExoPlayer
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    var isRetryingWithoutSidecarSubtitles by remember(currentUrl) { mutableStateOf(false) }
 
-    LaunchedEffect(currentUrl, customHeaders, subtitles) {
+    LaunchedEffect(currentUrl, customHeaders, subtitles, isRetryingWithoutSidecarSubtitles) {
         errorMessage = null
         exoPlayer?.release()
 
@@ -244,7 +245,7 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                     mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MP4)
                 }
 
-                if (subtitles.isNotEmpty()) {
+                if (subtitles.isNotEmpty() && !isRetryingWithoutSidecarSubtitles) {
                     val subtitleConfigs = subtitles.map { sub ->
                         val mimeType = if (sub.url.lowercase().contains(".vtt") || sub.url.lowercase().contains("vtt")) {
                             androidx.media3.common.MimeTypes.TEXT_VTT
@@ -275,18 +276,31 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
             }
 
         player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlayingParam: Boolean) {
+                isPlaying = isPlayingParam
+            }
+
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                isPlaying = playWhenReady
+                isPlaying = player.isPlaying || playWhenReady
             }
 
             override fun onPlaybackStateChanged(state: Int) {
                 playbackState = state
                 if (state == Player.STATE_READY) {
                     errorMessage = null
+                    if (player.playWhenReady && !player.isPlaying) {
+                        player.play()
+                    }
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                android.util.Log.e("MovieExoPlayerView", "Playback exception occurred: ${error.message}", error)
+                if (subtitles.isNotEmpty() && !isRetryingWithoutSidecarSubtitles) {
+                    android.util.Log.w("MovieExoPlayerView", "Retrying video playback without sidecar subtitles to bypass 404 subtitle error...")
+                    isRetryingWithoutSidecarSubtitles = true
+                    return
+                }
                 onPlaybackError(error.message ?: "Playback error encountered.")
             }
         })

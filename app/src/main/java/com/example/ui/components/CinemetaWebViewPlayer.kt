@@ -1291,10 +1291,43 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     }
                                 }
                             } else {
-                                // For anime, DO NOT auto-fallback to English western movie embeds!
-                                // Just show error on current server so user can select another sub/dub server manually or retry.
-                                isLoading = false
-                                hasError = true
+                                // For anime auto-failover: Switch to backup playable anime server on error
+                                scope.launch(Dispatchers.IO) {
+                                    val currentServers = (viewModel?.availableSubServers?.value ?: emptyList()) + (viewModel?.availableDubServers?.value ?: emptyList())
+                                    val nextServer = currentServers.firstOrNull { 
+                                        it.streamUrl.isNotBlank() && 
+                                        it.streamUrl != playableDirectUrl && 
+                                        !it.name.contains("Mirror", ignoreCase = true) && 
+                                        !it.id.contains("p", ignoreCase = true) &&
+                                        !it.streamUrl.contains("pahe", ignoreCase = true)
+                                    }
+                                    if (nextServer != null) {
+                                        withContext(Dispatchers.Main) {
+                                            viewModel?.selectAnikotoServer(nextServer, currentEpisode)
+                                        }
+                                    } else {
+                                        val nextRes = com.example.scraper.AnikotoScraper.getStreamByTitle(
+                                            title = title,
+                                            episode = currentEpisode,
+                                            preferDub = false
+                                        )
+                                        withContext(Dispatchers.Main) {
+                                            if (nextRes != null && nextRes.streamUrl.isNotBlank() && nextRes.streamUrl != playableDirectUrl) {
+                                                capturedVideoUrl = nextRes.streamUrl
+                                                customScrapedHeaders = nextRes.headers
+                                                if (nextRes.subtitles.isNotEmpty()) {
+                                                    activeSubtitles = nextRes.subtitles
+                                                }
+                                                useExoPlayer = true
+                                                isLoading = false
+                                                hasError = false
+                                            } else {
+                                                isLoading = false
+                                                hasError = true
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         },
                         onBack = onClosePlayer,

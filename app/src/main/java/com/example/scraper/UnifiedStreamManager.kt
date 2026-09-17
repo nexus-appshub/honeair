@@ -65,7 +65,8 @@ object UnifiedStreamManager {
         Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime)")
 
         // 0. High-Speed Anime Native & API Resolver (Direct Native Extraction + HLS M3U8)
-        if (isAnime || tmdbId.startsWith("anikoto_") || (tmdbId.contains("-") && tmdbId.any { it.isDigit() })) {
+        val isItemAnime = isAnime || AnimePosterEngine.isAnime(title = title, id = tmdbId) || tmdbId.startsWith("anikoto_") || tmdbId.startsWith("al_") || tmdbId.startsWith("mal_") || (tmdbId.contains("-") && tmdbId.any { it.isDigit() })
+        if (isItemAnime) {
             try {
                 val slugKey = when {
                     tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")

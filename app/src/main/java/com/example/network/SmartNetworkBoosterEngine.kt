@@ -124,7 +124,6 @@ object SmartNetworkBoosterEngine {
                 urlLower.contains("bldcmprod-cdn") ||
                 urlLower.contains("prod-cdn01") ||
                 urlLower.contains("toffee_") ||
-                urlLower.contains("media.hmair.xyz") ||
                 customHeaders["User-Agent"]?.contains("Toffee", ignoreCase = true) == true ||
                 customHeaders["Referer"]?.contains("toffee", ignoreCase = true) == true
 
@@ -166,6 +165,15 @@ object SmartNetworkBoosterEngine {
         // Ensure critical anti-hotlinking headers (Referer, Origin, Sec-CH-UA) are present based on target URL
         if (url != null && !isToffeeStream) {
             when {
+                urlLower.contains("media.hmair.xyz") -> {
+                    if (!baseHeaders.containsKey("Referer") || baseHeaders["Referer"]?.contains("toffee") == true) {
+                        baseHeaders["Referer"] = "https://anikoto.cz/"
+                    }
+                    if (!baseHeaders.containsKey("Origin")) baseHeaders["Origin"] = "https://anikoto.cz"
+                    baseHeaders["sec-ch-ua"] = "\"Google Chrome\";v=\"120\", \"Chromium\";v=\"120\", \"Not?A_Brand\";v=\"24\""
+                    baseHeaders["sec-ch-ua-mobile"] = "?0"
+                    baseHeaders["sec-ch-ua-platform"] = "\"Windows\""
+                }
                 urlLower.contains("kryntal.top") || urlLower.contains("megaplay") || urlLower.contains("anikoto") -> {
                     if (!baseHeaders.containsKey("Referer")) baseHeaders["Referer"] = "https://megaplay.buzz/"
                     if (!baseHeaders.containsKey("Origin")) baseHeaders["Origin"] = "https://megaplay.buzz"

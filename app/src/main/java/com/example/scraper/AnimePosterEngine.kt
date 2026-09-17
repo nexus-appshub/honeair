@@ -305,7 +305,10 @@ object AnimePosterEngine {
         val tp = (type ?: "").lowercase()
         val idStr = (id ?: "").lowercase()
 
-        if (idStr.startsWith("anikoto_") || cat.contains("anime") || tp.equals("anime")) return true
+        if (idStr.startsWith("anikoto_") || idStr.startsWith("al_") || idStr.startsWith("mal_") || idStr.startsWith("ani_") || cat.contains("anime") || tp.equals("anime")) return true
+
+        // Check for Japanese Kanji, Hiragana, Katakana unicode ranges
+        if (title.any { it in '\u3040'..'\u309F' || it in '\u30A0'..'\u30FF' || it in '\u4E00'..'\u9FAF' }) return true
 
         // Common anime titles, franchises, and keywords
         val keywords = listOf(
@@ -326,7 +329,13 @@ object AnimePosterEngine {
             "mob psycho", "no game no life", "future diary", "mirai nikki", "another", "angel beats", "noragami",
             "neon genesis", "evangelion", "cowboy bebop", "clannad", "toradora", "your name", "weathering with you",
             "suzume", "silent voice", "spirited away", "howl's moving", "howls moving", "totoro", "mononoke",
-            "grave of the fireflies", "anohana", "erased", "monster", "pluto", "the fable", "bartender"
+            "grave of the fireflies", "anohana", "erased", "monster", "pluto", "the fable", "bartender",
+            "world is dancing", "liar game", "inept villainess", "villainess", "futsutsuka", "danmachi",
+            "sakamoto", "dandadan", "uzumaki", "blue box", "ranma", "bleach", "trigun", "charlotte",
+            "horimiya", "bungo stray dogs", "haikyuu", "kuroko", "blue period", "dororo", "vinland saga",
+            "akame ga kill", "kill la kill", "assassination classroom", "sword art online", "fate/stay",
+            "fate stay", "fate/zero", "fate zero", "psycho-pass", "psycho pass", "gintama", "inuyasha",
+            "yu yu hakusho", "sailor moon", "digimon", "cardcaptor", "fruits basket", "ouran", "nana"
         )
         for (kw in keywords) {
             if (t.contains(kw)) return true
@@ -450,7 +459,7 @@ object AnimePosterEngine {
                                 id = "al_$id",
                                 title = displayTitle,
                                 posterUrl = poster,
-                                watchUrl = "https://anikoto.cz/watch/$id",
+                                watchUrl = "",
                                 type = if (mediaFormat.equals("MOVIE", ignoreCase = true)) "Movie" else "TV",
                                 subCount = "$episodes",
                                 dubCount = "$episodes",
