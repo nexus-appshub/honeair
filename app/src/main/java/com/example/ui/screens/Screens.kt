@@ -2459,10 +2459,19 @@ fun HomeScreen(
                     }
                 }
 
-                // 4. Developer Footer
+                // 4. Developer Footer & Poster Banner
                 item {
                     Spacer(modifier = Modifier.height(10.dp))
                     DeveloperNoteFooter(modifier = Modifier.padding(horizontal = 20.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
+                    if (!com.example.ad.StartIoAdManager.isPremiumUser()) {
+                        com.example.ad.StartIoBannerView(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            isMrec = true
+                        )
+                    }
                     Spacer(modifier = Modifier.height(80.dp))
                 }
             }

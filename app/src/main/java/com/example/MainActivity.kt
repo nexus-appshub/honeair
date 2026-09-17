@@ -152,6 +152,7 @@ class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
         try {
+            com.example.ad.StartIoAdManager.init(applicationContext)
             enableEdgeToEdge()
             com.example.security.SecurityGuard.applyScreenProtection(this)
             com.example.ad.StartIoAdManager.showSplashAd(this)
@@ -821,6 +822,20 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
         isVisible = showSubscriptionPlanGlobal,
         onDismiss = { showSubscriptionPlanGlobal = false }
     )
+
+    // Global Sponsored Ad Dialog (Fallback for Rewarded Ads)
+    val activeSponsoredAdState by com.example.ad.StartIoAdManager.activeSponsoredAd.collectAsState()
+    activeSponsoredAdState?.let { adReq ->
+        com.example.ui.components.SponsoredAdDialog(
+            onRewardEarned = {
+                adReq.onRewardEarned()
+                com.example.ad.StartIoAdManager.dismissSponsoredAd()
+            },
+            onDismiss = {
+                com.example.ad.StartIoAdManager.dismissSponsoredAd()
+            }
+        )
+    }
 }
 
 @Composable

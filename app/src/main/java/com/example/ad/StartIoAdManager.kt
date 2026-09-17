@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.example.subscription.SubscriptionManager
 import com.startapp.sdk.ads.banner.Banner
 import com.startapp.sdk.ads.banner.BannerListener
@@ -262,43 +265,97 @@ object StartIoAdManager {
             startAppAd.setVideoListener(object : VideoListener {
                 override fun onVideoCompleted() {
                     Log.d(TAG, "Rewarded video completed! Granting 30-min VIP pass.")
-                    isRewardGranted = true
-                    SubscriptionManager.unlockTemporaryVip(30)
-                    onRewardEarned()
+                    if (!isRewardGranted) {
+                        isRewardGranted = true
+                        SubscriptionManager.unlockTemporaryVip(30)
+                        onRewardEarned()
+                    }
                 }
             })
 
             startAppAd.loadAd(StartAppAd.AdMode.REWARDED_VIDEO, object : AdEventListener {
                 override fun onReceiveAd(ad: Ad) {
                     startAppAd.showAd(object : AdDisplayListener {
-                        override fun adHidden(ad: Ad?) {
-                            if (!isRewardGranted) {
-                                Log.w(TAG, "Rewarded video closed early.")
-                                onAdFailed()
-                            }
-                        }
                         override fun adDisplayed(ad: Ad?) {}
                         override fun adClicked(ad: Ad?) {}
+                        override fun adHidden(ad: Ad?) {
+                            if (!isRewardGranted) {
+                                Log.d(TAG, "Rewarded ad closed by user. Granting 30-min VIP pass.")
+                                isRewardGranted = true
+                                SubscriptionManager.unlockTemporaryVip(30)
+                                onRewardEarned()
+                            }
+                        }
                         override fun adNotDisplayed(ad: Ad?) {
-                            Log.w(TAG, "Rewarded video failed to display.")
-                            onAdFailed()
+                            Log.w(TAG, "Rewarded video failed to display, trying fallback...")
+                            showFallbackRewardedAd(activity, onRewardEarned, onAdFailed)
                         }
                     })
                 }
 
                 override fun onFailedToReceiveAd(ad: Ad?) {
-                    Log.e(TAG, "Failed to load REWARDED_VIDEO, trying AUTOMATIC mode fallback...")
-                    // Fallback to AUTOMATIC video mode
-                    loadFallbackVideoAd(activity, onRewardEarned, onAdFailed)
+                    Log.e(TAG, "Failed to load REWARDED_VIDEO (${ad?.errorMessage}), trying AUTOMATIC/preloaded fallback...")
+                    showFallbackRewardedAd(activity, onRewardEarned, onAdFailed)
                 }
             })
         } catch (e: Throwable) {
             Log.e(TAG, "Exception in showRewardedVideo: ${e.message}")
-            onAdFailed()
+            showFallbackRewardedAd(activity, onRewardEarned, onAdFailed)
         }
     }
 
-    private fun loadFallbackVideoAd(
+    data class SponsoredAdRequest(
+        val onRewardEarned: () -> Unit,
+        val onAdFailed: () -> Unit
+    )
+
+    private val _activeSponsoredAd = MutableStateFlow<SponsoredAdRequest?>(null)
+    val activeSponsoredAd: StateFlow<SponsoredAdRequest?> = _activeSponsoredAd.asStateFlow()
+
+    fun dismissSponsoredAd() {
+        _activeSponsoredAd.value = null
+    }
+
+    private fun triggerInternalSponsoredAd(
+        onRewardEarned: () -> Unit,
+        onAdFailed: () -> Unit
+    ) {
+        Log.d(TAG, "Showing internal Sponsored Ad overlay.")
+        _activeSponsoredAd.value = SponsoredAdRequest(
+            onRewardEarned = onRewardEarned,
+            onAdFailed = onAdFailed
+        )
+    }
+
+    private fun showFallbackRewardedAd(
+        activity: Activity,
+        onRewardEarned: () -> Unit,
+        onAdFailed: () -> Unit
+    ) {
+        if (cachedInterstitial != null) {
+            val preloadedAd = cachedInterstitial
+            cachedInterstitial = null
+
+            preloadedAd?.showAd(object : AdDisplayListener {
+                override fun adDisplayed(ad: Ad?) {}
+                override fun adClicked(ad: Ad?) {}
+                override fun adHidden(ad: Ad?) {
+                    Log.d(TAG, "Preloaded fallback ad closed. Granting 30-min VIP pass.")
+                    SubscriptionManager.unlockTemporaryVip(30)
+                    onRewardEarned()
+                    preloadInterstitial(activity)
+                }
+                override fun adNotDisplayed(ad: Ad?) {
+                    triggerInternalSponsoredAd(onRewardEarned, onAdFailed)
+                }
+            })
+            return
+        }
+
+        triggerInternalSponsoredAd(onRewardEarned, onAdFailed)
+    }
+
+    private fun loadDynamicFallbackAd(
         activity: Activity,
         onRewardEarned: () -> Unit,
         onAdFailed: () -> Unit
@@ -306,29 +363,44 @@ object StartIoAdManager {
         try {
             var isRewardGranted = false
             val startAppAd = StartAppAd(activity)
+
             startAppAd.setVideoListener(object : VideoListener {
                 override fun onVideoCompleted() {
-                    isRewardGranted = true
-                    SubscriptionManager.unlockTemporaryVip(30)
-                    onRewardEarned()
+                    if (!isRewardGranted) {
+                        isRewardGranted = true
+                        SubscriptionManager.unlockTemporaryVip(30)
+                        onRewardEarned()
+                    }
                 }
             })
+
             startAppAd.loadAd(StartAppAd.AdMode.AUTOMATIC, object : AdEventListener {
                 override fun onReceiveAd(ad: Ad) {
                     startAppAd.showAd(object : AdDisplayListener {
-                        override fun adHidden(ad: Ad?) {
-                            if (!isRewardGranted) onAdFailed()
-                        }
                         override fun adDisplayed(ad: Ad?) {}
                         override fun adClicked(ad: Ad?) {}
-                        override fun adNotDisplayed(ad: Ad?) { onAdFailed() }
+                        override fun adHidden(ad: Ad?) {
+                            if (!isRewardGranted) {
+                                Log.d(TAG, "Fallback ad hidden. Granting 30-min VIP pass.")
+                                isRewardGranted = true
+                                SubscriptionManager.unlockTemporaryVip(30)
+                                onRewardEarned()
+                            }
+                        }
+                        override fun adNotDisplayed(ad: Ad?) {
+                            Log.e(TAG, "Fallback adNotDisplayed.")
+                            onAdFailed()
+                        }
                     })
                 }
+
                 override fun onFailedToReceiveAd(ad: Ad?) {
+                    Log.e(TAG, "Fallback ad onFailedToReceiveAd: ${ad?.errorMessage}")
                     onAdFailed()
                 }
             })
         } catch (e: Throwable) {
+            Log.e(TAG, "Exception in loadDynamicFallbackAd: ${e.message}")
             onAdFailed()
         }
     }
@@ -340,20 +412,22 @@ object StartIoAdManager {
             return
         }
 
+        val context = container.context
+        init(context, START_IO_APP_ID)
+
         container.visibility = View.VISIBLE
         container.removeAllViews()
 
         try {
-            init(container.context)
             val banner = if (isMrec) {
-                Mrec(container.context, object : BannerListener {
+                Mrec(context, object : BannerListener {
                     override fun onReceiveAd(view: View?) { container.visibility = View.VISIBLE }
                     override fun onFailedToReceiveAd(view: View?) { container.visibility = View.GONE }
                     override fun onClick(view: View?) {}
                     override fun onImpression(view: View?) {}
                 })
             } else {
-                Banner(container.context, object : BannerListener {
+                Banner(context, object : BannerListener {
                     override fun onReceiveAd(view: View?) { container.visibility = View.VISIBLE }
                     override fun onFailedToReceiveAd(view: View?) { container.visibility = View.GONE }
                     override fun onClick(view: View?) {}

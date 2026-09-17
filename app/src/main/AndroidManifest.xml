@@ -29,6 +29,10 @@
         android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.MyApplication">
 
+        <meta-data
+            android:name="com.startapp.sdk.APPLICATION_ID"
+            android:value="208883567" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
