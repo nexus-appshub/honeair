@@ -329,12 +329,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     fun addCustomPlaylist(name: String, rawContent: String, source: String = "file", pathOrUrl: String = "") {
         viewModelScope.launch {
             val db = AppDatabase.getDatabase(getApplication())
+            val filename = "custom_playlist_${java.util.UUID.randomUUID()}.m3u"
+            val file = java.io.File(getApplication<android.app.Application>().filesDir, filename)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                file.writeText(rawContent)
+            }
+            val contentToStore = "file://${file.absolutePath}"
             db.customPlaylistDao().insertCustomPlaylist(
                 com.example.data.database.CustomPlaylistEntity(
                     name = name,
                     source = source,
                     pathOrUrl = pathOrUrl,
-                    rawContent = rawContent
+                    rawContent = contentToStore
                 )
             )
             loadPlaylists(forceRefresh = true)
@@ -365,6 +371,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             val all = db.customPlaylistDao().getAllCustomPlaylists()
             val match = all.find { it.id == playlistId }
             if (match != null) {
+                if (match.rawContent.startsWith("file://")) {
+                    val file = java.io.File(match.rawContent.substring(7))
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                }
                 db.customPlaylistDao().deleteCustomPlaylist(match)
             }
             val currentPlaylist = _selectedPlaylist.value
@@ -3241,7 +3253,15 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     val db = AppDatabase.getDatabase(getApplication())
                     val playlist = db.customPlaylistDao().getAllCustomPlaylists().find { it.id == id }
                     if (playlist != null) {
-                        com.example.data.network.IptvParser.parseChannels(playlist.rawContent)
+                        val content = if (playlist.rawContent.startsWith("file://")) {
+                            val file = java.io.File(playlist.rawContent.substring(7))
+                            if (file.exists()) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.readText() }
+                            } else ""
+                        } else {
+                            playlist.rawContent
+                        }
+                        com.example.data.network.IptvParser.parseChannels(content)
                     } else {
                         emptyList()
                     }

@@ -351,6 +351,8 @@ fun AuthScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+
     var emailInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
     var pendingDeviceAccounts by remember { mutableStateOf<List<String>?>(null) }
@@ -447,6 +449,8 @@ fun AuthScreen(
                     Spacer(modifier = Modifier.height(20.dp))
 
                     val context = LocalContext.current
+
+
                     // Standard Google Login Button
                     Button(
                         onClick = {
@@ -3526,6 +3530,8 @@ fun ChannelListRow(
     )
 
     val context = LocalContext.current
+
+
     val imageRequest = remember(channel.logo) {
         ImageRequest.Builder(context)
             .data(channel.logo)
@@ -3731,6 +3737,8 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
     val mediaState by viewModel.mediaState.collectAsState()
     val filteredChannels by viewModel.filteredChannels.collectAsState()
     val context = LocalContext.current
+
+
     val activity = context as? android.app.Activity
 
     var isSelectMode by remember { mutableStateOf(false) }
@@ -4139,6 +4147,8 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                     else -> null
                                 }
                                 val context = LocalContext.current
+
+
                                 val imageRequest = remember(item.logo) {
                                     ImageRequest.Builder(context)
                                         .data(item.logo)
@@ -4427,6 +4437,8 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                             else -> null
                                         }
                                         val context = LocalContext.current
+
+
                                         val imageRequest = remember(vertChannel.logo) {
                                             ImageRequest.Builder(context)
                                                 .data(vertChannel.logo)
@@ -4629,6 +4641,8 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                         val isSelected = vertChannel.url == channel.url
                                         val isFavStream by viewModel.isFavoriteStream(vertChannel.url).collectAsState(false)
                                         val context = LocalContext.current
+
+
                                         val imageRequest = remember(vertChannel.logo) {
                                             ImageRequest.Builder(context)
                                                 .data(vertChannel.logo)
@@ -5628,6 +5642,8 @@ fun AdminScreen(
     val mediaSearchQuery by viewModel.mediaSearchQuery.collectAsState()
 
     val context = LocalContext.current
+
+
     var customNotiTitle by remember { mutableStateOf("\ud83d\ude80 AppsHub System Update") }
     var customNotiBody by remember { mutableStateOf("New live streams & sports channels are now available!") }
     var customUserEmailInput by remember { mutableStateOf("") }
@@ -7085,6 +7101,8 @@ fun SettingsScreen(
     val isInPipMode by viewModel.isInPipMode.collectAsState()
     val profile = userProfile
     val context = LocalContext.current
+
+
     val scope = rememberCoroutineScope()
 
     val isPremium by SubscriptionManager.isPremium.collectAsState()
@@ -7356,6 +7374,7 @@ fun SettingsScreen(
                     M3uPlaylistsManagerSubPage(
                         viewModel = viewModel,
                         onBack = { activeSubPage = "MAIN" },
+                        onNavigateToAirTab = onNavigateToPlayer,
                         m3uFileLauncher = m3uFilePickerLauncher,
                         nameInput = m3uFileNameInput,
                         onNameChange = { m3uFileNameInput = it },
@@ -9143,6 +9162,8 @@ fun SignInBottomSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var pendingDeviceAccounts by remember { mutableStateOf<List<String>?>(null) }
@@ -9231,6 +9252,8 @@ fun SignInBottomSheet(
                     Spacer(modifier = Modifier.height(20.dp))
 
                     val context = LocalContext.current
+
+
                     // Google Button
                     Button(
                         onClick = {
@@ -9399,6 +9422,8 @@ fun MediaHubScreen(
             var isSearchExpanded by remember { mutableStateOf(false) }
 
             val context = LocalContext.current
+
+
             val speechRecognizerLauncher = rememberLauncherForActivityResult(
                 contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
             ) { result ->
@@ -11042,6 +11067,8 @@ fun ContinueWatchingCard(
             // Thumbnail image background
             if (!isImageLoadError && item.imageUrl.isNotBlank()) {
                 val context = LocalContext.current
+
+
                 val imageRequest = remember(item.imageUrl) {
                     ImageRequest.Builder(context)
                         .data(item.imageUrl)
@@ -11334,6 +11361,8 @@ fun CompactMediaCard(
             ) {
                 if (item.imageUrl.isNotBlank() && !isImageLoadError) {
                     val context = LocalContext.current
+
+
                     val imageRequest = remember(item.imageUrl) {
                         ImageRequest.Builder(context)
                             .data(item.imageUrl)
@@ -11355,6 +11384,8 @@ fun CompactMediaCard(
                 } else {
                     // Fallback poster image or styled placeholder
                     val context = LocalContext.current
+
+
                     AsyncImage(
                         model = ImageRequest.Builder(context)
                             .data(fallbackPoster)
@@ -11547,6 +11578,8 @@ fun MediaCard(
             ) {
                 if (item.imageUrl.isNotBlank() && !isImageLoadError) {
                     val context = LocalContext.current
+
+
                     val imageRequest = remember(item.imageUrl) {
                         ImageRequest.Builder(context)
                             .data(item.imageUrl)
@@ -11565,6 +11598,8 @@ fun MediaCard(
                     )
                 } else {
                     val context = LocalContext.current
+
+
                     AsyncImage(
                         model = ImageRequest.Builder(context)
                             .data(fallbackPoster)
@@ -11785,6 +11820,8 @@ fun WebBrowserDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Open Web Version", color = Color.White, fontWeight = FontWeight.Bold) },
@@ -11836,6 +11873,8 @@ fun ArchivedChannelsSubPage(
     viewModel: StreamViewModel,
     onBack: () -> Unit
 ) {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val textColor = if (isDark) Color.White else Color.Black
     val prefs by viewModel.channelPreferences.collectAsState()
     val archivedList = remember(prefs) { prefs.filter { it.isHidden } }
 
@@ -11850,9 +11889,9 @@ fun ArchivedChannelsSubPage(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = textColor)
             }
-            Text("Archived Channels", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Archived Channels", color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
 
         if (archivedList.isEmpty()) {
@@ -11903,6 +11942,7 @@ fun ArchivedChannelsSubPage(
 fun M3uPlaylistsManagerSubPage(
     viewModel: StreamViewModel,
     onBack: () -> Unit,
+    onNavigateToAirTab: () -> Unit = {},
     m3uFileLauncher: androidx.activity.result.ActivityResultLauncher<String>,
     nameInput: String,
     onNameChange: (String) -> Unit,
@@ -11911,6 +11951,10 @@ fun M3uPlaylistsManagerSubPage(
 ) {
     val customPlaylistsState by viewModel.customPlaylists.collectAsState()
     val context = LocalContext.current
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val textColor = if (isDark) Color.White else Color.Black
+
+
 
     Column(
         modifier = Modifier
@@ -11924,9 +11968,9 @@ fun M3uPlaylistsManagerSubPage(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = textColor)
             }
-            Text("M3U8 Playlists Manager", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("M3U8 Playlists Manager", color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
 
         // Section 1: URL Import
@@ -12013,7 +12057,7 @@ fun M3uPlaylistsManagerSubPage(
         }
 
         // Section 3: Playlists List
-        Text("Your Local Playlists", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
+        Text("Your Local Playlists", color = textColor, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
         if (customPlaylistsState.isEmpty()) {
             Text("No custom playlists added yet", color = Color.Gray, fontSize = 12.sp)
         } else {
@@ -12021,7 +12065,11 @@ fun M3uPlaylistsManagerSubPage(
                 customPlaylistsState.forEach { pl ->
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2E)),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.clickable {
+                            viewModel.selectPlaylist(com.example.data.model.IptvPlaylist(name = pl.name, url = "custom://${pl.id}", group = "Custom"))
+                            onNavigateToAirTab()
+                        }
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -12058,6 +12106,10 @@ fun LocalVideosManagerSubPage(
     onPlayFile: (java.io.File) -> Unit
 ) {
     val context = LocalContext.current
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val textColor = if (isDark) Color.White else Color.Black
+
+
     
     // Discover offline videos from app storage directories
     val localFiles = remember(selectedQueueVideos.size) {
@@ -12094,9 +12146,9 @@ fun LocalVideosManagerSubPage(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = textColor)
             }
-            Text("Local Offline Videos", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Local Offline Videos", color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
 
         Card(
@@ -12125,7 +12177,7 @@ fun LocalVideosManagerSubPage(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Your Offline Library", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("Your Offline Library", color = textColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             if (selectedQueueVideos.isNotEmpty()) {
                 TextButton(onClick = { selectedQueueVideos.clear() }) {
                     Text("Clear Selection (${selectedQueueVideos.size})", color = Color.Red, fontSize = 12.sp)
