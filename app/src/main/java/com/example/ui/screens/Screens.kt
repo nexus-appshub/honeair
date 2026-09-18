@@ -2203,11 +2203,11 @@ fun HomeScreen(
                                 HomeCategoryItem(com.example.ui.theme.AppTranslation.getString("movies", selectedAudioIndex), Icons.Outlined.Movie) { onNavigateToMediaTab("Movies") },
                                 HomeCategoryItem(com.example.ui.theme.AppTranslation.getString("tv_shows", selectedAudioIndex), Icons.Outlined.LiveTv) { onNavigateToMediaTab("Series & TV Shows") },
                                 HomeCategoryItem("Anime", Icons.Outlined.LiveTv) { onNavigateToMediaTab("Anime") },
-                                HomeCategoryItem("Bangla Cinema & Natok", Icons.Outlined.MovieFilter) { onNavigateToMediaTab("Bangla Cinema & Natok") },
+                                HomeCategoryItem("Bangla", Icons.Outlined.MovieFilter) { onNavigateToMediaTab("Bangla") },
                                 HomeCategoryItem("Hindi Cinema", Icons.Outlined.Movie) { onNavigateToMediaTab("Hindi Cinema") },
                                 HomeCategoryItem("Hindi Series", Icons.Outlined.Tv) { onNavigateToMediaTab("Hindi Series") },
                                 HomeCategoryItem("Hindi Dubbed", Icons.Default.RecordVoiceOver) { onNavigateToMediaTab("Hindi Dubbed") },
-                                HomeCategoryItem("Hindi Dubbed K-Dramas", Icons.Default.FavoriteBorder) { onNavigateToMediaTab("Hindi Dubbed K-Dramas") },
+                                HomeCategoryItem("Hindi K-Drama", Icons.Default.FavoriteBorder) { onNavigateToMediaTab("Hindi K-Drama") },
                                 HomeCategoryItem("Anime Series", Icons.Outlined.SmartDisplay) { onNavigateToMediaTab("Anime Series") },
                                 HomeCategoryItem("Anime Movies", Icons.Outlined.Theaters) { onNavigateToMediaTab("Anime Movies") },
                                 HomeCategoryItem(com.example.ui.theme.AppTranslation.getString("k_drama", selectedAudioIndex), Icons.Outlined.OndemandVideo) { onNavigateToMediaTab("K-Dramas") },
@@ -7405,6 +7405,8 @@ fun SettingsScreen(
     var showPrivacyTermsSheet by remember { mutableStateOf(false) }
     var showCopyrightSheet by remember { mutableStateOf(false) }
     var showFloatingPlayerLimitSheet by remember { mutableStateOf(false) }
+    var showSupportSheet by remember { mutableStateOf(false) }
+    var showAboutUsSheet by remember { mutableStateOf(false) }
     val maxFloatingPlayers by viewModel.maxFloatingPlayers.collectAsState()
     val showDownloadLibrary by viewModel.showDownloadLibraryGlobal.collectAsState()
 
@@ -8147,6 +8149,24 @@ fun SettingsScreen(
                 )
             }
 
+            item {
+                SecretSettingRow(
+                    title = "About Us",
+                    subtitle = "App overview, key features & user guide",
+                    icon = Icons.Outlined.Info,
+                    onClick = { showAboutUsSheet = true }
+                )
+            }
+
+            item {
+                SecretSettingRow(
+                    title = "Support",
+                    subtitle = "Community, Telegram, Facebook, Email & Messenger",
+                    icon = Icons.Outlined.SupportAgent,
+                    onClick = { showSupportSheet = true }
+                )
+            }
+
             // Footer Branding
             item {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -8223,7 +8243,7 @@ fun SettingsScreen(
     if (showSubscriptionSheet) {
         ModalBottomSheet(
             onDismissRequest = { showSubscriptionSheet = false },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = DeepSlate
         ) {
             Column(
                 modifier = Modifier
@@ -8244,7 +8264,7 @@ fun SettingsScreen(
                         text = "Home Air TV VIP Subscription",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = TextPrimary
                     )
                 }
 
@@ -8253,7 +8273,8 @@ fun SettingsScreen(
                 if (effectiveIsPremium) {
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFF2C2C2E),
+                        color = CyberGray,
+                        border = BorderStroke(1.dp, BorderColor),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -8262,7 +8283,7 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Active Plan", color = Color.Gray, fontSize = 13.sp)
+                                Text("Active Plan", color = TextSecondary, fontSize = 13.sp)
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
@@ -8274,7 +8295,7 @@ fun SettingsScreen(
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("All Live Channels, 4K Movies & VidSrc Player Active", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text("All Live Channels, 4K Movies & VidSrc Player Active", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(4.dp))
                             val planExpiryText = when {
                                 isRedeemActive -> "Promo Pass Activated"
@@ -8282,13 +8303,14 @@ fun SettingsScreen(
                                 SubscriptionManager.expiryDate.value != null -> "Renewal: Valid until ${SubscriptionManager.expiryDate.value}"
                                 else -> "VIP Plan Active"
                             }
-                            Text(planExpiryText, color = Color.LightGray, fontSize = 12.sp)
+                            Text(planExpiryText, color = TextSecondary, fontSize = 12.sp)
                         }
                     }
                 } else {
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFF2C2C2E),
+                        color = CyberGray,
+                        border = BorderStroke(1.dp, BorderColor),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -8297,7 +8319,7 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Current Plan", color = Color.Gray, fontSize = 13.sp)
+                                Text("Current Plan", color = TextSecondary, fontSize = 13.sp)
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
@@ -8309,9 +8331,9 @@ fun SettingsScreen(
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Limited Access to Live TV & Movies", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            Text("Limited Access to Live TV & Movies", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("Upgrade to VIP for full experience", color = Color.LightGray, fontSize = 12.sp)
+                            Text("Upgrade to VIP for full experience", color = TextSecondary, fontSize = 12.sp)
                         }
                     }
                 }
@@ -8347,7 +8369,7 @@ fun SettingsScreen(
         val langFontFamily = remember(selectedAudioIndex) { com.example.ui.theme.AppTranslation.getFontFamily(selectedAudioIndex) }
         ModalBottomSheet(
             onDismissRequest = { showHelpCenterSheet = false },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = DeepSlate
         ) {
             Column(
                 modifier = Modifier
@@ -8369,7 +8391,7 @@ fun SettingsScreen(
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = langFontFamily,
-                        color = Color.White
+                        color = TextPrimary
                     )
                 }
 
@@ -8378,7 +8400,8 @@ fun SettingsScreen(
                 // User Manual Card with Step-by-Step Server Guidelines
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF2C2C2E),
+                    color = CyberGray,
+                    border = BorderStroke(1.dp, BorderColor),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     LazyColumn(
@@ -8396,7 +8419,7 @@ fun SettingsScreen(
                                 Icon(Icons.Default.Info, contentDescription = "Guide", tint = Color(0xFFFF6B00), modifier = Modifier.size(20.dp))
                                 Text(
                                     text = com.example.ui.theme.AppTranslation.getString("server_guide_title", selectedAudioIndex),
-                                    color = Color.White,
+                                    color = TextPrimary,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = langFontFamily,
                                     fontSize = 15.sp
@@ -8417,7 +8440,8 @@ fun SettingsScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color(0xFF222224), RoundedCornerShape(10.dp))
+                                    .background(DeepSlate, RoundedCornerShape(10.dp))
+                                    .border(1.dp, BorderColor, RoundedCornerShape(10.dp))
                                     .padding(12.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
@@ -8430,7 +8454,7 @@ fun SettingsScreen(
                                 )
                                 Text(
                                     text = com.example.ui.theme.AppTranslation.getString(descKey, selectedAudioIndex),
-                                    color = Color.LightGray,
+                                    color = TextSecondary,
                                     fontFamily = langFontFamily,
                                     fontSize = 12.sp,
                                     lineHeight = 17.sp
@@ -8482,7 +8506,7 @@ fun SettingsScreen(
     if (showLanguageSheet) {
         ModalBottomSheet(
             onDismissRequest = { showLanguageSheet = false },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = DeepSlate
         ) {
             Column(
                 modifier = Modifier
@@ -8493,7 +8517,7 @@ fun SettingsScreen(
                     text = com.example.ui.theme.AppTranslation.getString("select_language_title", selectedAudioIndex),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = TextPrimary
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -8507,8 +8531,8 @@ fun SettingsScreen(
                             showLanguageSheet = false
                         },
                         shape = RoundedCornerShape(12.dp),
-                        color = if (idx == selectedAudioIndex) Color(0xFFFF6B00).copy(alpha = 0.2f) else Color(0xFF2C2C2E),
-                        border = BorderStroke(1.dp, if (idx == selectedAudioIndex) Color(0xFFFF6B00) else Color.Transparent),
+                        color = if (idx == selectedAudioIndex) Color(0xFFFF6B00).copy(alpha = 0.2f) else CyberGray,
+                        border = BorderStroke(1.dp, if (idx == selectedAudioIndex) Color(0xFFFF6B00) else BorderColor),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
@@ -8519,7 +8543,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(language, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(language, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                             if (idx == selectedAudioIndex) {
                                 Icon(Icons.Default.Check, contentDescription = "Selected", tint = Color(0xFFFF6B00))
                             }
@@ -8536,7 +8560,7 @@ fun SettingsScreen(
     if (showUpdateSheet) {
         ModalBottomSheet(
             onDismissRequest = { showUpdateSheet = false },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = DeepSlate
         ) {
             Column(
                 modifier = Modifier
@@ -8548,12 +8572,12 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "Update", tint = Color(0xFFFF6B00), modifier = Modifier.size(26.dp))
-                    Text("Check for App Updates", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Check for App Updates", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                Text("Installed Version: v$currentVersionName (Build $currentVersionCode)", color = Color.LightGray, fontSize = 13.sp)
+                Text("Installed Version: v$currentVersionName (Build $currentVersionCode)", color = TextSecondary, fontSize = 13.sp)
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -8564,7 +8588,7 @@ fun SettingsScreen(
                     else -> "Click check to scan for recent stream engine and UI improvements."
                 }
 
-                Text(statusText, color = Color.White, fontSize = 14.sp)
+                Text(statusText, color = TextPrimary, fontSize = 14.sp)
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -8609,7 +8633,7 @@ fun SettingsScreen(
     if (showAdvancedSettingsSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAdvancedSettingsSheet = false },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = DeepSlate
         ) {
             LazyColumn(
                 contentPadding = PaddingValues(24.dp),
@@ -8617,7 +8641,7 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 item {
-                    Text("Advanced Playback & System Settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Advanced Playback & System Settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                 }
 
                 item {
@@ -8659,7 +8683,8 @@ fun SettingsScreen(
                 item {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF2C2C2E),
+                        color = CyberGray,
+                        border = BorderStroke(1.dp, BorderColor),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -8668,8 +8693,8 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Hardware Acceleration", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("GPU decoding for smooth playback", color = Color.Gray, fontSize = 11.sp)
+                                Text("Hardware Acceleration", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("GPU decoding for smooth playback", color = TextSecondary, fontSize = 11.sp)
                             }
                             Switch(
                                 checked = isHardwareAccel,
@@ -8684,7 +8709,8 @@ fun SettingsScreen(
                     val isBatterySaver by viewModel.batterySaverMode.collectAsState()
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF2C2C2E),
+                        color = CyberGray,
+                        border = BorderStroke(1.dp, BorderColor),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -8693,8 +8719,8 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Battery Saver Mode", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Enforces data saver 480p and 24 FPS to extend viewing time in low-power scenarios.", color = Color.Gray, fontSize = 11.sp)
+                                Text("Battery Saver Mode", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Enforces data saver 480p and 24 FPS to extend viewing time in low-power scenarios.", color = TextSecondary, fontSize = 11.sp)
                             }
                             Switch(
                                 checked = isBatterySaver,
@@ -8708,7 +8734,8 @@ fun SettingsScreen(
                 item {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF2C2C2E),
+                        color = CyberGray,
+                        border = BorderStroke(1.dp, BorderColor),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -8717,8 +8744,8 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Auto Picture-in-Picture (PiP)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Keep playing when minimizing app", color = Color.Gray, fontSize = 11.sp)
+                                Text("Auto Picture-in-Picture (PiP)", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Keep playing when minimizing app", color = TextSecondary, fontSize = 11.sp)
                             }
                             Switch(
                                 checked = isAutoPip,
@@ -8754,12 +8781,12 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showDeleteAccountDialog = false },
             title = {
-                Text(text = "Delete Account?", fontWeight = FontWeight.Bold, color = Color.White)
+                Text(text = "Delete Account?", fontWeight = FontWeight.Bold, color = TextPrimary)
             },
             text = {
                 Text(
                     text = "Are you sure you want to permanently delete your profile and clear all local session data?",
-                    color = Color.LightGray
+                    color = TextSecondary
                 )
             },
             confirmButton = {
@@ -8779,10 +8806,10 @@ fun SettingsScreen(
                 OutlinedButton(
                     onClick = { showDeleteAccountDialog = false }
                 ) {
-                    Text("Cancel", color = Color.White)
+                    Text("Cancel", color = TextPrimary)
                 }
             },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = DeepSlate
         )
     }
 
@@ -9015,7 +9042,7 @@ fun SettingsScreen(
     if (showPrivacyTermsSheet) {
         ModalBottomSheet(
             onDismissRequest = { showPrivacyTermsSheet = false },
-            containerColor = Color(0xFF1C1C1E)
+            containerColor = DeepSlate
         ) {
             LazyColumn(
                 modifier = Modifier
@@ -9028,7 +9055,7 @@ fun SettingsScreen(
                         text = "Privacy Policy & Terms of Service",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = TextPrimary,
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
                 }
@@ -9042,7 +9069,7 @@ fun SettingsScreen(
                                "2. Content Aggregation: Home Air TV operates purely as an index and media browser. We do not host, store, or upload any video media on our servers. All contents are fetched from publicly available internet sources.\n\n" +
                                "3. No Commercial Subscriptions: We do not charge any fees, nor do we require credit card details. The service is 100% free for open-source community use.\n\n" +
                                "4. User Responsibility: Users are requested to use the app in compliance with local digital laws and guidelines.\n\n" +
-                               "Explore smoothly and stay tuned for more updates! \ud83d\ude80"
+                               "Explore smoothly and stay tuned for more updates! 🚀"
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
@@ -9070,7 +9097,7 @@ fun SettingsScreen(
                                "Or Visit our official website homeairtv.xubilaswebdevcorp.shop.\n\n" +
                                "2. Safe Installation: Since this is an open-source APK project built directly by Xubilas Web Dev Corp, your Android system might display a standard side-loading prompt. Rest assured, our files are completely clean and free of malware or spy tools.\n\n" +
                                "3. Beware of Imitators: Do not download modified or untrusted APK files from random third-party blogs or forums.\n\n" +
-                               "Enjoy your favorite shows with complete peace of mind! \ud83c\udf7f"
+                               "Enjoy your favorite shows with complete peace of mind! 🍿"
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
@@ -9081,8 +9108,8 @@ fun SettingsScreen(
                         icon = Icons.Default.Info,
                         text = "Many of you asked about the team and philosophy behind Home Air TV. Here is our vision:\n\n" +
                                " Developed by Xubilas Web Dev Corp: Home Air TV is an open-source initiative engineered to provide a lightweight, high-speed alternative to legacy platforms (like early-stage MovieBox).\n\n" +
-                               " Community-Driven: Built for the community with a motto of transparencyno hidden subscriptions, no ad trackers, and no deceptive features.\n\n" +
-                               " Developer Verification: You can inspect our agency background directly in the apps Profile section under Developer Credits, or visit xubilaswebdevcorp.shop anytime.\n\n" +
+                               " Community-Driven: Built for the community with a motto of transparency—no hidden subscriptions, no ad trackers, and no deceptive features.\n\n" +
+                               " Developer Verification: You can inspect our agency background directly in the app's Profile section under Developer Credits, or visit xubilaswebdevcorp.shop anytime.\n\n" +
                                "Thank you for being part of our journey! Share your thoughts and suggestions below."
                     )
                     Spacer(modifier = Modifier.height(16.dp))
@@ -9091,7 +9118,7 @@ fun SettingsScreen(
                 item {
                     Text(
                         text = "Official Web Links:",
-                        color = Color.White,
+                        color = TextPrimary,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -9152,6 +9179,18 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showSupportSheet) {
+        SupportBottomSheet(
+            onDismiss = { showSupportSheet = false }
+        )
+    }
+
+    if (showAboutUsSheet) {
+        AboutUsBottomSheet(
+            onDismiss = { showAboutUsSheet = false }
+        )
     }
 
         activeWebPlayer?.let { state ->
@@ -12135,18 +12174,19 @@ fun PrivacyPolicySectionCard(
     text: String
 ) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2E)),
+        colors = CardDefaults.cardColors(containerColor = CyberGray),
         shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, BorderColor),
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(imageVector = icon, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(text = text, fontSize = 13.sp, color = Color.LightGray, lineHeight = 18.sp)
+            Text(text = text, fontSize = 13.sp, color = TextSecondary, lineHeight = 18.sp)
         }
     }
 }
@@ -12548,6 +12588,313 @@ fun LocalVideosManagerSubPage(
                             Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.Black)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Play Selection Queue (${selectedQueueVideos.size} Videos)", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SupportBottomSheet(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val bgColor = if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+    val cardBg = if (isDark) Color(0xFF2C2C2E) else Color(0xFFFFFFFF)
+    val textColor = if (isDark) Color.White else Color(0xFF1C1C1E)
+    val subTextColor = if (isDark) Color.LightGray else Color(0xFF6C6C70)
+    val borderColor = if (isDark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
+
+    val supportLinks = listOf(
+        SupportItem("Telegram Community", "https://t.me/homeaircommunity", Icons.Outlined.Send, Color(0xFF0088CC)),
+        SupportItem("Telegram Group", "https://t.me/HomeAirTv", Icons.Outlined.Group, Color(0xFF2AABEE)),
+        SupportItem("Facebook", "https://www.facebook.com/HomeAirTv", Icons.Outlined.Share, Color(0xFF1877F2)),
+        SupportItem("Email", "mailto:hmairtv@gmail.com", Icons.Outlined.Email, Color(0xFFEA4335)),
+        SupportItem("Messenger", "https://m.me/homeairtv", Icons.Outlined.Chat, Color(0xFF0084FF))
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = bgColor
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.SupportAgent,
+                    contentDescription = "Support",
+                    tint = Color(0xFFFF6B00),
+                    modifier = Modifier.size(28.dp)
+                )
+                Column {
+                    Text(
+                        text = "Support & Community",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor
+                    )
+                    Text(
+                        text = "Connect with us on official channels",
+                        fontSize = 12.sp,
+                        color = subTextColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            supportLinks.forEach { item ->
+                Surface(
+                    onClick = {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(item.url))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    color = cardBg,
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 5.dp)
+                        .height(52.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(item.color.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = item.title,
+                                    tint = item.color,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Text(
+                                text = item.title,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = textColor
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Outlined.OpenInNew,
+                            contentDescription = null,
+                            tint = subTextColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+private data class SupportItem(
+    val title: String,
+    val url: String,
+    val icon: ImageVector,
+    val color: Color
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AboutUsBottomSheet(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val bgColor = if (isDark) Color(0xFF1C1C1E) else Color(0xFFF2F2F7)
+    val cardBg = if (isDark) Color(0xFF2C2C2E) else Color(0xFFFFFFFF)
+    val textColor = if (isDark) Color.White else Color(0xFF1C1C1E)
+    val subTextColor = if (isDark) Color.LightGray else Color(0xFF6C6C70)
+    val borderColor = if (isDark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = bgColor
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            contentPadding = PaddingValues(bottom = 32.dp)
+        ) {
+            item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(bottom = 16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFFFF6B00)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Tv,
+                            contentDescription = "App Icon",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "HOME AIR TV",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                        Text(
+                            text = "Smart Media Streaming Application",
+                            fontSize = 12.sp,
+                            color = subTextColor
+                        )
+                    }
+                }
+            }
+
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = cardBg,
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Overview",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "HOME AIR TV is an open-source, all-in-one smart media streaming application developed by volunteer developers under Xubilas Web Dev Corp. Built for Android devices and distributed via Xubilas Apps Hub, it offers free, unlimited access to global movies, TV shows, anime, and live broadcast channels.",
+                            fontSize = 13.sp,
+                            color = subTextColor,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = cardBg,
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Key Highlights",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        
+                        val highlights = listOf(
+                            "Open-Source & Ad-Free Architecture",
+                            "4K VidSrc & Multi-Server Player Engine",
+                            "Auto Picture-in-Picture (PiP) Mode",
+                            "Global Live TV Channels & FanCode VIP Pass",
+                            "Multi-Language Subtitles & Audio Engine"
+                        )
+                        
+                        highlights.forEach { highlight ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(vertical = 3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = highlight,
+                                    fontSize = 12.sp,
+                                    color = textColor,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = cardBg,
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Developer & Publisher",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Xubilas Web Dev Corp / Volunteer Community",
+                            fontSize = 12.sp,
+                            color = subTextColor
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://homeairtv.xubilaswebdevcorp.shop"))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Text("Visit Official Website", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }

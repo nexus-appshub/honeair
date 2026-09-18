@@ -346,7 +346,7 @@ class MediaRepository {
                 MediaItem(
                     id = "movie_2026_01",
                     title = "Dor ( দোর )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&q=80",
                     rating = "9.2",
                     year = "2026",
@@ -360,7 +360,7 @@ class MediaRepository {
                 MediaItem(
                     id = "movie_2026_02",
                     title = "Toofan 2: The Legacy ( তুফান ২ )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&q=80",
                     rating = "9.0",
                     year = "2026",
@@ -374,7 +374,7 @@ class MediaRepository {
                 MediaItem(
                     id = "movie_2026_03",
                     title = "Bonolota Express ( বনলতা এক্সপ্রেস )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&q=80",
                     rating = "9.1",
                     year = "2026",
@@ -388,7 +388,7 @@ class MediaRepository {
                 MediaItem(
                     id = "movie_2025_01",
                     title = "Devi Chowdhurani: Bandit Queen ( দেবী চৌধুরানী )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80",
                     rating = "9.4",
                     year = "2025",
@@ -402,7 +402,7 @@ class MediaRepository {
                 MediaItem(
                     id = "series_2025_01",
                     title = "Chakrabuhy ( চক্রব্যূহ )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=500&q=80",
                     rating = "8.9",
                     year = "2025",
@@ -416,7 +416,7 @@ class MediaRepository {
                 MediaItem(
                     id = "series_117282",
                     title = "Karagar ( কারাগার )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1518676590629-3dcbd9c5a5c9?w=500&q=80",
                     rating = "8.8",
                     year = "2022",
@@ -430,7 +430,7 @@ class MediaRepository {
                 MediaItem(
                     id = "series_128833",
                     title = "Mohanagar ( মহানগর )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1535016120720-40c646be5580?w=500&q=80",
                     rating = "8.9",
                     year = "2021",
@@ -444,7 +444,7 @@ class MediaRepository {
                 MediaItem(
                     id = "series_113886",
                     title = "Taqdeer ( তাকদীর )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=500&q=80",
                     rating = "8.7",
                     year = "2020",
@@ -458,7 +458,7 @@ class MediaRepository {
                 MediaItem(
                     id = "movie_838209",
                     title = "Hawa ( হাওয়া )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&q=80",
                     rating = "8.2",
                     year = "2022",
@@ -472,7 +472,7 @@ class MediaRepository {
                 MediaItem(
                     id = "movie_1136371",
                     title = "Toofan ( তুফান )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&q=80",
                     rating = "8.5",
                     year = "2024",
@@ -486,7 +486,7 @@ class MediaRepository {
                 MediaItem(
                     id = "movie_1139088",
                     title = "Priyotoma ( প্রিয়তমা )",
-                    category = "Bangla Cinema & Natok",
+                    category = "Bangla",
                     imageUrl = "https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=500&q=80",
                     rating = "8.0",
                     year = "2023",
@@ -676,16 +676,16 @@ class MediaRepository {
                     }
                 })
             }
+            catLower.contains("hindi k-drama") || catLower.contains("hindi kdrama") || catLower.contains("hindi dubbed k-drama") || catLower.contains("hindi dubbed kdrama") || (catLower.contains("hindi") && catLower.contains("k-drama")) -> addJob("Hindi K-Drama", "series") { tmdbApi.getHindiDubbedKDramas(page = it) }
             catLower.contains("k-drama") || catLower.contains("kdrama") -> addJob("K-Dramas", "series") { tmdbApi.getKDramas(page = it) }
             catLower == "action" -> addJob("Action", "movie") { tmdbApi.getActionMovies(page = it) }
             catLower.contains("sci-fi") || catLower.contains("scifi") -> addJob("Sci-Fi", "movie") { tmdbApi.getSciFiMovies(page = it) }
             catLower.contains("hindi cinema") || catLower.contains("hindi movie") -> addJob("Hindi Cinema", "movie") { tmdbApi.getHindiMovies(page = it) }
             catLower.contains("hindi series") -> addJob("Hindi Series", "series") { tmdbApi.getHindiSeries(page = it) }
-            catLower.contains("hindi dubbed k-drama") || catLower.contains("hindi dubbed kdrama") -> addJob("Hindi Dubbed K-Dramas", "series") { tmdbApi.getHindiDubbedKDramas(page = it) }
             catLower.contains("hindi dubbed") || catLower.contains("dubbed") -> addJob("Hindi Dubbed", "movie") { tmdbApi.getHindiDubbedMovies(page = it) }
             catLower.contains("bangla") || catLower.contains("bengali") -> {
-                addJob("Bangla Cinema & Natok", "movie") { tmdbApi.getBengaliMovies(page = it) }
-                addJob("Bangla Cinema & Natok", "series") { tmdbApi.getBengaliSeries(page = it) }
+                addJob("Bangla", "movie") { tmdbApi.getBengaliMovies(page = it) }
+                addJob("Bangla", "series") { tmdbApi.getBengaliSeries(page = it) }
             }
             else -> {
                 // Fallback core categories
@@ -724,8 +724,8 @@ class MediaRepository {
         jobs.add(async(Dispatchers.IO) { fetchLatestReleases(page) })
         addJob("Movies", "movie") { tmdbApi.getTrendingMovies(page = it) }
         addJob("Series & TV Shows", "series") { tmdbApi.getTrendingTvShows(page = it) }
-        addJob("Bangla Cinema & Natok", "movie") { tmdbApi.getBengaliMovies(page = it) }
-        addJob("Bangla Cinema & Natok", "series") { tmdbApi.getBengaliSeries(page = it) }
+        addJob("Bangla", "movie") { tmdbApi.getBengaliMovies(page = it) }
+        addJob("Bangla", "series") { tmdbApi.getBengaliSeries(page = it) }
         jobs.add(async(Dispatchers.IO) {
             try {
                 val list = com.example.scraper.AnikotoScraper.searchOrFilterAnime(type = "TV", page = page)

@@ -96,6 +96,7 @@ data class AppControlConfig(
     val sportsTabStatusText: String = "Live",
     val sportsLockReason: String = "Sports hub is currently locked by administrator.",
     val fancodeCode: String = "",
+    val fancodeBannerUrl: String = "",
     val isFanCodeLocked: Boolean = false,
     val isFanCodeGetCodeEnabled: Boolean = true,
     val fancodeTelegramUrl: String = "",
@@ -203,6 +204,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
                 sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
                 fancodeCode = p.getString("fancodeCode", "") ?: "",
+                fancodeBannerUrl = p.getString("fancodeBannerUrl", "") ?: "",
                 isFanCodeLocked = p.getBoolean("isFanCodeLocked", false),
                 isFanCodeGetCodeEnabled = p.getBoolean("isFanCodeGetCodeEnabled", true),
                 fancodeTelegramUrl = p.getString("fancodeTelegramUrl", "") ?: "",
@@ -1082,6 +1084,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 .ifBlank { json.optString("fanCode", "") }
                                 .ifBlank { json.optString("fancode", "") }
                                 .ifBlank { json.optString("fan_code", "") }
+                            val fancodeBannerUrl = json.optString("fancodeBannerUrl", "")
+                                .ifBlank { json.optString("fancode_banner_url", "") }
+                                .ifBlank { json.optString("fancodeBanner", "") }
+                                .ifBlank { json.optString("fancode_banner", "") }
                             val isFanCodeLocked = json.optBoolean("isFanCodeLocked", false) || json.optBoolean("isFanCodeRequired", false)
                             val isFanCodeGetCodeEnabled = if (json.has("isFanCodeGetCodeEnabled")) {
                                 json.optBoolean("isFanCodeGetCodeEnabled", true)
@@ -1386,11 +1392,28 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     )
                                 }
                                 else -> {
-                                    val isLaunchAdEnabled = json.optBoolean("isLaunchAdEnabled", false) || json.optBoolean("launchAdEnabled", false)
+                                    val isLaunchAdEnabled = json.optBoolean("isLaunchAdEnabled", false) ||
+                                            json.optBoolean("launchAdEnabled", false) ||
+                                            json.optBoolean("isSplashAdEnabled", false) ||
+                                            json.optBoolean("splashAdEnabled", false) ||
+                                            json.optBoolean("splash_ad_enabled", false) ||
+                                            json.optBoolean("showSplashAd", false) ||
+                                            (json.has("splashAd") && json.optJSONObject("splashAd") == null && json.optBoolean("splashAd", false))
+
                                     val rawMediaUrl = json.optString("launchAdMediaUrl", "").ifBlank {
                                         json.optString("launchAdVideoUrl", "").ifBlank {
                                             json.optString("launchAdImageUrl", "").ifBlank {
-                                                json.optString("launchAdPosterUrl", "")
+                                                json.optString("launchAdPosterUrl", "").ifBlank {
+                                                    json.optString("splashAdMediaUrl", "").ifBlank {
+                                                        json.optString("splashAdImageUrl", "").ifBlank {
+                                                            json.optString("splash_ad_media_url", "").ifBlank {
+                                                                json.optString("splashImageUrl", "").ifBlank {
+                                                                    json.optString("splash_image_url", "")
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1399,12 +1422,26 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                             enabled = true,
                                             mediaType = json.optString("launchAdMediaType", "auto"),
                                             mediaUrl = rawMediaUrl,
-                                            targetUrl = json.optString("launchAdTargetUrl", ""),
+                                            targetUrl = json.optString("launchAdTargetUrl", "").ifBlank {
+                                                json.optString("splashAdTargetUrl", "").ifBlank {
+                                                    json.optString("splash_ad_target_url", "").ifBlank {
+                                                        json.optString("splashClickUrl", "").ifBlank {
+                                                            json.optString("splash_click_url", "").ifBlank {
+                                                                json.optString("splashTargetUrl", "")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
                                             title = json.optString("launchAdTitle", ""),
                                             description = json.optString("launchAdDescription", ""),
                                             buttonText = json.optString("launchAdButtonText", "Learn More"),
-                                            skipDurationSeconds = json.optInt("launchAdSkipSeconds", 5),
-                                            displayFrequency = json.optString("launchAdDisplayFrequency", "ONCE_AFTER_INSTALL"),
+                                            skipDurationSeconds = json.optInt("launchAdSkipSeconds", json.optInt("splashAdSkipSeconds", 5)),
+                                            displayFrequency = json.optString("launchAdDisplayFrequency", "").ifBlank {
+                                                json.optString("splashAdDisplayFrequency", "").ifBlank {
+                                                    json.optString("displayFrequency", "EVERY_LAUNCH")
+                                                }
+                                            },
                                             adId = json.optString("launchAdId", "")
                                         )
                                     } else null
@@ -1421,6 +1458,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putString("sportsTabStatusText", sportsStatus)
                                     .putString("sportsLockReason", sportsReason)
                                     .putString("fancodeCode", fancodeCode)
+                                    .putString("fancodeBannerUrl", fancodeBannerUrl)
                                     .putBoolean("isFanCodeLocked", isFanCodeLocked)
                                     .putBoolean("isFanCodeGetCodeEnabled", isFanCodeGetCodeEnabled)
                                     .putString("fancodeTelegramUrl", fancodeTelegramUrl)
@@ -1468,6 +1506,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 sportsTabStatusText = sportsStatus,
                                 sportsLockReason = sportsReason,
                                 fancodeCode = fancodeCode,
+                                fancodeBannerUrl = fancodeBannerUrl,
                                 isFanCodeLocked = isFanCodeLocked,
                                 isFanCodeGetCodeEnabled = isFanCodeGetCodeEnabled,
                                 fancodeTelegramUrl = fancodeTelegramUrl,

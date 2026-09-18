@@ -411,9 +411,16 @@ fun CopyrightBottomSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val bgColor = if (isDark) Color(0xFF141416) else Color(0xFFF9F9FA)
+    val cardBg = if (isDark) Color(0xFF1C1C1E) else Color.White
+    val textColor = if (isDark) Color.White else Color(0xFF1C1C1E)
+    val subTextColor = if (isDark) Color(0xFFD1D1D6) else Color(0xFF48484A)
+    val dividerColor = if (isDark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1C1C1E)
+        containerColor = bgColor
     ) {
         Column(
             modifier = Modifier
@@ -434,7 +441,7 @@ fun CopyrightBottomSheet(
                     text = "Copyright Disclaimer",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = textColor
                 )
             }
 
@@ -442,7 +449,7 @@ fun CopyrightBottomSheet(
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF2C2C2E),
+                color = cardBg,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 LazyColumn(
@@ -455,7 +462,7 @@ fun CopyrightBottomSheet(
                     item {
                         Text(
                             text = "Copyright Disclaimer & Intellectual Property Notice",
-                            color = Color.White,
+                            color = textColor,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         )
@@ -464,7 +471,7 @@ fun CopyrightBottomSheet(
                     item {
                         Text(
                             text = "Home Air functions strictly as an indexing directory and media player utility. Home Air does not host, upload, broadcast, store, or retransmit any audio, video, or media content. All content streams, embedded links, and playlists indexed within this application are hosted by independent third-party servers and are publicly and freely accessible across the internet.",
-                            color = Color(0xFFD1D1D6),
+                            color = subTextColor,
                             fontSize = 13.sp,
                             lineHeight = 19.sp
                         )
@@ -473,14 +480,14 @@ fun CopyrightBottomSheet(
                     item {
                         Text(
                             text = "All trademarks, registered service marks, logos, and copyrighted materials displayed or accessed through this application remain the exclusive property of their respective owners. Home Air claims no ownership, affiliation, or endorsement regarding any third-party content.",
-                            color = Color(0xFFD1D1D6),
+                            color = subTextColor,
                             fontSize = 13.sp,
                             lineHeight = 19.sp
                         )
                     }
 
                     item {
-                        HorizontalDivider(color = Color(0xFF3A3A3C))
+                        HorizontalDivider(color = dividerColor)
                     }
 
                     item {
@@ -495,7 +502,7 @@ fun CopyrightBottomSheet(
                     item {
                         Text(
                             text = "Home Air complies with applicable copyright regulations, including the Digital Millennium Copyright Act (DMCA). If you are a copyright holder or an authorized agent and believe that an indexed link infringes upon your intellectual property rights, please submit a written notice containing proof of ownership and the exact URL/content identifier to:",
-                            color = Color(0xFFD1D1D6),
+                            color = subTextColor,
                             fontSize = 13.sp,
                             lineHeight = 19.sp
                         )
@@ -515,7 +522,7 @@ fun CopyrightBottomSheet(
                                 }
                             },
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF222224),
+                            color = if (isDark) Color(0xFF222224) else Color(0xFFF2F2F7),
                             border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.4f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -531,8 +538,8 @@ fun CopyrightBottomSheet(
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Column {
-                                    Text("Contact Legal Email", color = Color.Gray, fontSize = 11.sp)
-                                    Text("hmairtv@gmail.com", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Contact Legal Email", color = if (isDark) Color.Gray else Color(0xFF636366), fontSize = 11.sp)
+                                    Text("hmairtv@gmail.com", color = textColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
                             }
                         }
@@ -541,7 +548,7 @@ fun CopyrightBottomSheet(
                     item {
                         Text(
                             text = "Upon receipt of a valid infringement notice, the referenced links will be investigated and removed expeditiously.",
-                            color = Color(0xFFD1D1D6),
+                            color = subTextColor,
                             fontSize = 13.sp,
                             lineHeight = 19.sp
                         )
@@ -604,9 +611,16 @@ fun FloatingPlayerLimitBottomSheet(
     onSelectLimit: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val bgColor = if (isDark) Color(0xFF141416) else Color(0xFFF9F9FA)
+    val cardBg = if (isDark) Color(0xFF1C1C1E) else Color.White
+    val textColor = if (isDark) Color.White else Color(0xFF1C1C1E)
+    val subTextColor = if (isDark) Color.Gray else Color(0xFF636366)
+    val borderColor = if (isDark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1C1C1E)
+        containerColor = bgColor
     ) {
         Column(
             modifier = Modifier
@@ -628,12 +642,12 @@ fun FloatingPlayerLimitBottomSheet(
                         text = "Multiple Floating Player Mode",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = textColor
                     )
                     Text(
                         text = "Select max concurrent active floating players (2 to 6 max)",
                         fontSize = 12.sp,
-                        color = Color.Gray
+                        color = subTextColor
                     )
                 }
             }
@@ -652,8 +666,8 @@ fun FloatingPlayerLimitBottomSheet(
                             onDismiss()
                         },
                         shape = RoundedCornerShape(12.dp),
-                        color = if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color(0xFF2C2C2E),
-                        border = BorderStroke(1.dp, if (isSelected) Color(0xFF00E5FF) else Color(0xFF3A3A3C)),
+                        color = if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.15f) else cardBg,
+                        border = BorderStroke(1.dp, if (isSelected) Color(0xFF00E5FF) else borderColor),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -670,19 +684,19 @@ fun FloatingPlayerLimitBottomSheet(
                                 Icon(
                                     imageVector = Icons.Default.PictureInPictureAlt,
                                     contentDescription = null,
-                                    tint = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
+                                    tint = if (isSelected) Color(0xFF00E5FF) else subTextColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Column {
                                     Text(
                                         text = "$limit Floating Players ${if (limit == 6) "(Max)" else if (limit == 2) "(Standard)" else ""}",
-                                        color = if (isSelected) Color(0xFF00E5FF) else Color.White,
+                                        color = if (isSelected) Color(0xFF00E5FF) else textColor,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         fontSize = 14.sp
                                     )
                                     Text(
                                         text = "Allows playing up to $limit floating video players simultaneously",
-                                        color = Color.Gray,
+                                        color = subTextColor,
                                         fontSize = 11.sp
                                     )
                                 }
@@ -695,7 +709,7 @@ fun FloatingPlayerLimitBottomSheet(
                                 },
                                 colors = RadioButtonDefaults.colors(
                                     selectedColor = Color(0xFF00E5FF),
-                                    unselectedColor = Color.Gray
+                                    unselectedColor = subTextColor
                                 )
                             )
                         }

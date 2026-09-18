@@ -21,6 +21,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.material.icons.Icons
@@ -348,6 +351,8 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
     }
 
     val showPremiumPaywall by viewModel.showPremiumPaywall.collectAsState()
+    var showMainLoginSheet by remember { mutableStateOf(false) }
+
     if (showPremiumPaywall) {
         val config = appControlConfig
         PremiumPaywallDialog(
@@ -357,7 +362,18 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             buttonUrl = config?.premiumPaywallButtonUrl ?: "",
             viewModel = viewModel,
             userProfile = userProfile,
+            onOpenLogin = {
+                viewModel.triggerPremiumPaywall(false)
+                showMainLoginSheet = true
+            },
             onDismiss = { viewModel.triggerPremiumPaywall(false) }
+        )
+    }
+
+    if (showMainLoginSheet) {
+        com.example.ui.screens.SignInBottomSheet(
+            viewModel = viewModel,
+            onDismiss = { showMainLoginSheet = false }
         )
     }
 
@@ -981,143 +997,154 @@ fun AppSuspendedScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNoticeDialog(
     notice: com.example.ui.viewmodel.AppNotice,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    Dialog(onDismissRequest = { if (notice.isDismissible) onDismiss() }) {
-        Card(
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val bgColor = if (isDark) Color(0xFF141416) else Color(0xFFF9F9FA)
+    val textColor = if (isDark) Color.White else Color(0xFF1C1C1E)
+    val subTextColor = if (isDark) Color(0xFFB4B4C0) else Color(0xFF636366)
+    val borderColor = if (isDark) Color(0xFF3B3B48) else Color(0xFFE5E5EA)
+
+    ModalBottomSheet(
+        onDismissRequest = { if (notice.isDismissible) onDismiss() },
+        containerColor = bgColor,
+        dragHandle = {
+            androidx.compose.material3.BottomSheetDefaults.DragHandle(
+                color = Color(0xFFFF6B00).copy(alpha = 0.5f)
+            )
+        },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF13111C)),
-            border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(Color(0xFFFF6B00).copy(alpha = 0.6f), Color(0xFF8B5CF6).copy(alpha = 0.4f))))
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            // Header badge
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Header badge
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFFF6B00).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.4f))
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFFFF6B00).copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.4f))
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Campaign,
-                                contentDescription = "Announcement",
-                                tint = Color(0xFFFF6B00),
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = "SPECIAL ANNOUNCEMENT",
-                                color = Color(0xFFFF8800),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 0.8.sp
-                            )
-                        }
-                    }
-
-                    if (notice.isDismissible) {
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color.Gray,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Campaign,
+                            contentDescription = "Announcement",
+                            tint = Color(0xFFFF6B00),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "SPECIAL ANNOUNCEMENT",
+                            color = Color(0xFFFF8800),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.8.sp
+                        )
                     }
                 }
 
-                if (!notice.imageUrl.isNullOrBlank()) {
-                    coil.compose.AsyncImage(
-                        model = notice.imageUrl,
-                        contentDescription = "Notice Image",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
-                            .clip(RoundedCornerShape(14.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                }
-
-                Text(
-                    text = notice.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = notice.message,
-                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
-                    color = Color(0xFFB4B4C0),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (notice.isDismissible) {
-                        OutlinedButton(
-                            onClick = onDismiss,
-                            border = BorderStroke(1.dp, Color(0xFF3B3B48)),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                            modifier = Modifier.weight(1f).height(42.dp)
-                        ) {
-                            Text("Dismiss", fontSize = 13.sp)
-                        }
-                    }
-
-                    if (!notice.buttonUrl.isNullOrBlank() && !notice.buttonText.isNullOrBlank()) {
-                        Button(
-                            onClick = {
-                                try {
-                                    val intent = android.content.Intent(
-                                        android.content.Intent.ACTION_VIEW,
-                                        android.net.Uri.parse(notice.buttonUrl)
-                                    )
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(if (notice.isDismissible) 1.2f else 1f).height(42.dp)
-                        ) {
-                            Text(notice.buttonText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
+                if (notice.isDismissible) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = subTextColor,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
+
+            if (!notice.imageUrl.isNullOrBlank()) {
+                coil.compose.AsyncImage(
+                    model = notice.imageUrl,
+                    contentDescription = "Notice Image",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp)
+                        .clip(RoundedCornerShape(14.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
+            Text(
+                text = notice.title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = textColor,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = notice.message,
+                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
+                color = subTextColor,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (notice.isDismissible) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        border = BorderStroke(1.dp, borderColor),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = textColor),
+                        modifier = Modifier.weight(1f).height(42.dp)
+                    ) {
+                        Text("Dismiss", fontSize = 13.sp)
+                    }
+                }
+
+                if (!notice.buttonUrl.isNullOrBlank() && !notice.buttonText.isNullOrBlank()) {
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(notice.buttonUrl)
+                                )
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(if (notice.isDismissible) 1.2f else 1f).height(42.dp)
+                    ) {
+                        Text(notice.buttonText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }
@@ -1130,195 +1157,670 @@ fun GlobalFanCodeLockScreen(
     var enteredPasscode by remember { mutableStateOf("") }
     var passcodeError by remember { mutableStateOf(false) }
     var showGetCodeModal by remember { mutableStateOf(false) }
+    var showGetCodeOptionsModal by remember { mutableStateOf(false) }
+    var showLoginSheet by remember { mutableStateOf(false) }
 
     val appControlConfig by viewModel.appControlConfig.collectAsState()
+    val userProfile by viewModel.userProfile.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scrollState = rememberScrollState()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF090B14),
-                        Color(0xFF0D0B1A),
-                        Color(0xFF000000)
-                    )
-                )
-            )
-            .padding(20.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF141420)),
-            shape = RoundedCornerShape(26.dp),
-            border = BorderStroke(1.2.dp, Brush.linearGradient(listOf(Color(0xFFFF6B00).copy(alpha = 0.5f), Color(0xFF7C3AED).copy(alpha = 0.3f)))),
-            modifier = Modifier.fillMaxWidth(0.95f)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(68.dp)
-                        .background(
-                            Brush.linearGradient(listOf(Color(0xFFFF6B00).copy(alpha = 0.2f), Color(0xFFFF8800).copy(alpha = 0.1f))),
-                            CircleShape
-                        )
-                        .border(1.5.dp, Color(0xFFFF6B00), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Fan Code Lock",
-                        tint = Color(0xFFFF6B00),
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
+    var lastCheckedProfileEmail by remember { mutableStateOf<String?>(null) }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "Fan Code Access",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "Enter the security Fan Code from the Admin Panel to unlock access.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFA1A1AA),
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                OutlinedTextField(
-                    value = enteredPasscode,
-                    onValueChange = {
-                        enteredPasscode = it
-                        passcodeError = false
-                    },
-                    label = { Text("Security Fan Code") },
-                    placeholder = { Text("Enter code...", color = Color.DarkGray) },
-                    isError = passcodeError,
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFFFF6B00),
-                        unfocusedBorderColor = Color(0xFF2E2E3A),
-                        focusedLabelColor = Color(0xFFFF6B00),
-                        unfocusedLabelColor = Color.Gray,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedContainerColor = Color(0xFF1B1B28),
-                        unfocusedContainerColor = Color(0xFF1B1B28)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (passcodeError) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Incorrect Fan Code! Please check and try again.",
-                        color = Color(0xFFFF4D4D),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Button(
-                    onClick = {
-                        val success = viewModel.unlockAppWithFanCode(enteredPasscode)
-                        if (!success) {
-                            passcodeError = true
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Key,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Unlock App", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                }
-
-                // Get Code Button (Controlled from Website Admin Panel)
-                val isGetCodeEnabled = appControlConfig?.isFanCodeGetCodeEnabled != false
-                if (isGetCodeEnabled) {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedButton(
-                        onClick = { showGetCodeModal = true },
-                        border = BorderStroke(1.2.dp, Color(0xFFFF6B00).copy(alpha = 0.65f)),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = Color(0xFFFF6B00).copy(alpha = 0.12f)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("fancode_get_code_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.HelpOutline,
-                            contentDescription = "Get Code",
-                            tint = Color(0xFFFF8800),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Get Code",
-                            color = Color(0xFFFF8800),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
+    // Check if logged in user is in Authorized VIP list from Admin Panel
+    androidx.compose.runtime.LaunchedEffect(userProfile) {
+        val currentEmail = userProfile?.email?.trim()
+        if (!currentEmail.isNullOrEmpty() && currentEmail != lastCheckedProfileEmail) {
+            lastCheckedProfileEmail = currentEmail
+            val isVip = viewModel.isUserPremium(currentEmail)
+            if (isVip) {
+                viewModel.unlockAppWithFanCode("AUTO_VIP_USER")
+                Toast.makeText(context, "Welcome VIP User! Access granted.", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "You're not a VIP user! Please apply FanCode or buy subscription.", Toast.LENGTH_LONG).show()
             }
         }
     }
 
+    val bannerUrl = appControlConfig?.fancodeBannerUrl?.ifBlank { null }
+        ?: "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=1000&auto=format&fit=crop"
+
+    val subscribeUrl = appControlConfig?.fancodeWebUrl?.ifBlank { null }
+        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+        ?: "https://homeair.pages.dev/vip"
+
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val pageBg = if (isDark) Color(0xFF121214) else Color(0xFFFFF9F2)
+    val cardBg = if (isDark) Color(0xFF1E1E24) else Color(0xFFFFF6EE)
+    val cardBorder = if (isDark) Color(0xFF2C2C36) else Color(0xFFFFE0CC)
+    val textPrimary = if (isDark) Color.White else Color(0xFF1E1E2C)
+    val textSecondary = if (isDark) Color(0xFFA1A1AA) else Color(0xFF71717A)
+    val inputBg = if (isDark) Color(0xFF141418) else Color.White
+    val badgeBg = if (isDark) Color(0xFF2C2C36) else Color(0xFFFFEAD0)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(pageBg)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+        ) {
+                // Top Orange Hero Banner Section matching image.png exactly with Calligraphic bottom curve
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(210.dp)
+                        .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFFF512F),
+                                    Color(0xFFFF8800)
+                                )
+                            )
+                        )
+                ) {
+                    // Admin Banner Image Overlay if configured or default image matching image.png
+                    coil.compose.AsyncImage(
+                        model = bannerUrl,
+                        contentDescription = "FanCode Banner",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(0xFFFF512F).copy(alpha = 0.85f),
+                                        Color(0xFFFF8800).copy(alpha = 0.85f)
+                                    )
+                                )
+                            )
+                    )
+
+                    // Right-side calligraphic sports silhouettes & diagonal speed lines matching image.png
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(150.dp)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.12f))
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SportsBasketball,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.25f),
+                                modifier = Modifier
+                                    .size(110.dp)
+                                    .padding(end = 12.dp)
+                            )
+                        }
+                    }
+
+                    // Content Text Column (Matching image.png typography exactly)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "FANCODE",
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Black,
+                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                letterSpacing = 2.5.sp
+                            ),
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "More Sports. More Action.",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Get access to live sports, exclusive content, and premium features with FanCode.",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp
+                            ),
+                            color = Color.White.copy(alpha = 0.95f),
+                            modifier = Modifier.fillMaxWidth(0.72f)
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Fancode Apply Header Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = cardBg),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(Color(0xFFFF6B00), RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ConfirmationNumber,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "FanCode Pass",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textPrimary
+                                    )
+                                    Text(
+                                        text = "Enter your FanCode to get special benefits and unlock premium content.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = textSecondary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Input Box with Apply Button
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                                    .background(inputBg, RoundedCornerShape(12.dp))
+                                    .border(1.2.dp, Color(0xFFFF6B00), RoundedCornerShape(12.dp))
+                                    .padding(start = 12.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ConfirmationNumber,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (enteredPasscode.isEmpty()) {
+                                        Text(
+                                            text = "Enter FanCode",
+                                            color = Color(0xFF9CA3AF),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = enteredPasscode,
+                                        onValueChange = {
+                                            enteredPasscode = it
+                                            passcodeError = false
+                                        },
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = textPrimary, fontWeight = FontWeight.Bold),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                Button(
+                                    onClick = {
+                                        val success = viewModel.unlockAppWithFanCode(enteredPasscode)
+                                        if (!success) {
+                                            passcodeError = true
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isDark) Color(0xFFFF6B00).copy(alpha = 0.25f) else Color(0xFFFFEAD0)
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Text("Apply", color = Color(0xFFFF6B00), fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            if (passcodeError) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Incorrect FanCode! Please verify and try again.",
+                                    color = Color(0xFFFF4D4D),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // 4 Feature Badges in a Row (Matching image.png)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // 1. Live Matches & Events
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .background(badgeBg, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Live Matches\n& Events",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textPrimary,
+                                textAlign = TextAlign.Center,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 14.sp
+                            )
+                        }
+
+                        // 2. Exclusive Content
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .background(badgeBg, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stars,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Exclusive\nContent",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textPrimary,
+                                textAlign = TextAlign.Center,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 14.sp
+                            )
+                        }
+
+                        // 3. Watch on Any Device
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .background(badgeBg, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tv,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Watch on\nAny Device",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textPrimary,
+                                textAlign = TextAlign.Center,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 14.sp
+                            )
+                        }
+
+                        // 4. Premium Access
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .background(badgeBg, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Premium\nAccess",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = textPrimary,
+                                textAlign = TextAlign.Center,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Subscribe Now Gradient Button
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(subscribeUrl))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                // Fallback
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(),
+                        shape = RoundedCornerShape(28.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFFFF512F),
+                                            Color(0xFFFF8800)
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stars,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Subscribe Now",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Get Code Button (Controlled from Website Admin Panel)
+                    val isGetCodeEnabled = appControlConfig?.isFanCodeGetCodeEnabled != false
+                    if (isGetCodeEnabled) {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = { showGetCodeOptionsModal = true },
+                            border = BorderStroke(1.2.dp, Color(0xFFFF6B00).copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color(0xFFFF6B00).copy(alpha = 0.08f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .testTag("fancode_get_code_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HelpOutline,
+                                contentDescription = "Get FanCode",
+                                tint = Color(0xFFFF6B00),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Get FanCode",
+                                color = Color(0xFFFF6B00),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Footer Login Link
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Already have a FanCode account? ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textSecondary
+                        )
+                        androidx.compose.foundation.text.ClickableText(
+                            text = androidx.compose.ui.text.AnnotatedString("Login"),
+                            onClick = {
+                                showLoginSheet = true
+                            },
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Color(0xFFFF6B00),
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+            }
+        }
+
+    if (showGetCodeOptionsModal) {
+        FanCodeGetCodeOptionsModal(
+            viewModel = viewModel,
+            onApplyRedeemCode = {
+                showGetCodeOptionsModal = false
+                showGetCodeModal = true
+            },
+            onDismiss = { showGetCodeOptionsModal = false }
+        )
+    }
+
     if (showGetCodeModal) {
         FanCodeGetCodeModal(
-            telegramUrl = appControlConfig?.fancodeTelegramUrl ?: "",
-            webUrl = appControlConfig?.fancodeWebUrl ?: "",
+            viewModel = viewModel,
+            userProfile = userProfile,
+            onOpenLogin = {
+                showGetCodeModal = false
+                showLoginSheet = true
+            },
             onDismiss = { showGetCodeModal = false }
         )
+    }
+
+    if (showLoginSheet) {
+        com.example.ui.screens.SignInBottomSheet(
+            viewModel = viewModel,
+            onDismiss = { showLoginSheet = false }
+        )
+    }
+}
+
+@Composable
+fun GoldenTicketGraphic(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.size(100.dp, 80.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // Floating sparkles / confetti around
+        Icon(
+            imageVector = Icons.Default.AutoAwesome,
+            contentDescription = null,
+            tint = Color(0xFFFFD700),
+            modifier = Modifier
+                .size(16.dp)
+                .align(Alignment.TopStart)
+                .offset(x = 4.dp, y = 2.dp)
+        )
+        Icon(
+            imageVector = Icons.Default.Star,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.8f),
+            modifier = Modifier
+                .size(12.dp)
+                .align(Alignment.BottomStart)
+                .offset(x = 2.dp, y = (-8).dp)
+        )
+        Icon(
+            imageVector = Icons.Default.AutoAwesome,
+            contentDescription = null,
+            tint = Color(0xFFFFE082),
+            modifier = Modifier
+                .size(14.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = (-6).dp, y = 6.dp)
+        )
+
+        // Main Golden Ticket Card (Tilted 12 degrees)
+        Box(
+            modifier = Modifier
+                .size(82.dp, 54.dp)
+                .graphicsLayer { rotationZ = 12f }
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFFFFD54F),
+                            Color(0xFFFF8F00)
+                        )
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                )
+                .border(1.5.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            // Crown inside ticket
+            Icon(
+                imageVector = Icons.Default.WorkspacePremium,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(32.dp)
+            )
+
+            // Percent badge on ticket bottom right
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 8.dp, y = 8.dp)
+                    .size(28.dp)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFFE65100), Color(0xFFFF3D00))
+                        ),
+                        shape = RoundedCornerShape(6.dp)
+                    )
+                    .border(1.2.dp, Color.White, RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "%",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp
+                )
+            }
+        }
     }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun FanCodeGetCodeModal(
-    telegramUrl: String,
-    webUrl: String,
+fun FanCodeGetCodeOptionsModal(
+    viewModel: com.example.ui.viewmodel.StreamViewModel,
+    onApplyRedeemCode: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val appControlConfig by viewModel.appControlConfig.collectAsState()
+
+    val telegramUrl = appControlConfig?.fancodeTelegramUrl?.ifBlank { null }
+        ?: "https://t.me/HomeAirTv"
+
+    val webUrl = appControlConfig?.fancodeWebUrl?.ifBlank { null }
+        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+        ?: "https://homeair.pages.dev/vip"
+
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val modalBg = if (isDark) Color(0xFF141418) else Color(0xFFFFF9F2)
+    val textPrimary = if (isDark) Color.White else Color(0xFF1E1E2C)
+    val textSecondary = if (isDark) Color(0xFFA1A1AA) else Color(0xFF71717A)
 
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF141422),
+        containerColor = modalBg,
         dragHandle = {
             androidx.compose.material3.BottomSheetDefaults.DragHandle(
-                color = Color(0xFF3F3F56)
+                color = Color(0xFFFF6B00).copy(alpha = 0.4f)
             )
         },
         shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
@@ -1326,233 +1828,635 @@ fun FanCodeGetCodeModal(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 22.dp)
-                .padding(bottom = 36.dp, top = 8.dp),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFFFF6B00).copy(alpha = 0.22f), Color(0xFF7C3AED).copy(alpha = 0.22f))
-                        ),
-                        CircleShape
-                    )
-                    .border(1.2.dp, Color(0xFFFF6B00).copy(alpha = 0.5f), CircleShape),
-                contentAlignment = Alignment.Center
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Key,
-                    contentDescription = null,
-                    tint = Color(0xFFFF8800),
-                    modifier = Modifier.size(26.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Color(0xFFFF6B00), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ConfirmationNumber,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "Get FanCode",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = textPrimary
+                    )
+                    Text(
+                        text = "Choose how you'd like to get your code",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = textSecondary
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            Text(
-                text = "Get Fan Code",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
-                color = Color.White
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "Select an option below to get the official Fan Code access key:",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFFA1A1AA),
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Option 1: Telegram
-            Card(
+            // 1. Get via Telegram Channel
+            Button(
                 onClick = {
-                    val target = telegramUrl.ifBlank { "https://t.me/HomeAirTv" }
                     try {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(telegramUrl)
+                        )
                         context.startActivity(intent)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        Toast.makeText(context, "Could not open Telegram link", Toast.LENGTH_SHORT).show()
                     }
                     onDismiss()
                 },
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B2D)),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24A1DE)),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.2.dp, Color(0xFF0088CC).copy(alpha = 0.55f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("get_code_telegram_option")
+                    .height(52.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .background(
-                                Brush.linearGradient(listOf(Color(0xFF0088CC), Color(0xFF2AABEE))),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Telegram",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Telegram",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFF0088CC).copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Official Channel",
-                                    color = Color(0xFF2AABEE),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "Join our Telegram community to receive active access keys & announcements",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFA1A1AA),
-                            lineHeight = 16.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        tint = Color(0xFF0088CC),
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Telegram",
+                        tint = Color.White,
                         modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Get via Telegram Channel",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Option 2: Web
-            Card(
+            // 2. Get via Official Website
+            Button(
                 onClick = {
-                    val target = webUrl.ifBlank { "https://xubilasappshub.xubilaswebdevcorp.shop" }
                     try {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(webUrl)
+                        )
                         context.startActivity(intent)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        Toast.makeText(context, "Could not open Web link", Toast.LENGTH_SHORT).show()
                     }
                     onDismiss()
                 },
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B2D)),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.2.dp, Color(0xFF7C3AED).copy(alpha = 0.55f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("get_code_web_option")
+                    .height(52.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .background(
-                                Brush.linearGradient(listOf(Color(0xFF7C3AED), Color(0xFF4F46E5))),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = "Web",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Web",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFF7C3AED).copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Website Portal",
-                                    color = Color(0xFFA78BFA),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "Visit the official web portal to collect the active security Fan Code pass",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFA1A1AA),
-                            lineHeight = 16.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        tint = Color(0xFFA78BFA),
+                        imageVector = Icons.Default.Public,
+                        contentDescription = "Website",
+                        tint = Color.White,
                         modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Get via Official Website",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
+            // 3. I Have a Redeem Code / Apply
+            OutlinedButton(
+                onClick = {
+                    onDismiss()
+                    onApplyRedeemCode()
+                },
+                border = BorderStroke(1.2.dp, Color(0xFFFF6B00)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocalOffer,
+                        contentDescription = "Apply Code",
+                        tint = Color(0xFFFF6B00),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Apply Redeem Code",
+                        color = Color(0xFFFF6B00),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Close
             TextButton(
                 onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth().height(48.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
             ) {
                 Text(
                     text = "Close",
-                    color = Color.Gray,
-                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF71717A),
+                    fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun FanCodeGetCodeModal(
+    viewModel: com.example.ui.viewmodel.StreamViewModel,
+    userProfile: com.example.ui.viewmodel.UserProfile?,
+    onOpenLogin: () -> Unit = {},
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var enteredCode by remember { mutableStateOf("") }
+    var applyError by remember { mutableStateOf(false) }
+    var applySuccess by remember { mutableStateOf(false) }
+
+    val appControlConfig by viewModel.appControlConfig.collectAsState()
+    val subscribeUrl = appControlConfig?.fancodeWebUrl?.ifBlank { null }
+        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+        ?: "https://homeair.pages.dev/vip"
+
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val modalBg = if (isDark) Color(0xFF141418) else Color(0xFFFFF9F2)
+    val cardBg = if (isDark) Color(0xFF1E1E24) else Color(0xFFFFF6EE)
+    val cardBorder = if (isDark) Color(0xFF2C2C36) else Color(0xFFFFE0CC)
+    val textPrimary = if (isDark) Color.White else Color(0xFF1E1E2C)
+    val textSecondary = if (isDark) Color(0xFFA1A1AA) else Color(0xFF71717A)
+    val inputBg = if (isDark) Color(0xFF282830) else Color(0xFFFFF9F2)
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = modalBg,
+        dragHandle = {
+            androidx.compose.material3.BottomSheetDefaults.DragHandle(
+                color = Color(0xFFFF6B00).copy(alpha = 0.4f)
+            )
+        },
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Top Orange Hero Banner Section matching image.png exactly
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFFFF512F),
+                                Color(0xFFFF8800)
+                            )
+                        )
+                    )
+                    .padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "FANCODE",
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Black,
+                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                letterSpacing = 2.5.sp
+                            ),
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Apply Redeem Code",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Got a special code? Enter it below to unlock exciting offers and premium benefits!",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp
+                            ),
+                            color = Color.White.copy(alpha = 0.95f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    GoldenTicketGraphic()
+                }
+            }
+
+            // Body Content
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (userProfile == null) {
+                    // Sign-in gate card when not signed in
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = cardBg),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFFFF6B00),
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Sign In Required",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = textPrimary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Please sign in to apply redeem codes and unlock exclusive FanCode access.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = textSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    onDismiss()
+                                    onOpenLogin()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text("Sign In Now", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    // Redeem Code Box (Only appears when signed in)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = cardBg),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, cardBorder),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(Color(0xFFFF6B00).copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocalOffer,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF6B00),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Enter Redeem Code",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textPrimary
+                                    )
+                                    Text(
+                                        text = "Type your code here (e.g. FAN10, VIP20, etc.)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = textSecondary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Input Field Box
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
+                                    .background(inputBg, RoundedCornerShape(12.dp))
+                                    .border(1.2.dp, Color(0xFFFF6B00).copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ConfirmationNumber,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (enteredCode.isEmpty()) {
+                                        Text(
+                                            text = "Enter code",
+                                            color = Color(0xFF9CA3AF),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = enteredCode,
+                                        onValueChange = {
+                                            enteredCode = it
+                                            applyError = false
+                                            applySuccess = false
+                                        },
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = textPrimary, fontWeight = FontWeight.Bold),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+
+                            if (applyError) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Invalid code! Please check and try again.",
+                                    color = Color(0xFFFF4D4D),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            if (applySuccess) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Success! Redeem code applied successfully.",
+                                    color = Color(0xFF10B981),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Apply Button
+                    Button(
+                        onClick = {
+                            val success = viewModel.unlockAppWithFanCode(enteredCode)
+                            if (success) {
+                                applySuccess = true
+                                Toast.makeText(context, "Redeem code applied successfully!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                applyError = true
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        contentPadding = PaddingValues(),
+                        shape = RoundedCornerShape(28.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFFFF512F),
+                                            Color(0xFFFF8800)
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "Apply",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // How it works? Card (Matching image.png exactly)
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF6EE)),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFFE0CC)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(Color(0xFFFF6B00), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "How it works?",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1E1E2C)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val bulletPoints = listOf(
+                            "Enter your redeem code in the box above.",
+                            "Click Apply to unlock the offer.",
+                            "Enjoy exclusive benefits on Fancode!"
+                        )
+
+                        bulletPoints.forEach { point ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = point,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF71717A)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Subscribe Button (as requested: "ar tar niche subscribe and close button")
+                Button(
+                    onClick = {
+                        try {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(subscribeUrl))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {}
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    contentPadding = PaddingValues(),
+                    shape = RoundedCornerShape(28.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color(0xFFFF512F),
+                                        Color(0xFFFF8800)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Stars,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Subscribe Now",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Close Button
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                ) {
+                    Text(
+                        text = "Close",
+                        color = Color(0xFF71717A),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
             }
         }
     }
@@ -1567,94 +2471,449 @@ fun PremiumPaywallDialog(
     buttonUrl: String,
     viewModel: StreamViewModel,
     userProfile: com.example.ui.viewmodel.UserProfile?,
+    onOpenLogin: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var enteredCode by remember { mutableStateOf("") }
+    var applyError by remember { mutableStateOf(false) }
+    var applySuccess by remember { mutableStateOf(false) }
+
+    val appControlConfig by viewModel.appControlConfig.collectAsState()
+    val subscribeUrl = buttonUrl.ifBlank { null }
+        ?: appControlConfig?.fancodeWebUrl?.ifBlank { null }
+        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+        ?: "https://homeair.pages.dev/vip"
 
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF18181B),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
+        containerColor = Color(0xFFFFF9F2),
+        dragHandle = {
+            androidx.compose.material3.BottomSheetDefaults.DragHandle(
+                color = Color(0xFFFF6B00).copy(alpha = 0.4f)
+            )
+        },
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 24.dp, start = 24.dp, end = 24.dp),
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Top Orange Hero Banner Section matching image.png exactly
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFFFF512F),
+                                Color(0xFFFF8800)
+                            )
+                        )
+                    )
+                    .padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "FANCODE",
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Black,
+                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                letterSpacing = 2.5.sp
+                            ),
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = title.ifBlank { "Apply Redeem Code" },
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = message.ifBlank { "Got a special code? Enter it below to unlock exciting offers and premium benefits!" },
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp
+                            ),
+                            color = Color.White.copy(alpha = 0.95f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    GoldenTicketGraphic()
+                }
+            }
+
+            // Body Content
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .background(Color(0xFFFFD700).copy(alpha = 0.2f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = "Premium VIP",
-                        tint = Color(0xFFFFD700),
-                        modifier = Modifier.size(36.dp)
-                    )
+                if (userProfile == null) {
+                    // Sign-in gate card when not signed in
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF6EE)),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFFFE0CC)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFFFF6B00),
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Sign In Required",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1E1E2C)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Please sign in to apply redeem codes and unlock exclusive FanCode access.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF71717A),
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    onDismiss()
+                                    onOpenLogin()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text("Sign In Now", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    // Redeem Code Box (Only appears when signed in)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFFFF)),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color(0xFFFFE0CC)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(Color(0xFFFFEAD0), RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocalOffer,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF6B00),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Enter Redeem Code",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1E1E2C)
+                                    )
+                                    Text(
+                                        text = "Type your code here (e.g. FAN10, VIP20, etc.)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF71717A)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Input Field Box
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
+                                    .background(Color(0xFFFFF9F2), RoundedCornerShape(12.dp))
+                                    .border(1.2.dp, Color(0xFFFFE0CC), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ConfirmationNumber,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (enteredCode.isEmpty()) {
+                                        Text(
+                                            text = "Enter code",
+                                            color = Color(0xFF9CA3AF),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = enteredCode,
+                                        onValueChange = {
+                                            enteredCode = it
+                                            applyError = false
+                                            applySuccess = false
+                                        },
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color(0xFF1E1E2C), fontWeight = FontWeight.Bold),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+
+                            if (applyError) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Invalid code! Please check and try again.",
+                                    color = Color(0xFFFF4D4D),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            if (applySuccess) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Success! Redeem code applied successfully.",
+                                    color = Color(0xFF10B981),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Apply Button
+                    Button(
+                        onClick = {
+                            val success = viewModel.unlockAppWithFanCode(enteredCode)
+                            if (success) {
+                                applySuccess = true
+                                Toast.makeText(context, "Redeem code applied successfully!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                applyError = true
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        contentPadding = PaddingValues(),
+                        shape = RoundedCornerShape(28.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFFFF512F),
+                                            Color(0xFFFF8800)
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "Apply",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
+                // How it works? Card (Matching image.png exactly)
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF6EE)),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFFE0CC)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(Color(0xFFFF6B00), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "How it works?",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1E1E2C)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val bulletPoints = listOf(
+                            "Enter your redeem code in the box above.",
+                            "Click Apply to unlock the offer.",
+                            "Enjoy exclusive benefits on Fancode!"
+                        )
+
+                        bulletPoints.forEach { point ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = point,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF71717A)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Subscribe Button
+                Button(
+                    onClick = {
+                        try {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(subscribeUrl))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {}
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    contentPadding = PaddingValues(),
+                    shape = RoundedCornerShape(28.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color(0xFFFF512F),
+                                        Color(0xFFFF8800)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Stars,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = buttonText.ifBlank { "Subscribe Now" },
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.LightGray,
-                    textAlign = TextAlign.Center
-                )
-
-                RedeemCodeSection(viewModel, userProfile)
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // Close Button
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Close", color = Color.White)
-                    }
-
-                    Button(
-                        onClick = {
-                            if (buttonUrl.isNotBlank()) {
-                                try {
-                                    val intent = android.content.Intent(
-                                        android.content.Intent.ACTION_VIEW,
-                                        android.net.Uri.parse(buttonUrl)
-                                    )
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                }
-                            }
-                            onDismiss()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
-                        modifier = Modifier.weight(1.5f)
-                    ) {
-                        Text(buttonText, color = Color.Black, fontWeight = FontWeight.Bold)
-                    }
+                    Text(
+                        text = "Close",
+                        color = Color(0xFF71717A),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
                 }
+            }
         }
     }
 }
