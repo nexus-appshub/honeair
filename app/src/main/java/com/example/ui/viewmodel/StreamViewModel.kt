@@ -29,9 +29,14 @@ import com.google.firebase.auth.GoogleAuthProvider
 import android.widget.Toast
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 sealed interface UiState<out T> {
     object Loading : UiState<Nothing>
@@ -68,16 +73,33 @@ data class AppNotice(
     val isDismissible: Boolean = true
 )
 
+data class LaunchAdOverlayConfig(
+    val enabled: Boolean = false,
+    val mediaType: String = "auto", // "auto", "image", "video"
+    val mediaUrl: String = "",
+    val targetUrl: String = "",
+    val title: String = "",
+    val description: String = "",
+    val buttonText: String = "Learn More",
+    val skipDurationSeconds: Int = 5,
+    val displayFrequency: String = "ONCE_AFTER_INSTALL", // "ONCE_AFTER_INSTALL" or "EVERY_LAUNCH"
+    val adId: String = ""
+)
+
 data class AppControlConfig(
     val isAppSuspended: Boolean = false,
     val suspensionTitle: String = "App Under Maintenance",
     val suspensionMessage: String = "App access is temporarily suspended by administrator. Please check back later.",
     val notice: AppNotice? = null,
+    val launchAdOverlay: LaunchAdOverlayConfig? = null,
     val isSportsTabLocked: Boolean = false,
     val sportsTabStatusText: String = "Live",
     val sportsLockReason: String = "Sports hub is currently locked by administrator.",
     val fancodeCode: String = "",
     val isFanCodeLocked: Boolean = false,
+    val isFanCodeGetCodeEnabled: Boolean = true,
+    val fancodeTelegramUrl: String = "",
+    val fancodeWebUrl: String = "",
     val lockedTabs: List<String> = emptyList(),
     val premiumCategories: List<String> = emptyList(),
     val premiumMediaIds: List<String> = emptyList(),
@@ -153,15 +175,38 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             val p = application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
             val cachedLiveTvIds = p.getString("premiumLiveTvIds", "")?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
             val cachedLiveTvCats = p.getString("premiumLiveTvCategories", "")?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
+            val cachedLaunchAdJson = p.getString("launch_ad_overlay_json", "") ?: ""
+            val cachedLaunchAd: LaunchAdOverlayConfig? = if (cachedLaunchAdJson.isNotBlank()) {
+                try {
+                    val j = org.json.JSONObject(cachedLaunchAdJson)
+                    LaunchAdOverlayConfig(
+                        enabled = j.optBoolean("enabled", false),
+                        mediaType = j.optString("mediaType", "auto"),
+                        mediaUrl = j.optString("mediaUrl", ""),
+                        targetUrl = j.optString("targetUrl", ""),
+                        title = j.optString("title", ""),
+                        description = j.optString("description", ""),
+                        buttonText = j.optString("buttonText", "Learn More"),
+                        skipDurationSeconds = j.optInt("skipDurationSeconds", 5),
+                        displayFrequency = j.optString("displayFrequency", "ONCE_AFTER_INSTALL"),
+                        adId = j.optString("adId", "")
+                    )
+                } catch (e: Throwable) { null }
+            } else null
+
             AppControlConfig(
                 isAppSuspended = p.getBoolean("isAppSuspended", false),
                 suspensionTitle = p.getString("suspensionTitle", "App Under Maintenance") ?: "App Under Maintenance",
                 suspensionMessage = p.getString("suspensionMessage", "App access is temporarily suspended by administrator. Please check back later.") ?: "App access is temporarily suspended by administrator. Please check back later.",
+                launchAdOverlay = cachedLaunchAd,
                 isSportsTabLocked = p.getBoolean("isSportsTabLocked", false),
                 sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
                 sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
                 fancodeCode = p.getString("fancodeCode", "") ?: "",
                 isFanCodeLocked = p.getBoolean("isFanCodeLocked", false),
+                isFanCodeGetCodeEnabled = p.getBoolean("isFanCodeGetCodeEnabled", true),
+                fancodeTelegramUrl = p.getString("fancodeTelegramUrl", "") ?: "",
+                fancodeWebUrl = p.getString("fancodeWebUrl", "") ?: "",
                 redeemCode = p.getString("redeemCode", "") ?: "",
                 redeemValidityHours = p.getInt("redeemValidityHours", 24),
                 redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L),
@@ -548,12 +593,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _isRedeemActive = MutableStateFlow(false)
     val isRedeemActive: StateFlow<Boolean> = _isRedeemActive.asStateFlow()
 
+    private val _showLaunchAdOverlay = MutableStateFlow(false)
+    val showLaunchAdOverlay: StateFlow<Boolean> = _showLaunchAdOverlay.asStateFlow()
+    private var isLaunchAdDismissedInThisSession = false
+
     init {
         // Initial check for redeem status
         viewModelScope.launch {
             _userProfile.collect { profile ->
                 _isRedeemActive.value = isRedeemCodeActive(profile?.email)
             }
+        }
+        // Initial check for Launch Ad Overlay
+        val initialAd = _appControlConfig.value?.launchAdOverlay
+        if (initialAd != null && initialAd.enabled && initialAd.mediaUrl.isNotBlank()) {
+            checkAndTriggerLaunchAd(initialAd)
         }
     }
 
@@ -905,6 +959,94 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _appControlConfig.value = current.copy(notice = null)
     }
 
+    fun checkAndTriggerLaunchAd(ad: LaunchAdOverlayConfig?) {
+        if (ad == null || !ad.enabled || ad.mediaUrl.isBlank()) {
+            return
+        }
+        if (isLaunchAdDismissedInThisSession) {
+            return
+        }
+        val adKey = ad.adId.ifBlank { ad.mediaUrl.hashCode().toString() }
+        val isOnce = ad.displayFrequency.equals("ONCE_AFTER_INSTALL", ignoreCase = true) ||
+                ad.displayFrequency.equals("ONCE", ignoreCase = true)
+        if (isOnce) {
+            val hasShown = controlPrefs.getBoolean("has_shown_launch_ad_$adKey", false)
+            if (!hasShown) {
+                _showLaunchAdOverlay.value = true
+            }
+        } else {
+            // EVERY_LAUNCH / ALWAYS
+            _showLaunchAdOverlay.value = true
+        }
+    }
+
+    fun dismissLaunchAdOverlay() {
+        isLaunchAdDismissedInThisSession = true
+        val ad = _appControlConfig.value?.launchAdOverlay
+        if (ad != null) {
+            val adKey = ad.adId.ifBlank { ad.mediaUrl.hashCode().toString() }
+            controlPrefs.edit().putBoolean("has_shown_launch_ad_$adKey", true).apply()
+        }
+        _showLaunchAdOverlay.value = false
+    }
+
+    fun previewLaunchAd(config: LaunchAdOverlayConfig) {
+        _showLaunchAdOverlay.value = true
+    }
+
+    fun saveLaunchAdOverlayConfig(config: LaunchAdOverlayConfig, onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val adObj = org.json.JSONObject().apply {
+                    put("enabled", config.enabled)
+                    put("mediaType", config.mediaType)
+                    put("mediaUrl", config.mediaUrl)
+                    put("targetUrl", config.targetUrl)
+                    put("title", config.title)
+                    put("description", config.description)
+                    put("buttonText", config.buttonText)
+                    put("skipDurationSeconds", config.skipDurationSeconds)
+                    put("displayFrequency", config.displayFrequency)
+                    put("adId", config.adId)
+                }
+                controlPrefs.edit().putString("launch_ad_overlay_json", adObj.toString()).apply()
+
+                val current = _appControlConfig.value
+                if (current != null) {
+                    _appControlConfig.value = current.copy(launchAdOverlay = config)
+                } else {
+                    _appControlConfig.value = AppControlConfig(launchAdOverlay = config)
+                }
+
+                // Sync to Firebase Realtime Database
+                try {
+                    val client = okhttp3.OkHttpClient.Builder()
+                        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+                    val mediaType = "application/json; charset=utf-8".toMediaType()
+                    val body = adObj.toString().toRequestBody(mediaType)
+                    val patchReq = okhttp3.Request.Builder()
+                        .url("https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl/launchAdOverlay.json")
+                        .put(body)
+                        .build()
+                    client.newCall(patchReq).execute().close()
+                } catch (e: Exception) {
+                    Log.w("StreamViewModel", "Firebase launchAd sync deferred: ${e.message}")
+                }
+
+                withContext(Dispatchers.Main) {
+                    onResult?.invoke(true, "Launch Ad saved and updated successfully!")
+                }
+            } catch (e: Exception) {
+                Log.e("StreamViewModel", "Error saving launch ad config", e)
+                withContext(Dispatchers.Main) {
+                    onResult?.invoke(false, "Failed to save: ${e.localizedMessage}")
+                }
+            }
+        }
+    }
+
     fun fetchAppControlConfig(onComplete: (() -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             _isCheckingSuspension.value = true
@@ -941,6 +1083,34 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 .ifBlank { json.optString("fancode", "") }
                                 .ifBlank { json.optString("fan_code", "") }
                             val isFanCodeLocked = json.optBoolean("isFanCodeLocked", false) || json.optBoolean("isFanCodeRequired", false)
+                            val isFanCodeGetCodeEnabled = if (json.has("isFanCodeGetCodeEnabled")) {
+                                json.optBoolean("isFanCodeGetCodeEnabled", true)
+                            } else if (json.has("fancodeGetCodeEnabled")) {
+                                json.optBoolean("fancodeGetCodeEnabled", true)
+                            } else if (json.has("isGetCodeEnabled")) {
+                                json.optBoolean("isGetCodeEnabled", true)
+                            } else if (json.has("getCodeEnabled")) {
+                                json.optBoolean("getCodeEnabled", true)
+                            } else if (json.has("fancode_get_code_enabled")) {
+                                json.optBoolean("fancode_get_code_enabled", true)
+                            } else true
+
+                            val fancodeTelegramUrl = json.optString("fancodeTelegramUrl", "")
+                                .ifBlank { json.optString("fancodeTelegramLink", "") }
+                                .ifBlank { json.optString("fancode_telegram_url", "") }
+                                .ifBlank { json.optString("fancodeTelegram", "") }
+                                .ifBlank { json.optString("telegramUrl", "") }
+                                .ifBlank { json.optString("telegramLink", "") }
+                                .ifBlank { json.optString("fancode_telegram", "") }
+
+                            val fancodeWebUrl = json.optString("fancodeWebUrl", "")
+                                .ifBlank { json.optString("fancodeWebLink", "") }
+                                .ifBlank { json.optString("fancode_web_url", "") }
+                                .ifBlank { json.optString("fancodeWeb", "") }
+                                .ifBlank { json.optString("webUrl", "") }
+                                .ifBlank { json.optString("websiteUrl", "") }
+                                .ifBlank { json.optString("fancode_web", "") }
+
                             val isLiveTvLockEnabled = json.optBoolean("isLiveTvLockEnabled", false)
 
                             val lockedTabs = mutableListOf<String>()
@@ -1139,9 +1309,111 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val isDismissed = noticeKey.isNotBlank() && noticeKey == lastDismissedNoticeKey
                             val notice = if (isDismissed) null else parsedNotice
 
+                            // Parse Launch Ad Overlay
+                            val launchAdRaw = json.opt("launchAdOverlay")
+                                ?: json.opt("launchAd")
+                                ?: json.opt("launch_ad_overlay")
+                                ?: json.opt("fullscreenAd")
+                                ?: json.opt("splashAd")
+                                ?: json.opt("adOverlay")
+                                ?: json.opt("appLaunchAd")
+
+                            val parsedLaunchAd: LaunchAdOverlayConfig? = when (launchAdRaw) {
+                                is org.json.JSONObject -> {
+                                    val enabled = launchAdRaw.optBoolean("enabled", true)
+                                    val mediaUrl = launchAdRaw.optString("mediaUrl", "").ifBlank {
+                                        launchAdRaw.optString("videoUrl", "").ifBlank {
+                                            launchAdRaw.optString("imageUrl", "").ifBlank {
+                                                launchAdRaw.optString("posterUrl", "").ifBlank {
+                                                    launchAdRaw.optString("url", "")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    val mediaType = launchAdRaw.optString("mediaType", "").ifBlank {
+                                        launchAdRaw.optString("type", "auto")
+                                    }
+                                    val targetUrl = launchAdRaw.optString("targetUrl", "").ifBlank {
+                                        launchAdRaw.optString("actionUrl", "").ifBlank {
+                                            launchAdRaw.optString("linkUrl", "").ifBlank {
+                                                launchAdRaw.optString("clickUrl", "").ifBlank {
+                                                    launchAdRaw.optString("link", "")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    val title = launchAdRaw.optString("title", "")
+                                    val description = launchAdRaw.optString("description", "").ifBlank {
+                                        launchAdRaw.optString("subtitle", "").ifBlank {
+                                            launchAdRaw.optString("message", "")
+                                        }
+                                    }
+                                    val buttonText = launchAdRaw.optString("buttonText", "").ifBlank {
+                                        launchAdRaw.optString("btnText", "").ifBlank {
+                                            launchAdRaw.optString("actionText", "Learn More")
+                                        }
+                                    }
+                                    val skipDuration = if (launchAdRaw.has("skipDurationSeconds")) {
+                                        launchAdRaw.optInt("skipDurationSeconds", 5)
+                                    } else if (launchAdRaw.has("skipSeconds")) {
+                                        launchAdRaw.optInt("skipSeconds", 5)
+                                    } else if (launchAdRaw.has("skipDelay")) {
+                                        launchAdRaw.optInt("skipDelay", 5)
+                                    } else 5
+
+                                    val displayFrequency = launchAdRaw.optString("displayFrequency", "").ifBlank {
+                                        launchAdRaw.optString("showMode", "").ifBlank {
+                                            launchAdRaw.optString("frequency", "").ifBlank {
+                                                launchAdRaw.optString("displayMode", "ONCE_AFTER_INSTALL")
+                                            }
+                                        }
+                                    }
+                                    val adId = launchAdRaw.optString("adId", "").ifBlank {
+                                        launchAdRaw.optString("id", "")
+                                    }
+
+                                    LaunchAdOverlayConfig(
+                                        enabled = enabled,
+                                        mediaType = mediaType,
+                                        mediaUrl = mediaUrl,
+                                        targetUrl = targetUrl,
+                                        title = title,
+                                        description = description,
+                                        buttonText = buttonText,
+                                        skipDurationSeconds = skipDuration,
+                                        displayFrequency = displayFrequency,
+                                        adId = adId
+                                    )
+                                }
+                                else -> {
+                                    val isLaunchAdEnabled = json.optBoolean("isLaunchAdEnabled", false) || json.optBoolean("launchAdEnabled", false)
+                                    val rawMediaUrl = json.optString("launchAdMediaUrl", "").ifBlank {
+                                        json.optString("launchAdVideoUrl", "").ifBlank {
+                                            json.optString("launchAdImageUrl", "").ifBlank {
+                                                json.optString("launchAdPosterUrl", "")
+                                            }
+                                        }
+                                    }
+                                    if (isLaunchAdEnabled && rawMediaUrl.isNotBlank()) {
+                                        LaunchAdOverlayConfig(
+                                            enabled = true,
+                                            mediaType = json.optString("launchAdMediaType", "auto"),
+                                            mediaUrl = rawMediaUrl,
+                                            targetUrl = json.optString("launchAdTargetUrl", ""),
+                                            title = json.optString("launchAdTitle", ""),
+                                            description = json.optString("launchAdDescription", ""),
+                                            buttonText = json.optString("launchAdButtonText", "Learn More"),
+                                            skipDurationSeconds = json.optInt("launchAdSkipSeconds", 5),
+                                            displayFrequency = json.optString("launchAdDisplayFrequency", "ONCE_AFTER_INSTALL"),
+                                            adId = json.optString("launchAdId", "")
+                                        )
+                                    } else null
+                                }
+                            }
+
                             // Cache to SharedPreferences for instant cold-boot enforcement
                             try {
-                                controlPrefs.edit()
+                                val edit = controlPrefs.edit()
                                     .putBoolean("isAppSuspended", isSuspended)
                                     .putString("suspensionTitle", suspensionTitle)
                                     .putString("suspensionMessage", suspensionMessage)
@@ -1150,6 +1422,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putString("sportsLockReason", sportsReason)
                                     .putString("fancodeCode", fancodeCode)
                                     .putBoolean("isFanCodeLocked", isFanCodeLocked)
+                                    .putBoolean("isFanCodeGetCodeEnabled", isFanCodeGetCodeEnabled)
+                                    .putString("fancodeTelegramUrl", fancodeTelegramUrl)
+                                    .putString("fancodeWebUrl", fancodeWebUrl)
                                     .putString("redeemCode", redeemCode)
                                     .putInt("redeemValidityHours", redeemValidityHours)
                                     .putLong("redeemExpiryTimestamp", redeemExpiryTimestamp)
@@ -1157,7 +1432,23 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putBoolean("isLiveTvLockEnabled", isLiveTvLockEnabled)
                                     .putString("premiumLiveTvIds", premiumLiveTvIds.joinToString(","))
                                     .putString("premiumLiveTvCategories", premiumLiveTvCategories.joinToString(","))
-                                    .apply()
+
+                                if (parsedLaunchAd != null) {
+                                    val adJsonObj = org.json.JSONObject().apply {
+                                        put("enabled", parsedLaunchAd.enabled)
+                                        put("mediaType", parsedLaunchAd.mediaType)
+                                        put("mediaUrl", parsedLaunchAd.mediaUrl)
+                                        put("targetUrl", parsedLaunchAd.targetUrl)
+                                        put("title", parsedLaunchAd.title)
+                                        put("description", parsedLaunchAd.description)
+                                        put("buttonText", parsedLaunchAd.buttonText)
+                                        put("skipDurationSeconds", parsedLaunchAd.skipDurationSeconds)
+                                        put("displayFrequency", parsedLaunchAd.displayFrequency)
+                                        put("adId", parsedLaunchAd.adId)
+                                    }
+                                    edit.putString("launch_ad_overlay_json", adJsonObj.toString())
+                                }
+                                edit.apply()
                             } catch (e: Throwable) {
                                 Log.e("StreamViewModel", "Error saving control preferences", e)
                             }
@@ -1172,11 +1463,15 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 suspensionTitle = suspensionTitle,
                                 suspensionMessage = suspensionMessage,
                                 notice = notice,
+                                launchAdOverlay = parsedLaunchAd,
                                 isSportsTabLocked = isSportsLocked,
                                 sportsTabStatusText = sportsStatus,
                                 sportsLockReason = sportsReason,
                                 fancodeCode = fancodeCode,
                                 isFanCodeLocked = isFanCodeLocked,
+                                isFanCodeGetCodeEnabled = isFanCodeGetCodeEnabled,
+                                fancodeTelegramUrl = fancodeTelegramUrl,
+                                fancodeWebUrl = fancodeWebUrl,
                                 lockedTabs = lockedTabs,
                                 premiumCategories = premiumCategories,
                                 premiumMediaIds = premiumMediaIds,
@@ -1199,6 +1494,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 premiumLiveTvCategories = premiumLiveTvCategories,
                                 isLiveTvLockEnabled = isLiveTvLockEnabled
                             )
+
+                            if (parsedLaunchAd != null && parsedLaunchAd.enabled && parsedLaunchAd.mediaUrl.isNotBlank()) {
+                                withContext(Dispatchers.Main) {
+                                    checkAndTriggerLaunchAd(parsedLaunchAd)
+                                }
+                            }
 
                             // Synchronize SubscriptionManager with remote config
                             com.example.subscription.SubscriptionManager.syncWithRemoteConfig(
@@ -1522,10 +1823,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun fetchAnikotoServers(item: MediaItem, season: Int = 1, episode: Int = 1) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _isFetchingServers.value = true
             try {
+                val matchedSeasonWatchUrl = _anikotoSeasons.value.find { it.number == season }?.watchUrl
                 val targetTitleOrSlug = when {
+                    !matchedSeasonWatchUrl.isNullOrBlank() -> matchedSeasonWatchUrl
                     item.id.startsWith("anikoto_") -> item.id
                     item.id.startsWith("al_") || item.id.startsWith("mal_") || item.id.startsWith("tmdb_") -> item.title.ifBlank { item.id }
                     !item.imdbId.isNullOrBlank() && item.imdbId!!.startsWith("anikoto_") -> item.imdbId!!
@@ -2761,16 +3064,23 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
                 if (watchUrl.isNotBlank()) {
                     Log.d("StreamViewModel", "Fetching Anikoto details & seasons for watchUrl: $watchUrl")
-                    val details = com.example.scraper.AnikotoScraper.fetchAnimeDetails(watchUrl)
-                    _anikotoDetailsState.value = details
+                    val detailsDeferred = async {
+                        com.example.scraper.AnikotoScraper.fetchAnimeDetails(watchUrl)
+                    }
+                    val seasonsDeferred = async {
+                        com.example.scraper.AnikotoScraper.fetchSeasons(watchUrl, item.title)
+                    }
 
-                    val seasons = com.example.scraper.AnikotoScraper.fetchSeasons(watchUrl, item.title)
+                    val details = detailsDeferred.await()
+                    val seasons = seasonsDeferred.await()
+
+                    _anikotoDetailsState.value = details
                     _anikotoSeasons.value = seasons
 
                     val matchedSeasonUrl = seasons.find { it.number == selectedSeasonNum }?.watchUrl ?: watchUrl
                     val episodes = com.example.scraper.AnikotoScraper.fetchEpisodes(matchedSeasonUrl)
                     _anikotoEpisodes.value = episodes
-                    Log.d("StreamViewModel", "Anikoto details loaded: ${seasons.size} seasons, ${episodes.size} episodes")
+                    Log.d("StreamViewModel", "Anikoto details loaded: ${seasons.size} seasons/parts, ${episodes.size} episodes")
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -2784,7 +3094,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         if (item == null) return
         val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
         val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
-        if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, season, episode) != null) return
 
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
             title = effectiveItem.title,
@@ -2792,6 +3101,14 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             type = effectiveItem.type,
             id = effectiveItem.id
         )
+
+        // Instant pre-scrape for anime metadata & servers
+        if (isAnime) {
+            fetchAnikotoMediaData(effectiveItem, season)
+            fetchAnikotoServers(effectiveItem, season, episode)
+        }
+
+        if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, season, episode) != null) return
 
         val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
                            effectiveItem.type.equals("tv", ignoreCase = true) ||

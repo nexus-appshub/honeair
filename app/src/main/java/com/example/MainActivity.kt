@@ -33,6 +33,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -54,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import com.example.ui.components.LaunchAdOverlayScreen
 import com.example.ui.components.FloatingDownloadButton
 import com.example.ui.components.FloatingHomaiButton
 import com.example.ui.components.GlowCapsuleNavigationBar
@@ -279,6 +281,28 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
     val appControlConfig by viewModel.appControlConfig.collectAsState()
     val isCheckingSuspension by viewModel.isCheckingSuspension.collectAsState()
     val isAppUnlockedWithFanCode by viewModel.isAppUnlockedWithFanCode.collectAsState()
+    val showLaunchAdOverlay by viewModel.showLaunchAdOverlay.collectAsState()
+
+    // Full screen Pre-Splash / Pre-Lock Ad or Poster Overlay
+    val launchAd = appControlConfig?.launchAdOverlay
+    if (showLaunchAdOverlay && launchAd != null && launchAd.enabled && launchAd.mediaUrl.isNotBlank()) {
+        LaunchAdOverlayScreen(
+            config = launchAd,
+            onDismiss = { viewModel.dismissLaunchAdOverlay() },
+            onOpenLink = { url ->
+                try {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Failed to open launch ad url: $url", e)
+                }
+                viewModel.dismissLaunchAdOverlay()
+            }
+        )
+        return
+    }
 
     // Full screen kill-switch / suspension screen if enabled remotely
     appControlConfig?.let { config ->
@@ -1105,6 +1129,9 @@ fun GlobalFanCodeLockScreen(
 ) {
     var enteredPasscode by remember { mutableStateOf("") }
     var passcodeError by remember { mutableStateOf(false) }
+    var showGetCodeModal by remember { mutableStateOf(false) }
+
+    val appControlConfig by viewModel.appControlConfig.collectAsState()
 
     Box(
         modifier = Modifier
@@ -1229,6 +1256,303 @@ fun GlobalFanCodeLockScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Unlock App", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
+
+                // Get Code Button (Controlled from Website Admin Panel)
+                val isGetCodeEnabled = appControlConfig?.isFanCodeGetCodeEnabled != false
+                if (isGetCodeEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = { showGetCodeModal = true },
+                        border = BorderStroke(1.2.dp, Color(0xFFFF6B00).copy(alpha = 0.65f)),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color(0xFFFF6B00).copy(alpha = 0.12f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("fancode_get_code_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.HelpOutline,
+                            contentDescription = "Get Code",
+                            tint = Color(0xFFFF8800),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Get Code",
+                            color = Color(0xFFFF8800),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showGetCodeModal) {
+        FanCodeGetCodeModal(
+            telegramUrl = appControlConfig?.fancodeTelegramUrl ?: "",
+            webUrl = appControlConfig?.fancodeWebUrl ?: "",
+            onDismiss = { showGetCodeModal = false }
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun FanCodeGetCodeModal(
+    telegramUrl: String,
+    webUrl: String,
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF141422),
+        dragHandle = {
+            androidx.compose.material3.BottomSheetDefaults.DragHandle(
+                color = Color(0xFF3F3F56)
+            )
+        },
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 36.dp, top = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xFFFF6B00).copy(alpha = 0.22f), Color(0xFF7C3AED).copy(alpha = 0.22f))
+                        ),
+                        CircleShape
+                    )
+                    .border(1.2.dp, Color(0xFFFF6B00).copy(alpha = 0.5f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Key,
+                    contentDescription = null,
+                    tint = Color(0xFFFF8800),
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "Get Fan Code",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold),
+                color = Color.White
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "Select an option below to get the official Fan Code access key:",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFA1A1AA),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Option 1: Telegram
+            Card(
+                onClick = {
+                    val target = telegramUrl.ifBlank { "https://t.me/HomeAirTv" }
+                    try {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    onDismiss()
+                },
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B2D)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.2.dp, Color(0xFF0088CC).copy(alpha = 0.55f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("get_code_telegram_option")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(
+                                Brush.linearGradient(listOf(Color(0xFF0088CC), Color(0xFF2AABEE))),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Telegram",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Telegram",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF0088CC).copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Official Channel",
+                                    color = Color(0xFF2AABEE),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Join our Telegram community to receive active access keys & announcements",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFA1A1AA),
+                            lineHeight = 16.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Color(0xFF0088CC),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Option 2: Web
+            Card(
+                onClick = {
+                    val target = webUrl.ifBlank { "https://xubilasappshub.xubilaswebdevcorp.shop" }
+                    try {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    onDismiss()
+                },
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B2D)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.2.dp, Color(0xFF7C3AED).copy(alpha = 0.55f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("get_code_web_option")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(
+                                Brush.linearGradient(listOf(Color(0xFF7C3AED), Color(0xFF4F46E5))),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = "Web",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Web",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF7C3AED).copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Website Portal",
+                                    color = Color(0xFFA78BFA),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Visit the official web portal to collect the active security Fan Code pass",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFA1A1AA),
+                            lineHeight = 16.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Color(0xFFA78BFA),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text(
+                    text = "Close",
+                    color = Color.Gray,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 14.sp
+                )
             }
         }
     }

@@ -8,6 +8,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import com.example.network.DiagnosticLoggingInterceptor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -463,10 +465,13 @@ object AnikotoScraper {
     }
 
     /**
-     * 2. Fetch Seasons for an anime from API
+     * 2. Fetch All Seasons & Franchise Parts for an anime from API (Ensures all seasons, parts, cours, OVAs and movies are fetched)
      */
     suspend fun fetchSeasons(watchUrlOrSlug: String, animeTitle: String? = null, episode: Int = 1): List<AnikotoSeason> = withContext(Dispatchers.IO) {
-        val seasons = mutableListOf<AnikotoSeason>()
+        val rawSeasonsList = mutableListOf<AnikotoSeason>()
+        val seenWatchUrls = mutableSetOf<String>()
+        val seenTitles = mutableSetOf<String>()
+
         try {
             val queryParams = mutableListOf<String>()
             if (watchUrlOrSlug.startsWith("http") || watchUrlOrSlug.contains("/watch/")) {
@@ -487,41 +492,112 @@ object AnikotoScraper {
                 if (seasonsArray != null && seasonsArray.length() > 0) {
                     for (i in 0 until seasonsArray.length()) {
                         val sObj = seasonsArray.optJSONObject(i) ?: continue
-                        val title = sObj.optString("title", "Season ${i + 1}")
-                        val link = sObj.optString("link", "")
-                        val poster = sObj.optString("poster", "")
+                        val title = sObj.optString("title", "Season ${i + 1}").trim()
+                        val link = sObj.optString("link", "").trim()
+                        val poster = sObj.optString("poster", "").trim()
                         val subCount = sObj.optString("subCount", "")
                         val dubCount = sObj.optString("dubCount", "")
+                        val finalWatch = link.ifBlank { watchUrlOrSlug }
 
-                        val seasonNumber = extractSeasonNumber(title, i + 1)
-                        seasons.add(
-                            AnikotoSeason(
-                                number = seasonNumber,
-                                title = title,
-                                watchUrl = link.ifBlank { watchUrlOrSlug },
-                                posterUrl = poster,
-                                subCount = subCount,
-                                dubCount = dubCount
+                        val cleanT = title.lowercase().trim()
+                        val normalizedWatch = finalWatch.removeSuffix("/").lowercase()
+
+                        if (!seenWatchUrls.contains(normalizedWatch) && !seenTitles.contains(cleanT)) {
+                            seenWatchUrls.add(normalizedWatch)
+                            seenTitles.add(cleanT)
+                            rawSeasonsList.add(
+                                AnikotoSeason(
+                                    number = i + 1,
+                                    title = title,
+                                    watchUrl = finalWatch,
+                                    posterUrl = poster,
+                                    subCount = subCount,
+                                    dubCount = dubCount
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "fetchSeasons error: ${e.message}", e)
+            Log.e(TAG, "fetchSeasons API error: ${e.message}", e)
         }
 
-        if (seasons.isEmpty()) {
-            seasons.add(AnikotoSeason(number = 1, title = "Season 1", watchUrl = watchUrlOrSlug))
+        // Deep Franchise Discovery: Search for all related parts, cours, specials & movies
+        // (e.g. Mushoku Tensei Season 1, Part 2, Season 2 Part 1, Season 2 Part 2, Season 3, OVA/Movie)
+        try {
+            val targetName = (animeTitle ?: watchUrlOrSlug).trim()
+            val cleanTarget = sanitizeSearchTitle(targetName)
+            val baseFranchise = cleanTarget
+                .substringBefore(":")
+                .substringBefore("–")
+                .substringBefore("-")
+                .replace(Regex("""(?i)\b(season|part|cour|the movie|movie|final|ova|special|chapter|arc)\b.*"""), "")
+                .trim()
+
+            if (baseFranchise.length >= 3) {
+                val franchiseResults = searchOrFilterAnime(keyword = baseFranchise)
+                val baseWords = baseFranchise.lowercase().split(Regex("""\s+""")).filter { it.length >= 3 }
+                for (item in franchiseResults) {
+                    val itemTitleLower = item.title.lowercase()
+                    val matchesFranchise = baseWords.isNotEmpty() && baseWords.all { itemTitleLower.contains(it) }
+                    if (matchesFranchise && item.watchUrl.isNotBlank()) {
+                        val normWatch = item.watchUrl.removeSuffix("/").lowercase()
+                        val normTitle = item.title.lowercase().trim()
+                        if (!seenWatchUrls.contains(normWatch) && !seenTitles.contains(normTitle)) {
+                            seenWatchUrls.add(normWatch)
+                            seenTitles.add(normTitle)
+                            rawSeasonsList.add(
+                                AnikotoSeason(
+                                    number = rawSeasonsList.size + 1,
+                                    title = item.title,
+                                    watchUrl = item.watchUrl,
+                                    posterUrl = item.posterUrl,
+                                    subCount = item.subCount,
+                                    dubCount = item.dubCount
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Franchise discovery error: ${e.message}")
         }
 
-        seasons.distinctBy { it.number }.sortedBy { it.number }
+        if (rawSeasonsList.isEmpty()) {
+            rawSeasonsList.add(AnikotoSeason(number = 1, title = animeTitle ?: "Season 1", watchUrl = watchUrlOrSlug))
+        }
+
+        // Sort all franchise parts chronologically / logically
+        val sortedSeasons = rawSeasonsList.sortedWith(
+            compareBy<AnikotoSeason> { getSeasonSortRank(it.title).first }
+                .thenBy { getSeasonSortRank(it.title).second }
+                .thenBy { it.title }
+        )
+
+        // Assign clean 1-based sequential season numbers so all parts are accessible
+        val finalSeasons = sortedSeasons.mapIndexed { index, season ->
+            season.copy(number = index + 1)
+        }
+
+        Log.d(TAG, "fetchSeasons resolved ${finalSeasons.size} parts/seasons for: ${animeTitle ?: watchUrlOrSlug}")
+        finalSeasons
     }
 
-    private fun extractSeasonNumber(title: String, defaultNum: Int): Int {
-        val regex = Regex("""(?i)(?:season|part|s)\s*(\d+)""")
-        val match = regex.find(title)
-        return match?.groupValues?.get(1)?.toIntOrNull() ?: defaultNum
+    private fun getSeasonSortRank(title: String): Pair<Int, Int> {
+        val lower = title.lowercase()
+        val isSpecial = lower.contains("movie") || lower.contains("ova") || lower.contains("special") || lower.contains("the movie")
+        
+        val sRegex = Regex("""(?i)(?:season|s)\s*(\d+)""")
+        val sMatch = sRegex.find(lower)
+        val seasonNum = sMatch?.groupValues?.get(1)?.toIntOrNull() ?: if (isSpecial) 999 else 1
+
+        val pRegex = Regex("""(?i)(?:part|cour)\s*(\d+)""")
+        val pMatch = pRegex.find(lower)
+        val partNum = pMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
+
+        return Pair(if (isSpecial) 999 else seasonNum, partNum)
     }
 
     /**
@@ -674,7 +750,7 @@ object AnikotoScraper {
     }
 
     /**
-     * 5. Fetch available SUB & DUB streaming servers from API
+     * 5. Fetch available SUB & DUB streaming servers from API in parallel for high speed
      */
     suspend fun fetchAvailableServers(
         title: String,
@@ -726,12 +802,21 @@ object AnikotoScraper {
                 queriesToTry.add(baseFranchise)
             }
 
+            // Execute parallel fetch for candidate queries across SUB & DUB
             for (queryCandidate in queriesToTry) {
                 if (subServers.isNotEmpty() && dubServers.isNotEmpty()) break
 
-                // Query SUB servers
-                val subUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "sub")
-                val subJson = fetchJson(subUrl)
+                val subDeferred = async {
+                    val subUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "sub")
+                    fetchJson(subUrl)
+                }
+                val dubDeferred = async {
+                    val dubUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "dub")
+                    fetchJson(dubUrl)
+                }
+
+                val subJson = subDeferred.await()
+                val dubJson = dubDeferred.await()
 
                 if (subJson != null && subJson.optBoolean("success") == true) {
                     if (resolvedWatchUrl.isBlank()) {
@@ -809,7 +894,6 @@ object AnikotoScraper {
                             }
                         }
                     } else {
-                        // If availableServers array is empty but selectedStream is returned
                         val selected = subJson.optJSONObject("selectedStream")
                         if (selected != null && subServers.isEmpty()) {
                             val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
@@ -834,37 +918,32 @@ object AnikotoScraper {
                     }
                 }
 
-                // Query DUB servers if needed
-                if (dubServers.isEmpty()) {
-                    val dubUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "dub")
-                    val dubJson = fetchJson(dubUrl)
-                    if (dubJson != null && dubJson.optBoolean("success") == true) {
-                        val availableServers = dubJson.optJSONArray("availableServers")
-                        if (availableServers != null && availableServers.length() > 0) {
-                            for (i in 0 until availableServers.length()) {
-                                val srvObj = availableServers.optJSONObject(i) ?: continue
-                                val srvId = srvObj.optString("server", "HD-${i + 1}")
-                                val srvName = srvObj.optString("name", "Server ${i + 1}")
-                                val audioType = srvObj.optString("audioType", "DUB").uppercase()
-                                val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
-                                val rawUrl = srvObj.optString("rawUrl", "")
-                                val referer = srvObj.optString("referer", "https://anikoto.cz/")
-                                val tracks = parseSubtitles(srvObj.optJSONArray("tracks"))
+                if (dubJson != null && dubJson.optBoolean("success") == true) {
+                    val availableServers = dubJson.optJSONArray("availableServers")
+                    if (availableServers != null && availableServers.length() > 0) {
+                        for (i in 0 until availableServers.length()) {
+                            val srvObj = availableServers.optJSONObject(i) ?: continue
+                            val srvId = srvObj.optString("server", "HD-${i + 1}")
+                            val srvName = srvObj.optString("name", "Server ${i + 1}")
+                            val audioType = srvObj.optString("audioType", "DUB").uppercase()
+                            val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
+                            val rawUrl = srvObj.optString("rawUrl", "")
+                            val referer = srvObj.optString("referer", "https://anikoto.cz/")
+                            val tracks = parseSubtitles(srvObj.optJSONArray("tracks"))
 
-                                if (audioType == "DUB") {
-                                    val parsedServer = AnikotoServer(
-                                        id = srvId,
-                                        linkId = streamUrl.ifBlank { rawUrl },
-                                        name = if (srvName.isNotBlank() && !srvName.startsWith("DEMON KING")) srvName else srvId,
-                                        type = "dub",
-                                        streamUrl = streamUrl,
-                                        rawUrl = rawUrl,
-                                        referer = referer,
-                                        tracks = tracks
-                                    )
-                                    if (dubServers.none { it.id == parsedServer.id && it.streamUrl == parsedServer.streamUrl }) {
-                                        dubServers.add(parsedServer)
-                                    }
+                            if (audioType == "DUB") {
+                                val parsedServer = AnikotoServer(
+                                    id = srvId,
+                                    linkId = streamUrl.ifBlank { rawUrl },
+                                    name = if (srvName.isNotBlank() && !srvName.startsWith("DEMON KING")) srvName else srvId,
+                                    type = "dub",
+                                    streamUrl = streamUrl,
+                                    rawUrl = rawUrl,
+                                    referer = referer,
+                                    tracks = tracks
+                                )
+                                if (dubServers.none { it.id == parsedServer.id && it.streamUrl == parsedServer.streamUrl }) {
+                                    dubServers.add(parsedServer)
                                 }
                             }
                         }

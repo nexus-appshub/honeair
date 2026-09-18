@@ -5812,7 +5812,7 @@ fun AdminScreen(
                                 premiumMedia = premiumMedia,
                                 onTogglePremium = { id -> viewModel.togglePremiumMedia(id) }
                             )
-                            5 -> AdminSettingsTab()
+                            5 -> AdminSettingsTab(viewModel = viewModel)
                             6 -> AdminLogsTab(
                                 logs = filteredLogs,
                                 selectedFilter = selectedLogFilter,
@@ -6075,9 +6075,288 @@ fun AdminPremiumTab(
 }
 
 @Composable
-fun AdminSettingsTab() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Core System Configuration coming soon.", color = Color.Gray)
+fun AdminSettingsTab(viewModel: StreamViewModel) {
+    val context = LocalContext.current
+    val appControlConfig by viewModel.appControlConfig.collectAsState()
+    val initialAd = appControlConfig?.launchAdOverlay
+
+    var enabled by remember(initialAd) { mutableStateOf(initialAd?.enabled ?: false) }
+    var mediaType by remember(initialAd) { mutableStateOf(initialAd?.mediaType ?: "auto") }
+    var mediaUrl by remember(initialAd) { mutableStateOf(initialAd?.mediaUrl ?: "") }
+    var targetUrl by remember(initialAd) { mutableStateOf(initialAd?.targetUrl ?: "") }
+    var title by remember(initialAd) { mutableStateOf(initialAd?.title ?: "") }
+    var description by remember(initialAd) { mutableStateOf(initialAd?.description ?: "") }
+    var buttonText by remember(initialAd) { mutableStateOf(initialAd?.buttonText ?: "Learn More") }
+    var skipDuration by remember(initialAd) { mutableStateOf((initialAd?.skipDurationSeconds ?: 5).toString()) }
+    var displayFrequency by remember(initialAd) { mutableStateOf(initialAd?.displayFrequency ?: "ONCE_AFTER_INSTALL") }
+    var isSaving by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DeepSlate),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Pre-Splash Fullscreen Ad / Poster",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Shows full-screen video or poster on app launch before lock & splash",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = { enabled = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = NeonCyan,
+                                uncheckedThumbColor = Color.Gray,
+                                uncheckedTrackColor = SpaceBlack
+                            )
+                        )
+                    }
+
+                    HorizontalDivider(color = BorderColor, thickness = 1.dp)
+
+                    // Media Type Selector
+                    Text("Media Type", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("auto" to "Auto-Detect", "video" to "Video (MP4/HLS)", "image" to "Poster / Image").forEach { (typeKey, label) ->
+                            val isSelected = mediaType.equals(typeKey, ignoreCase = true)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { mediaType = typeKey },
+                                label = { Text(label, fontSize = 12.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                                    selectedLabelColor = NeonCyan,
+                                    containerColor = SpaceBlack,
+                                    labelColor = Color.White
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = isSelected,
+                                    borderColor = if (isSelected) NeonCyan else BorderColor
+                                )
+                            )
+                        }
+                    }
+
+                    // Media URL Input
+                    OutlinedTextField(
+                        value = mediaUrl,
+                        onValueChange = { mediaUrl = it },
+                        label = { Text("Media URL (MP4 / M3U8 / JPG / PNG / GIF)", color = TextSecondary) },
+                        placeholder = { Text("https://example.com/ad_video.mp4", color = Color.Gray) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonCyan,
+                            unfocusedBorderColor = Color.Gray,
+                            focusedTextColor = Color(0xFF38BDF8),
+                            unfocusedTextColor = Color(0xFF38BDF8),
+                            cursorColor = Color(0xFF38BDF8)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Target / CTA URL Input
+                    OutlinedTextField(
+                        value = targetUrl,
+                        onValueChange = { targetUrl = it },
+                        label = { Text("Action / Target Click URL (Optional)", color = TextSecondary) },
+                        placeholder = { Text("https://t.me/mychannel or website URL", color = Color.Gray) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonCyan,
+                            unfocusedBorderColor = Color.Gray,
+                            focusedTextColor = Color(0xFF38BDF8),
+                            unfocusedTextColor = Color(0xFF38BDF8),
+                            cursorColor = Color(0xFF38BDF8)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Title & Description
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = title,
+                            onValueChange = { title = it },
+                            label = { Text("Ad Title", color = TextSecondary) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonCyan,
+                                unfocusedBorderColor = Color.Gray,
+                                focusedTextColor = Color(0xFF38BDF8),
+                                unfocusedTextColor = Color(0xFF38BDF8),
+                                cursorColor = Color(0xFF38BDF8)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = buttonText,
+                            onValueChange = { buttonText = it },
+                            label = { Text("Button Text", color = TextSecondary) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonCyan,
+                                unfocusedBorderColor = Color.Gray,
+                                focusedTextColor = Color(0xFF38BDF8),
+                                unfocusedTextColor = Color(0xFF38BDF8),
+                                cursorColor = Color(0xFF38BDF8)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Ad Subtitle / Message", color = TextSecondary) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonCyan,
+                            unfocusedBorderColor = Color.Gray,
+                            focusedTextColor = Color(0xFF38BDF8),
+                            unfocusedTextColor = Color(0xFF38BDF8),
+                            cursorColor = Color(0xFF38BDF8)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Skip duration & Display Frequency
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = skipDuration,
+                            onValueChange = { if (it.all { char -> char.isDigit() }) skipDuration = it },
+                            label = { Text("Skip After (Sec)", color = TextSecondary) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonCyan,
+                                unfocusedBorderColor = Color.Gray,
+                                focusedTextColor = Color(0xFF38BDF8),
+                                unfocusedTextColor = Color(0xFF38BDF8),
+                                cursorColor = Color(0xFF38BDF8)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        Column(modifier = Modifier.weight(1.5f)) {
+                            Text("Display Frequency", color = TextSecondary, fontSize = 11.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val isOnce = displayFrequency.equals("ONCE_AFTER_INSTALL", ignoreCase = true)
+                                FilterChip(
+                                    selected = !isOnce,
+                                    onClick = { displayFrequency = "EVERY_LAUNCH" },
+                                    label = { Text("Every Launch", fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                                        selectedLabelColor = NeonCyan,
+                                        containerColor = SpaceBlack,
+                                        labelColor = Color.White
+                                    )
+                                )
+                                FilterChip(
+                                    selected = isOnce,
+                                    onClick = { displayFrequency = "ONCE_AFTER_INSTALL" },
+                                    label = { Text("Once", fontSize = 10.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                                        selectedLabelColor = NeonCyan,
+                                        containerColor = SpaceBlack,
+                                        labelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Action Buttons: Preview & Save
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val testConfig = com.example.ui.viewmodel.LaunchAdOverlayConfig(
+                                    enabled = true,
+                                    mediaType = mediaType,
+                                    mediaUrl = mediaUrl.ifBlank { "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" },
+                                    targetUrl = targetUrl,
+                                    title = title.ifBlank { "Sample Launch Ad" },
+                                    description = description.ifBlank { "This is a live preview of your launch advertisement." },
+                                    buttonText = buttonText.ifBlank { "Learn More" },
+                                    skipDurationSeconds = skipDuration.toIntOrNull() ?: 5,
+                                    displayFrequency = displayFrequency
+                                )
+                                viewModel.previewLaunchAd(testConfig)
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                            border = BorderStroke(1.dp, NeonCyan),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Preview Ad")
+                        }
+
+                        Button(
+                            onClick = {
+                                isSaving = true
+                                val newConfig = com.example.ui.viewmodel.LaunchAdOverlayConfig(
+                                    enabled = enabled,
+                                    mediaType = mediaType,
+                                    mediaUrl = mediaUrl.trim(),
+                                    targetUrl = targetUrl.trim(),
+                                    title = title.trim(),
+                                    description = description.trim(),
+                                    buttonText = buttonText.trim().ifBlank { "Learn More" },
+                                    skipDurationSeconds = skipDuration.toIntOrNull() ?: 5,
+                                    displayFrequency = displayFrequency,
+                                    adId = "ad_${System.currentTimeMillis()}"
+                                )
+                                viewModel.saveLaunchAdOverlayConfig(newConfig) { success, msg ->
+                                    isSaving = false
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = !isSaving,
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = SpaceBlack, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp), tint = SpaceBlack)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Save & Publish", color = SpaceBlack, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -7726,6 +8005,14 @@ fun SettingsScreen(
 
             item {
                 SecretSettingRow(
+                    title = "Subscription",
+                    icon = Icons.Outlined.Tv,
+                    onClick = { showSubscriptionSheet = true }
+                )
+            }
+
+            item {
+                SecretSettingRow(
                     title = "Watch History",
                     subtitle = "View recently watched movies, shows & live TV",
                     icon = Icons.Outlined.History,
@@ -7780,14 +8067,6 @@ fun SettingsScreen(
 
             item {
                 SecretSettingRow(
-                    title = "Subscription",
-                    icon = Icons.Outlined.Tv,
-                    onClick = { showSubscriptionSheet = true }
-                )
-            }
-
-            item {
-                SecretSettingRow(
                     title = "Homai AI Assistant",
                     subtitle = "Chat with AI for recommendations & support",
                     icon = Icons.Default.AutoAwesome,
@@ -7817,14 +8096,6 @@ fun SettingsScreen(
                     title = com.example.ui.theme.AppTranslation.getString("app_update", selectedAudioIndex),
                     icon = Icons.Outlined.Refresh,
                     onClick = { showUpdateSheet = true }
-                )
-            }
-
-            item {
-                SecretSettingRow(
-                    title = com.example.ui.theme.AppTranslation.getString("settings", selectedAudioIndex),
-                    icon = Icons.Outlined.Settings,
-                    onClick = { showAdvancedSettingsSheet = true }
                 )
             }
 
@@ -7865,6 +8136,14 @@ fun SettingsScreen(
                     subtitle = "Usage Policy, Safety Guidelines & Data Security",
                     icon = Icons.Outlined.Shield,
                     onClick = { showPrivacyTermsSheet = true }
+                )
+            }
+
+            item {
+                SecretSettingRow(
+                    title = com.example.ui.theme.AppTranslation.getString("settings", selectedAudioIndex),
+                    icon = Icons.Outlined.Settings,
+                    onClick = { showAdvancedSettingsSheet = true }
                 )
             }
 
@@ -8591,8 +8870,10 @@ fun SettingsScreen(
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = NeonCyan,
                                     unfocusedBorderColor = Color.Gray,
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
+                                    focusedTextColor = Color(0xFF38BDF8),
+                                    unfocusedTextColor = Color(0xFF38BDF8),
+                                    cursorColor = Color(0xFF38BDF8),
+                                    focusedLabelColor = Color(0xFF38BDF8)
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -8604,8 +8885,10 @@ fun SettingsScreen(
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = NeonCyan,
                                     unfocusedBorderColor = Color.Gray,
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
+                                    focusedTextColor = Color(0xFF38BDF8),
+                                    unfocusedTextColor = Color(0xFF38BDF8),
+                                    cursorColor = Color(0xFF38BDF8),
+                                    focusedLabelColor = Color(0xFF38BDF8)
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -11990,8 +12273,10 @@ fun M3uPlaylistsManagerSubPage(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NeonCyan,
                         unfocusedBorderColor = Color.Gray,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedTextColor = Color(0xFF38BDF8),
+                        unfocusedTextColor = Color(0xFF38BDF8),
+                        cursorColor = Color(0xFF38BDF8),
+                        focusedLabelColor = Color(0xFF38BDF8)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -12003,8 +12288,10 @@ fun M3uPlaylistsManagerSubPage(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NeonCyan,
                         unfocusedBorderColor = Color.Gray,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedTextColor = Color(0xFF38BDF8),
+                        unfocusedTextColor = Color(0xFF38BDF8),
+                        cursorColor = Color(0xFF38BDF8),
+                        focusedLabelColor = Color(0xFF38BDF8)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
