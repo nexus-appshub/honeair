@@ -153,7 +153,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         try {
             enableEdgeToEdge()
-            com.example.security.SecurityGuard.allowScreenCapture(this)
+            com.example.security.SecurityGuard.applyScreenProtection(this)
         } catch (e: Throwable) {
             e.printStackTrace()
         }

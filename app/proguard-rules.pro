@@ -79,8 +79,19 @@
 -repackageclasses 'a'
 -allowaccessmodification
 -renamesourcefileattribute SourceFile
+-optimizationpasses 5
+-overloadaggressively
+-adaptclassstrings
 
-# Protect Security Guard module from reflection breaking while obfuscating implementation
+# Strip Android Log calls from release byte code
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+    public static *** w(...);
+}
+
+# Anti-Tamper & Security Core Protections
 -keep class com.example.security.SecurityGuard {
     public static *** isDeviceRooted(...);
     public static *** isProxyOrVpnActive(...);
