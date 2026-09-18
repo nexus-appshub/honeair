@@ -154,29 +154,7 @@ fun VideoPlayerScreen(
                 )
                 if (res != null && res.streamUrl.isNotEmpty()) {
                     streamResult = res
-                    val headers = res.headers.ifEmpty {
-                        mapOf(
-                            "Referer" to res.referer.ifEmpty { "https://vidnest.fun/" },
-                            "Origin" to "https://vidnest.fun",
-                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
-                        )
-                    }
-                    val httpFactory = DefaultHttpDataSource.Factory()
-                        .setUserAgent(headers["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36")
-                        .setConnectTimeoutMs(25000)
-                        .setReadTimeoutMs(25000)
-                        .setAllowCrossProtocolRedirects(true)
-                        .setDefaultRequestProperties(headers)
-
-                    val mediaItem = MediaItem.Builder()
-                        .setUri(Uri.parse(res.streamUrl))
-                        .setMimeType(if (res.streamUrl.contains(".m3u8", ignoreCase = true) || res.streamUrl.contains(".txt", ignoreCase = true)) MimeTypes.APPLICATION_M3U8 else MimeTypes.APPLICATION_MP4)
-                        .build()
-
-                    val mediaSource = DefaultMediaSourceFactory(httpFactory).createMediaSource(mediaItem)
-                    exoPlayer.setMediaSource(mediaSource)
-                    exoPlayer.prepare()
-                    exoPlayer.playWhenReady = true
+                    activeStreamUrl = res.streamUrl
                 } else {
                     isBuffering = false
                     errorMessage = "Stream source could not be extracted directly."

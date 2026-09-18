@@ -26,6 +26,9 @@ object VidSrcNativeScraper {
 
     private val VIDSRC_HOSTS = listOf(
         "https://vidsrc.sbs",
+        "https://vidsrc.cc",
+        "https://vidsrc.vip",
+        "https://vidsrc.pro",
         "https://vidsrc.me",
         "https://vidsrc.to",
         "https://vidsrc.xyz",

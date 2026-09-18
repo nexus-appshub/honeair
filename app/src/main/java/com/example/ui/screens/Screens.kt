@@ -1,4 +1,6 @@
 // UTF-8 encoding marker: বাংলা HomeAirTV IPTV App Screens v1.0.0 ✨
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.example.ui.screens
 import android.Manifest
 import android.content.Intent
@@ -9,6 +11,7 @@ import android.os.Build
 import com.example.notifications.LocalNotificationManager
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.window.Dialog
@@ -27,6 +30,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -2963,7 +2967,10 @@ fun HomeScreen(
                                         onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                         isSelected = isSelected,
                                         hasError = hasError,
-                                        isPremium = viewModel.isChannelPremium(channel)
+                                        isPremium = viewModel.isChannelPremium(channel),
+                                        onHideClick = { viewModel.toggleHideChannel(channel, true) },
+                                        onMoveUpClick = { viewModel.moveChannel(channel, up = true, activeList = filteredChannels) },
+                                        onMoveDownClick = { viewModel.moveChannel(channel, up = false, activeList = filteredChannels) }
                                     )
                                 }
                                 item {
@@ -3503,7 +3510,10 @@ fun ChannelListRow(
     onFloatClick: (() -> Unit)? = null,
     isSelected: Boolean = false,
     hasError: Boolean = false,
-    isPremium: Boolean = false
+    isPremium: Boolean = false,
+    onHideClick: (() -> Unit)? = null,
+    onMoveUpClick: (() -> Unit)? = null,
+    onMoveDownClick: (() -> Unit)? = null
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -3621,6 +3631,8 @@ fun ChannelListRow(
 
             // Action icon
             Row(verticalAlignment = Alignment.CenterVertically) {
+                var showMenu by remember { mutableStateOf(false) }
+
                 if (onFloatClick != null) {
                     IconButton(onClick = onFloatClick) {
                         Icon(
@@ -3637,6 +3649,55 @@ fun ChannelListRow(
                         tint = if (isFavorite) NeonMagenta else TextSecondary
                     )
                 }
+
+                if (onHideClick != null || onMoveUpClick != null || onMoveDownClick != null) {
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Customize Channel",
+                                tint = TextSecondary
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            modifier = Modifier.background(DeepSlate)
+                        ) {
+                            if (onMoveUpClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Move Up", color = TextPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = NeonCyan) },
+                                    onClick = {
+                                        showMenu = false
+                                        onMoveUpClick()
+                                    }
+                                )
+                            }
+                            if (onMoveDownClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Move Down", color = TextPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = NeonCyan) },
+                                    onClick = {
+                                        showMenu = false
+                                        onMoveDownClick()
+                                    }
+                                )
+                            }
+                            if (onHideClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Hide / Disable", color = Color.Red) },
+                                    leadingIcon = { Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Color.Red) },
+                                    onClick = {
+                                        showMenu = false
+                                        onHideClick()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Icon(
                     imageVector = Icons.Default.ChevronRight,
                     contentDescription = "Play",
@@ -3671,6 +3732,14 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
     val filteredChannels by viewModel.filteredChannels.collectAsState()
     val context = LocalContext.current
     val activity = context as? android.app.Activity
+
+    var isSelectMode by remember { mutableStateOf(false) }
+    val selectedChannelsForCategory = remember { mutableStateListOf<IptvChannel>() }
+    var showCreateCategoryDialog by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
+    var reorderingChannelUrl by remember { mutableStateOf<String?>(null) }
+    val selectedCategory by viewModel.selectedChannelGroup.collectAsState()
+    val verticalChannels = filteredChannels
 
 
 
@@ -4005,6 +4074,31 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
+
+                                IconButton(
+                                    onClick = {
+                                        isSelectMode = !isSelectMode
+                                        if (!isSelectMode) {
+                                            selectedChannelsForCategory.clear()
+                                            showCreateCategoryDialog = false
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .background(
+                                            if (isSelectMode) NeonCyan.copy(alpha = 0.25f)
+                                            else if (isDark) Color.White.copy(alpha = 0.1f)
+                                            else Color.Black.copy(alpha = 0.06f),
+                                            CircleShape
+                                        )
+                                        .size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlaylistAddCheck,
+                                        contentDescription = "Select Channels for Custom Category",
+                                        tint = if (isSelectMode) NeonCyan else playerIconTint,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -4116,10 +4210,7 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                         Spacer(modifier = Modifier.height(10.dp))
 
                         // Category Filters Row & Fluid Search Bar
-                        val categories = remember(filteredChannels) {
-                            listOf("All") + filteredChannels.map { it.group }.filter { it.isNotBlank() }.distinct()
-                        }
-                        var selectedCategory by remember { mutableStateOf("All") }
+                        val categories by viewModel.availableChannelGroups.collectAsState(listOf("All"))
 
                         Column(modifier = Modifier.fillMaxWidth()) {
                             // Ultra Smooth Fluid Animated Search Box
@@ -4288,7 +4379,7 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(if (isSelected) Color(0xFFFF6B00) else playerChipBg)
                                             .clickable {
-                                                selectedCategory = cat
+                                                viewModel.setSelectedChannelGroup(cat)
                                                 if (channelSearchQuery.isNotEmpty()) {
                                                     viewModel.setChannelSearchQuery("")
                                                 }
@@ -4309,11 +4400,6 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                         Spacer(modifier = Modifier.height(10.dp))
 
                         // Channels list (Circular 4-column Grid or Vertical List)
-                        val verticalChannels = remember(filteredChannels, selectedCategory) {
-                            if (selectedCategory == "All") filteredChannels
-                            else filteredChannels.filter { it.group == selectedCategory }
-                        }
-
                         val isCircularLayout by viewModel.useCircularChannelsLayout.collectAsState()
 
                         AnimatedContent(
@@ -4332,7 +4418,7 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                     verticalArrangement = Arrangement.spacedBy(16.dp),
                                     modifier = Modifier.fillMaxSize()
                                 ) {
-                                    itemsIndexed(verticalChannels, key = { index, vertChannel -> "${vertChannel.url}_${vertChannel.name}_$index" }) { _, vertChannel ->
+                                    itemsIndexed(verticalChannels, key = { index, vertChannel -> "${index}_${vertChannel.url}_${vertChannel.name}" }) { _, vertChannel ->
                                         val isSelected = vertChannel.url == channel.url
                                         val hasError = isSelected && playbackErrorChannelUrl == vertChannel.url
                                         val circularHighlightColor = when {
@@ -4348,14 +4434,65 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                                 .build()
                                         }
 
+                                        val isReorderingThis = reorderingChannelUrl == vertChannel.url
+                                        val isChannelSelectedInSelectMode = isSelectMode && selectedChannelsForCategory.any { it.url == vertChannel.url }
+
                                         Column(
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .clickable(
+                                                .graphicsLayer {
+                                                    scaleX = if (isReorderingThis) 1.15f else 1f
+                                                    scaleY = if (isReorderingThis) 1.15f else 1f
+                                                    alpha = if (isReorderingThis) 0.85f else 1f
+                                                }
+                                                .pointerInput(vertChannel.url) {
+                                                    var dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                    detectDragGesturesAfterLongPress(
+                                                        onDragStart = {
+                                                            if (!isSelectMode) {
+                                                                reorderingChannelUrl = vertChannel.url
+                                                            }
+                                                        },
+                                                        onDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            if (!isSelectMode) {
+                                                                reorderingChannelUrl = vertChannel.url
+                                                                dragOffset += dragAmount
+                                                                 if (dragOffset.x > 25f) {
+                                                                    viewModel.moveChannelByDelta(vertChannel, 1, verticalChannels)
+                                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                                } else if (dragOffset.x < -25f) {
+                                                                    viewModel.moveChannelByDelta(vertChannel, -1, verticalChannels)
+                                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                                } else if (dragOffset.y > 25f) {
+                                                                    viewModel.moveChannelByDelta(vertChannel, 4, verticalChannels)
+                                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                                } else if (dragOffset.y < -25f) {
+                                                                    viewModel.moveChannelByDelta(vertChannel, -4, verticalChannels)
+                                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                                }
+                                                            }
+                                                        },
+                                                        onDragEnd = { reorderingChannelUrl = null },
+                                                        onDragCancel = { reorderingChannelUrl = null }
+                                                    )
+                                                }
+                                                .combinedClickable(
                                                     interactionSource = remember { MutableInteractionSource() },
-                                                    indication = null
-                                                ) { viewModel.setActiveChannel(vertChannel) }
+                                                    indication = null,
+                                                    onClick = {
+                                                        if (isSelectMode) {
+                                                            if (selectedChannelsForCategory.any { it.url == vertChannel.url }) {
+                                                                selectedChannelsForCategory.removeAll { it.url == vertChannel.url }
+                                                            } else {
+                                                                selectedChannelsForCategory.add(vertChannel)
+                                                            }
+                                                        } else {
+                                                            viewModel.setActiveChannel(vertChannel)
+                                                        }
+                                                    }
+                                                )
                                         ) {
                                             Box(
                                                 modifier = Modifier
@@ -4365,8 +4502,8 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                                         shape = CircleShape
                                                     )
                                                     .border(
-                                                        width = if (isSelected) 3.dp else 1.dp,
-                                                        color = circularHighlightColor ?: (if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
+                                                        width = if (isChannelSelectedInSelectMode) 3.5.dp else if (isSelected) 3.dp else 1.dp,
+                                                        color = if (isChannelSelectedInSelectMode) NeonCyan else circularHighlightColor ?: (if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)),
                                                         shape = CircleShape
                                                     )
                                                     .padding(if (isSelected) 4.dp else 2.dp),
@@ -4411,6 +4548,50 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                                         )
                                                     }
                                                 }
+
+                                                if (isReorderingThis) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .background(Color.Black.copy(alpha = 0.85f), CircleShape)
+                                                    ) {
+                                                        // Up button
+                                                        IconButton(
+                                                            onClick = { viewModel.moveChannelByDelta(vertChannel, -4, verticalChannels) },
+                                                            modifier = Modifier.align(Alignment.TopCenter).size(20.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                                        }
+                                                        // Down button
+                                                        IconButton(
+                                                            onClick = { viewModel.moveChannelByDelta(vertChannel, 4, verticalChannels) },
+                                                            modifier = Modifier.align(Alignment.BottomCenter).size(20.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                                        }
+                                                        // Left button
+                                                        IconButton(
+                                                            onClick = { viewModel.moveChannelByDelta(vertChannel, -1, verticalChannels) },
+                                                            modifier = Modifier.align(Alignment.CenterStart).size(20.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Move Left", tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                                        }
+                                                        // Right button
+                                                        IconButton(
+                                                            onClick = { viewModel.moveChannelByDelta(vertChannel, 1, verticalChannels) },
+                                                            modifier = Modifier.align(Alignment.CenterEnd).size(20.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Move Right", tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                                        }
+                                                        // Center check (Done)
+                                                        IconButton(
+                                                            onClick = { reorderingChannelUrl = null },
+                                                            modifier = Modifier.align(Alignment.Center).size(20.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Check, contentDescription = "Done", tint = Color(0xFF00E676), modifier = Modifier.size(12.dp))
+                                                        }
+                                                    }
+                                                }
                                             }
 
                                             Spacer(modifier = Modifier.height(6.dp))
@@ -4444,7 +4625,7 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                     contentPadding = PaddingValues(bottom = 96.dp),
                                     modifier = Modifier.fillMaxSize()
                                 ) {
-                                    itemsIndexed(verticalChannels, key = { index, vertChannel -> "${vertChannel.url}_${vertChannel.name}_$index" }) { _, vertChannel ->
+                                    itemsIndexed(verticalChannels, key = { index, vertChannel -> "${index}_${vertChannel.url}_${vertChannel.name}" }) { _, vertChannel ->
                                         val isSelected = vertChannel.url == channel.url
                                         val isFavStream by viewModel.isFavoriteStream(vertChannel.url).collectAsState(false)
                                         val context = LocalContext.current
@@ -4455,21 +4636,66 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                                                 .build()
                                         }
 
+                                        val isReorderingThis = reorderingChannelUrl == vertChannel.url
+                                        val isChannelSelectedInSelectMode = isSelectMode && selectedChannelsForCategory.any { it.url == vertChannel.url }
+
                                         Card(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(horizontal = 20.dp, vertical = 6.dp)
-                                                .clickable(
+                                                .graphicsLayer {
+                                                    scaleX = if (isReorderingThis) 1.04f else 1f
+                                                    scaleY = if (isReorderingThis) 1.04f else 1f
+                                                    alpha = if (isReorderingThis) 0.85f else 1f
+                                                }
+                                                .pointerInput(vertChannel.url) {
+                                                    var dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                    detectDragGesturesAfterLongPress(
+                                                        onDragStart = {
+                                                            if (!isSelectMode) {
+                                                                reorderingChannelUrl = vertChannel.url
+                                                            }
+                                                        },
+                                                        onDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            if (!isSelectMode) {
+                                                                reorderingChannelUrl = vertChannel.url
+                                                                dragOffset += dragAmount
+                                                                if (dragOffset.y > 70f) {
+                                                                    viewModel.moveChannelByDelta(vertChannel, 1, verticalChannels)
+                                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                                } else if (dragOffset.y < -70f) {
+                                                                    viewModel.moveChannelByDelta(vertChannel, -1, verticalChannels)
+                                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                                }
+                                                            }
+                                                        },
+                                                        onDragEnd = { reorderingChannelUrl = null },
+                                                        onDragCancel = { reorderingChannelUrl = null }
+                                                    )
+                                                }
+                                                .combinedClickable(
                                                     interactionSource = remember { MutableInteractionSource() },
-                                                    indication = null
-                                                ) { viewModel.setActiveChannel(vertChannel) },
+                                                    indication = null,
+                                                    onClick = {
+                                                        if (isSelectMode) {
+                                                            if (selectedChannelsForCategory.any { it.url == vertChannel.url }) {
+                                                                selectedChannelsForCategory.removeAll { it.url == vertChannel.url }
+                                                            } else {
+                                                                selectedChannelsForCategory.add(vertChannel)
+                                                            }
+                                                        } else {
+                                                            viewModel.setActiveChannel(vertChannel)
+                                                        }
+                                                    }
+                                                ),
                                             shape = RoundedCornerShape(12.dp),
                                             colors = CardDefaults.cardColors(
-                                                containerColor = if (isSelected && playbackErrorChannelUrl == vertChannel.url) Color(0xFFFF0000).copy(alpha = 0.15f) else if (isSelected) Color(0xFFFF6B00).copy(alpha = 0.15f) else playerCardBg
+                                                containerColor = if (isChannelSelectedInSelectMode) NeonCyan.copy(alpha = 0.15f) else if (isSelected && playbackErrorChannelUrl == vertChannel.url) Color(0xFFFF0000).copy(alpha = 0.15f) else if (isSelected) Color(0xFFFF6B00).copy(alpha = 0.15f) else playerCardBg
                                             ),
                                             border = BorderStroke(
-                                                width = if (isSelected) 2.dp else 1.dp,
-                                                color = if (isSelected && playbackErrorChannelUrl == vertChannel.url) Color(0xFFFF0000) else if (isSelected) Color(0xFFFF6B00) else playerBorderColor
+                                                width = if (isChannelSelectedInSelectMode) 2.5.dp else if (isSelected) 2.dp else 1.dp,
+                                                color = if (isChannelSelectedInSelectMode) NeonCyan else if (isSelected && playbackErrorChannelUrl == vertChannel.url) Color(0xFFFF0000) else if (isSelected) Color(0xFFFF6B00) else playerBorderColor
                                             )
                                         ) {
                                             Row(
@@ -4552,6 +4778,228 @@ fun PlayerScreen(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit =
                 }
             }
         }
+
+        if (isSelectMode && !showCreateCategoryDialog) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 8.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141418)),
+                    border = BorderStroke(1.5.dp, NeonCyan),
+                    shape = RoundedCornerShape(22.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .imePadding(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                color = NeonCyan.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f))
+                            ) {
+                                Text(
+                                    text = "📁 Select Channels",
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            Text(
+                                text = "${selectedChannelsForCategory.size} selected",
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    if (selectedChannelsForCategory.size == verticalChannels.size) {
+                                        selectedChannelsForCategory.clear()
+                                    } else {
+                                        selectedChannelsForCategory.clear()
+                                        selectedChannelsForCategory.addAll(verticalChannels)
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text(
+                                    if (selectedChannelsForCategory.size == verticalChannels.size) "Deselect All" else "Select All",
+                                    color = NeonCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (selectedChannelsForCategory.isNotEmpty()) {
+                                        showCreateCategoryDialog = true
+                                    }
+                                },
+                                enabled = selectedChannelsForCategory.isNotEmpty(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = NeonCyan,
+                                    disabledContainerColor = Color.Gray.copy(alpha = 0.3f)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text(
+                                    "Next ->",
+                                    color = if (selectedChannelsForCategory.isNotEmpty()) Color.Black else Color.White.copy(alpha = 0.5f),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    isSelectMode = false
+                                    selectedChannelsForCategory.clear()
+                                    newCategoryName = ""
+                                    showCreateCategoryDialog = false
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        @OptIn(ExperimentalMaterial3Api::class)
+        if (showCreateCategoryDialog) {
+            ModalBottomSheet(
+                onDismissRequest = { showCreateCategoryDialog = false },
+                containerColor = Color(0xFF18181C),
+                dragHandle = { BottomSheetDefaults.DragHandle() },
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 28.dp)
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "📁 Create Group Category",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "${selectedChannelsForCategory.size} channels selected for this group",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = { showCreateCategoryDialog = false },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                        }
+                    }
+
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = newCategoryName,
+                        onValueChange = { newCategoryName = it },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.SemiBold),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(NeonCyan),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .background(Color(0xFF24242A), RoundedCornerShape(14.dp))
+                            .border(1.5.dp, if (newCategoryName.isNotBlank()) NeonCyan else Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp),
+                        decorationBox = { innerTextField ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (newCategoryName.isEmpty()) {
+                                    Text("Enter category group name...", color = Color.Gray, fontSize = 13.sp)
+                                }
+                                innerTextField()
+                            }
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = { showCreateCategoryDialog = false }
+                        ) {
+                            Text("Cancel", color = Color.Gray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (newCategoryName.isNotBlank() && selectedChannelsForCategory.isNotEmpty()) {
+                                    val newName = newCategoryName.trim()
+                                    viewModel.createCustomCategory(selectedChannelsForCategory.toList(), newName)
+                                    viewModel.setSelectedChannelGroup(newName)
+                                    showCreateCategoryDialog = false
+                                    isSelectMode = false
+                                    selectedChannelsForCategory.clear()
+                                    newCategoryName = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NeonCyan,
+                                disabledContainerColor = Color.Gray.copy(alpha = 0.3f)
+                            ),
+                            enabled = newCategoryName.isNotBlank() && selectedChannelsForCategory.isNotEmpty(),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                "Create Category",
+                                color = if (newCategoryName.isNotBlank() && selectedChannelsForCategory.isNotEmpty()) Color.Black else Color.White.copy(alpha = 0.5f),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+
     }
 }
 
@@ -4689,7 +5137,7 @@ fun FavoritesScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(favorites, key = { it.url }) { channel ->
+                    itemsIndexed(favorites, key = { index, channel -> "${index}_${channel.url}_${channel.name}" }) { _, channel ->
                         val activeCh by viewModel.activeChannel.collectAsState()
                         val errUrl by viewModel.playbackErrorChannelUrl.collectAsState()
                         val isSelected = channel.url == activeCh?.url
@@ -4723,7 +5171,7 @@ fun FavoritesScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(watchHistory, key = { it.url }) { channel ->
+                    itemsIndexed(watchHistory, key = { index, channel -> "${index}_${channel.url}_${channel.name}" }) { _, channel ->
                         val isFav by viewModel.isFavoriteStream(channel.url).collectAsState(false)
                         val activeCh by viewModel.activeChannel.collectAsState()
                         val errUrl by viewModel.playbackErrorChannelUrl.collectAsState()
@@ -4957,7 +5405,7 @@ fun WatchHistorySheet(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(watchHistory, key = { it.url }) { channel ->
+                            itemsIndexed(watchHistory, key = { index, channel -> "${index}_${channel.url}_${channel.name}" }) { _, channel ->
                                 val isFav by viewModel.isFavoriteStream(channel.url).collectAsState(false)
                                 val activeCh by viewModel.activeChannel.collectAsState()
                                 val errUrl by viewModel.playbackErrorChannelUrl.collectAsState()
@@ -6577,6 +7025,51 @@ fun SettingsDropdownRow(
     }
 }
 
+fun saveUriToOfflineStorage(context: android.content.Context, uri: Uri): java.io.File? {
+    return try {
+        val resolver = context.contentResolver
+        var displayName: String? = null
+        try {
+            val cursor = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val index = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) {
+                        displayName = it.getString(index)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        val type = resolver.getType(uri)
+        val extension = if (type != null && type.contains("video/")) {
+            type.substringAfter("video/")
+        } else {
+            "mp4"
+        }
+
+        val dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+        if (!dir.exists()) dir.mkdirs()
+
+        val fileName = if (!displayName.isNullOrBlank()) {
+            displayName!!
+        } else {
+            "offline_video_${System.currentTimeMillis()}.$extension"
+        }
+
+        val targetFile = java.io.File(dir, fileName)
+        resolver.openInputStream(uri)?.use { input ->
+            targetFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        targetFile
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
 // ==========================================
 // 6. SETTINGS SCREEN
 // ==========================================
@@ -6617,6 +7110,89 @@ fun SettingsScreen(
     var showFloatingPlayerLimitSheet by remember { mutableStateOf(false) }
     val maxFloatingPlayers by viewModel.maxFloatingPlayers.collectAsState()
     val showDownloadLibrary by viewModel.showDownloadLibraryGlobal.collectAsState()
+
+    var activeSubPage by remember { mutableStateOf("MAIN") }
+    val selectedQueueVideos = remember { mutableStateListOf<java.io.File>() }
+
+    var showLocalVideosPicker by remember { mutableStateOf(false) }
+    var selectedLocalVideoFile by remember { mutableStateOf<java.io.File?>(null) }
+    
+    var showM3UManagerSheet by remember { mutableStateOf(false) }
+    var showArchiveChannelsSheet by remember { mutableStateOf(false) }
+
+    var m3uFileNameInput by remember { mutableStateOf("") }
+    var m3uUrlInput by remember { mutableStateOf("") }
+
+    val multipleVideoPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            val savedList = mutableListOf<java.io.File>()
+            uris.forEach { uri ->
+                val savedFile = saveUriToOfflineStorage(context, uri)
+                if (savedFile != null && savedFile.exists()) {
+                    savedList.add(savedFile)
+                }
+            }
+            if (savedList.isNotEmpty()) {
+                if (savedList.size == 1) {
+                    // Single video selected: Direct Play
+                    selectedLocalVideoFile = savedList.first()
+                    Toast.makeText(context, "Playing selected video", Toast.LENGTH_SHORT).show()
+                } else {
+                    // Multiple videos selected: Import then Play
+                    selectedQueueVideos.clear()
+                    selectedQueueVideos.addAll(savedList)
+                    selectedLocalVideoFile = savedList.first()
+                    Toast.makeText(context, "Imported ${savedList.size} videos to Offline Playlist Library!", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(context, "Failed to import video file(s)", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val savedFile = saveUriToOfflineStorage(context, uri)
+            if (savedFile != null && savedFile.exists()) {
+                selectedLocalVideoFile = savedFile
+                Toast.makeText(context, "Playing video", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Failed to load local video file", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    LaunchedEffect(showLocalVideosPicker) {
+        if (showLocalVideosPicker) {
+            videoPickerLauncher.launch("video/*")
+            showLocalVideosPicker = false
+        }
+    }
+
+    val m3uFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val contentResolver = context.contentResolver
+                val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                if (text.isNotBlank() && (text.contains("#EXTM3U") || text.contains("#EXTINF"))) {
+                    val finalName = m3uFileNameInput.ifBlank { "Custom Playlist File" }
+                    viewModel.addCustomPlaylist(finalName, text, "file", uri.toString())
+                    Toast.makeText(context, "M3U File imported successfully!", Toast.LENGTH_SHORT).show()
+                    m3uFileNameInput = ""
+                } else {
+                    Toast.makeText(context, "Invalid M3U file format", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error reading M3U: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     val currentVersionName = remember { AppUpdateManager.getAppVersionName(context) }
     val currentVersionCode = remember { AppUpdateManager.getAppVersionCode(context) }
@@ -6774,13 +7350,34 @@ fun SettingsScreen(
                     .then(if (activeWebPlayer == null) Modifier.statusBarsPadding() else Modifier)
                     .padding(top = 10.dp)
             ) {
-// Top Search Bar removed as requested
+                if (activeSubPage == "ARCHIVED_CHANNELS") {
+                    ArchivedChannelsSubPage(viewModel = viewModel, onBack = { activeSubPage = "MAIN" })
+                } else if (activeSubPage == "M3U8_MANAGER") {
+                    M3uPlaylistsManagerSubPage(
+                        viewModel = viewModel,
+                        onBack = { activeSubPage = "MAIN" },
+                        m3uFileLauncher = m3uFilePickerLauncher,
+                        nameInput = m3uFileNameInput,
+                        onNameChange = { m3uFileNameInput = it },
+                        urlInput = m3uUrlInput,
+                        onUrlChange = { m3uUrlInput = it }
+                    )
+                } else if (activeSubPage == "LOCAL_VIDEOS_MANAGER") {
+                    LocalVideosManagerSubPage(
+                        viewModel = viewModel,
+                        onBack = { activeSubPage = "MAIN" },
+                        multiPickerLauncher = multipleVideoPickerLauncher,
+                        selectedQueueVideos = selectedQueueVideos,
+                        onPlayFile = { selectedLocalVideoFile = it }
+                    )
+                } else {
+                    // Top Search Bar removed as requested
 
-        LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.weight(1f)
-        ) {
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
             // 2. Home Air TV Branding Row (Matching Screenshot)
             item {
                 Row(
@@ -7132,6 +7729,33 @@ fun SettingsScreen(
                     subtitle = "Offline videos library",
                     icon = Icons.Outlined.Download,
                     onClick = { viewModel.setShowDownloadLibraryGlobal(true) }
+                )
+            }
+
+            item {
+                SecretSettingRow(
+                    title = "Archived Channels",
+                    subtitle = "Manage hidden or disabled live TV channels",
+                    icon = Icons.Outlined.Archive,
+                    onClick = { activeSubPage = "ARCHIVED_CHANNELS" }
+                )
+            }
+
+            item {
+                SecretSettingRow(
+                    title = "Local Offline Videos",
+                    subtitle = "Play your offline and local video files",
+                    icon = Icons.Outlined.VideoLibrary,
+                    onClick = { activeSubPage = "LOCAL_VIDEOS_MANAGER" }
+                )
+            }
+
+            item {
+                SecretSettingRow(
+                    title = "M3U8 Player & Playlists",
+                    subtitle = "Import and manage custom M3U playlist URLs or files",
+                    icon = Icons.Outlined.PlaylistPlay,
+                    onClick = { activeSubPage = "M3U8_MANAGER" }
                 )
             }
 
@@ -7826,6 +8450,7 @@ fun SettingsScreen(
             }
         }
     }
+    }
 
     if (showDeleteAccountDialog) {
         AlertDialog(
@@ -7861,6 +8486,221 @@ fun SettingsScreen(
             },
             containerColor = Color(0xFF1C1C1E)
         )
+    }
+
+    if (showArchiveChannelsSheet) {
+        val prefs by viewModel.channelPreferences.collectAsState()
+        val archivedList = remember(prefs) { prefs.filter { it.isHidden } }
+        
+        AlertDialog(
+            onDismissRequest = { showArchiveChannelsSheet = false },
+            title = { Text("Archived Channels", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                if (archivedList.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                        Text("No archived channels found", color = TextSecondary)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 400.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(archivedList) { item ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = DeepSlate),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(item.name, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(item.customGroup ?: "General", color = TextSecondary, fontSize = 12.sp)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            viewModel.toggleHideChannel(
+                                                IptvChannel(name = item.name, url = item.url, logo = "", group = item.customGroup ?: "General"),
+                                                hide = false
+                                            )
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                                    ) {
+                                        Text("Activate", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showArchiveChannelsSheet = false }) {
+                    Text("Close", color = NeonCyan)
+                }
+            },
+            containerColor = Color(0xFF1C1C1E)
+        )
+    }
+
+    if (showM3UManagerSheet) {
+        val customPlaylistsState by viewModel.customPlaylists.collectAsState()
+        
+        AlertDialog(
+            onDismissRequest = { showM3UManagerSheet = false },
+            title = { Text("M3U8 Playlists Manager", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()).heightIn(max = 500.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Part 1: Add Playlist from URL
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = DeepSlate),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Import from URL", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            
+                            OutlinedTextField(
+                                value = m3uFileNameInput,
+                                onValueChange = { m3uFileNameInput = it },
+                                label = { Text("Playlist Name", color = TextSecondary) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Color.Gray,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            OutlinedTextField(
+                                value = m3uUrlInput,
+                                onValueChange = { m3uUrlInput = it },
+                                label = { Text("M3U / M3U8 Link URL", color = TextSecondary) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Color.Gray,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            Button(
+                                onClick = {
+                                    if (m3uUrlInput.isBlank()) {
+                                        Toast.makeText(context, "Please enter M3U URL", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        val pName = m3uFileNameInput.ifBlank { "Custom Web Playlist" }
+                                        viewModel.addCustomPlaylistFromUrl(pName, m3uUrlInput) { success, msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                            if (success) {
+                                                m3uFileNameInput = ""
+                                                m3uUrlInput = ""
+                                            }
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Import Playlist Link", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    
+                    // Part 2: Upload M3U File
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = DeepSlate),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Upload Local M3U File", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            
+                            Button(
+                                onClick = {
+                                    m3uFilePickerLauncher.launch("*/*")
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonMagenta),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.UploadFile, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Select .m3u / .m3u8 File", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    
+                    // Part 3: List of currently added Playlists
+                    Text("Your Local Playlists", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    if (customPlaylistsState.isEmpty()) {
+                        Text("No custom playlists added yet", color = TextSecondary, fontSize = 12.sp)
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            customPlaylistsState.forEach { pl ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2E)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                            Text(pl.name, color = Color.White, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = if (pl.source == "url") pl.pathOrUrl else "Local File Upload",
+                                                color = TextSecondary,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.deleteCustomPlaylist(pl.id) }) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showM3UManagerSheet = false }) {
+                    Text("Done", color = NeonCyan)
+                }
+            },
+            containerColor = Color(0xFF1C1C1E)
+        )
+    }
+
+    if (selectedLocalVideoFile != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            OfflineVideoPlayerScreen(
+                videoFile = selectedLocalVideoFile!!,
+                playlist = selectedQueueVideos,
+                onBack = {
+                    try {
+                        selectedLocalVideoFile?.delete()
+                    } catch (_: Exception) {}
+                    selectedLocalVideoFile = null
+                    selectedQueueVideos.clear()
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 
     if (showSignInSheetInSettings) {
@@ -9273,7 +10113,7 @@ fun MediaHubScreen(
                                             Spacer(modifier = Modifier.height(8.dp))
                                             com.example.ui.components.AutoScrollingBannerCarousel(
                                                 items = popularList,
-                                                onItemClick = { item -> viewModel.playMediaItem(item, 1, 1); activeWebPlayer = WebPlayerState(item, 1, 1) }
+                                                onItemClick = { item -> viewModel.preScrapeMediaItem(item); viewModel.playMediaItem(item, 1, 1); activeWebPlayer = WebPlayerState(item, 1, 1) }
                                             )
                                         }
                                     }
@@ -10987,6 +11827,392 @@ fun PrivacyPolicySectionCard(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = text, fontSize = 13.sp, color = Color.LightGray, lineHeight = 18.sp)
+        }
+    }
+}
+
+@Composable
+fun ArchivedChannelsSubPage(
+    viewModel: StreamViewModel,
+    onBack: () -> Unit
+) {
+    val prefs by viewModel.channelPreferences.collectAsState()
+    val archivedList = remember(prefs) { prefs.filter { it.isHidden } }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Text("Archived Channels", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+
+        if (archivedList.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No archived channels found", color = Color.Gray, fontSize = 14.sp)
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(archivedList) { item ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = CyberGray),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(item.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(item.customGroup ?: "General", color = Color.Gray, fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = {
+                                    viewModel.toggleHideChannel(
+                                        IptvChannel(name = item.name, url = item.url, logo = "", group = item.customGroup ?: "General"),
+                                        hide = false
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Activate", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun M3uPlaylistsManagerSubPage(
+    viewModel: StreamViewModel,
+    onBack: () -> Unit,
+    m3uFileLauncher: androidx.activity.result.ActivityResultLauncher<String>,
+    nameInput: String,
+    onNameChange: (String) -> Unit,
+    urlInput: String,
+    onUrlChange: (String) -> Unit
+) {
+    val customPlaylistsState by viewModel.customPlaylists.collectAsState()
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Text("M3U8 Playlists Manager", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+
+        // Section 1: URL Import
+        Card(
+            colors = CardDefaults.cardColors(containerColor = CyberGray),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color(0xFF2C2C2E)),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Import from Link / URL", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = onNameChange,
+                    label = { Text("Playlist Name", color = Color.Gray) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = onUrlChange,
+                    label = { Text("M3U / M3U8 Link URL", color = Color.Gray) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Button(
+                    onClick = {
+                        if (urlInput.isBlank()) {
+                            Toast.makeText(context, "Please enter M3U URL", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val pName = nameInput.ifBlank { "Custom Web Playlist" }
+                            viewModel.addCustomPlaylistFromUrl(pName, urlInput) { success, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                if (success) {
+                                    onNameChange("")
+                                    onUrlChange("")
+                                }
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Import Playlist Link", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Section 2: File Import
+        Card(
+            colors = CardDefaults.cardColors(containerColor = CyberGray),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color(0xFF2C2C2E)),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Upload Local M3U File", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                
+                Button(
+                    onClick = { m3uFileLauncher.launch("*/*") },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.UploadFile, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Select .m3u / .m3u8 File", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Section 3: Playlists List
+        Text("Your Local Playlists", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
+        if (customPlaylistsState.isEmpty()) {
+            Text("No custom playlists added yet", color = Color.Gray, fontSize = 12.sp)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                customPlaylistsState.forEach { pl ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2C2C2E)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(pl.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(
+                                    text = if (pl.source == "url") pl.pathOrUrl else "Local File Upload",
+                                    color = Color.Gray,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            IconButton(onClick = { viewModel.deleteCustomPlaylist(pl.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LocalVideosManagerSubPage(
+    viewModel: StreamViewModel,
+    onBack: () -> Unit,
+    multiPickerLauncher: androidx.activity.result.ActivityResultLauncher<String>,
+    selectedQueueVideos: androidx.compose.runtime.snapshots.SnapshotStateList<java.io.File>,
+    onPlayFile: (java.io.File) -> Unit
+) {
+    val context = LocalContext.current
+    
+    // Discover offline videos from app storage directories
+    val localFiles = remember(selectedQueueVideos.size) {
+        val dirs = listOfNotNull(
+            context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS),
+            context.filesDir,
+            context.cacheDir
+        )
+        dirs.flatMap { dir ->
+            if (dir.exists()) {
+                dir.listFiles()?.filter {
+                    it.isFile && (
+                        it.name.endsWith(".mp4", true) ||
+                        it.name.endsWith(".mkv", true) ||
+                        it.name.endsWith(".webm", true) ||
+                        it.name.endsWith(".ts", true) ||
+                        it.name.contains("video", true)
+                    )
+                } ?: emptyList()
+            } else {
+                emptyList()
+            }
+        }.distinctBy { it.absolutePath }.sortedByDescending { it.lastModified() }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            Text("Local Offline Videos", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = CyberGray),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Playlist Queue Tools", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("Select multiple videos from your device to save them in your offline playlist library.", color = Color.Gray, fontSize = 12.sp)
+                Button(
+                    onClick = { multiPickerLauncher.launch("video/*") },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add", tint = Color.White)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Import Multi Videos to Playlist", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Your Offline Library", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            if (selectedQueueVideos.isNotEmpty()) {
+                TextButton(onClick = { selectedQueueVideos.clear() }) {
+                    Text("Clear Selection (${selectedQueueVideos.size})", color = Color.Red, fontSize = 12.sp)
+                }
+            }
+        }
+
+        if (localFiles.isEmpty()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("No offline videos imported yet", color = Color.Gray, fontSize = 14.sp)
+            }
+        } else {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(localFiles) { file ->
+                        val isSelected = selectedQueueVideos.any { it.absolutePath == file.absolutePath }
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = if (isSelected) NeonCyan.copy(alpha = 0.12f) else Color(0xFF2C2C2E)),
+                            border = BorderStroke(1.dp, if (isSelected) NeonCyan else Color.Transparent),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { checked ->
+                                            if (checked) {
+                                                selectedQueueVideos.add(file)
+                                            } else {
+                                                selectedQueueVideos.removeAll { it.absolutePath == file.absolutePath }
+                                            }
+                                        },
+                                        colors = CheckboxDefaults.colors(checkedColor = NeonCyan, checkmarkColor = Color.Black)
+                                    )
+                                    Column {
+                                        Text(file.nameWithoutExtension, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(text = "${file.length() / (1024 * 1024)} MB | Offline Playlist", color = Color.Gray, fontSize = 10.sp)
+                                    }
+                                }
+                                
+                                Button(
+                                    onClick = { onPlayFile(file) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.Black, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Play", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Floating Action Bar if multiple videos are selected
+                if (selectedQueueVideos.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(bottom = 16.dp),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        Button(
+                            onClick = { onPlayFile(selectedQueueVideos.first()) },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.padding(horizontal = 32.dp).height(48.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Play Selection Queue (${selectedQueueVideos.size} Videos)", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         }
     }
 }

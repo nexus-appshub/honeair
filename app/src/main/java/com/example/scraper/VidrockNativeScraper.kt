@@ -147,7 +147,9 @@ object VidrockNativeScraper {
             "https://www.dolphin-cf.$cleanId.xyz",
             "https://$cleanId.xyz",
             "https://ch.tsload7.com",
-            "https://gtg.og-114.tsload7.com"
+            "https://gtg.og-114.tsload7.com",
+            "https://vidrock.to",
+            "https://vidrock.ru"
         )
 
         for (proxyHost in dynamicProxyHosts) {

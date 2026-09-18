@@ -138,6 +138,59 @@ interface MediaFavoriteDao {
     fun isMediaFavorite(id: String): Flow<Boolean>
 }
 
+// Custom Playlist and Local Channel Customizations
+@Entity(tableName = "custom_playlists")
+data class CustomPlaylistEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val source: String, // "url" or "file"
+    val pathOrUrl: String,
+    val rawContent: String,
+    val addedTimestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "channel_preferences")
+data class ChannelPreferenceEntity(
+    @PrimaryKey val url: String,
+    val name: String,
+    val isHidden: Boolean = false,
+    val displayOrder: Int = 0,
+    val customGroup: String? = null
+)
+
+@Dao
+interface CustomPlaylistDao {
+    @Query("SELECT * FROM custom_playlists ORDER BY addedTimestamp DESC")
+    fun getAllCustomPlaylistsFlow(): Flow<List<CustomPlaylistEntity>>
+
+    @Query("SELECT * FROM custom_playlists ORDER BY addedTimestamp DESC")
+    suspend fun getAllCustomPlaylists(): List<CustomPlaylistEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomPlaylist(playlist: CustomPlaylistEntity)
+
+    @Delete
+    suspend fun deleteCustomPlaylist(playlist: CustomPlaylistEntity)
+}
+
+@Dao
+interface ChannelPreferenceDao {
+    @Query("SELECT * FROM channel_preferences")
+    fun getAllPreferencesFlow(): Flow<List<ChannelPreferenceEntity>>
+
+    @Query("SELECT * FROM channel_preferences")
+    suspend fun getAllPreferences(): List<ChannelPreferenceEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPreference(pref: ChannelPreferenceEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPreferences(prefs: List<ChannelPreferenceEntity>)
+
+    @Query("DELETE FROM channel_preferences WHERE url = :url")
+    suspend fun deletePreference(url: String)
+}
+
 // Database
 @Database(
     entities = [
@@ -149,9 +202,11 @@ interface MediaFavoriteDao {
         PremiumMediaEntity::class,
         RegisteredUserEntity::class,
         com.example.data.model.MediaCommentEntity::class,
-        ScrapedStreamEntity::class
+        ScrapedStreamEntity::class,
+        CustomPlaylistEntity::class,
+        ChannelPreferenceEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -164,6 +219,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun registeredUserDao(): RegisteredUserDao
     abstract fun mediaCommentDao(): MediaCommentDao
     abstract fun scrapedStreamDao(): ScrapedStreamDao
+    abstract fun customPlaylistDao(): CustomPlaylistDao
+    abstract fun channelPreferenceDao(): ChannelPreferenceDao
 
     companion object {
         @Volatile

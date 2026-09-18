@@ -181,9 +181,36 @@ object SmartNetworkBoosterEngine {
                     baseHeaders["sec-ch-ua-mobile"] = "?0"
                     baseHeaders["sec-ch-ua-platform"] = "\"Windows\""
                 }
-                urlLower.contains("vidnest") || urlLower.contains("vidsrc") || urlLower.contains("autoembed") -> {
-                    if (!baseHeaders.containsKey("Referer")) baseHeaders["Referer"] = "https://vidnest.fun/"
-                    if (!baseHeaders.containsKey("Origin")) baseHeaders["Origin"] = "https://vidnest.fun"
+                urlLower.contains("vidnest") || urlLower.contains("vidsrc") || urlLower.contains("autoembed") ||
+                urlLower.contains("vidlink") || urlLower.contains("vidrock") || urlLower.contains("moviebox") ||
+                urlLower.contains("apuseen") || urlLower.contains("hakunamatata") || urlLower.contains("aoneroom") ||
+                urlLower.contains("themoviebox") || urlLower.contains("rogflix") || urlLower.contains("filxer") -> {
+                    if (!baseHeaders.containsKey("Referer")) {
+                        try {
+                            val uri = android.net.Uri.parse(url)
+                            val host = uri.host
+                            if (host != null) {
+                                baseHeaders["Referer"] = "${uri.scheme}://$host/"
+                            } else {
+                                baseHeaders["Referer"] = "https://vidnest.fun/"
+                            }
+                        } catch (_: Exception) {
+                            baseHeaders["Referer"] = "https://vidnest.fun/"
+                        }
+                    }
+                    if (!baseHeaders.containsKey("Origin")) {
+                        try {
+                            val uri = android.net.Uri.parse(url)
+                            val host = uri.host
+                            if (host != null) {
+                                baseHeaders["Origin"] = "${uri.scheme}://$host"
+                            } else {
+                                baseHeaders["Origin"] = "https://vidnest.fun"
+                            }
+                        } catch (_: Exception) {
+                            baseHeaders["Origin"] = "https://vidnest.fun"
+                        }
+                    }
                 }
                 urlLower.contains("megacloud") || urlLower.contains("rabbitstream") || urlLower.contains("dokicloud") -> {
                     if (!baseHeaders.containsKey("Referer")) baseHeaders["Referer"] = "https://megacloud.tv/"

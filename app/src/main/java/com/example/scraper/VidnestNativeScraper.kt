@@ -44,7 +44,10 @@ object VidnestNativeScraper {
         "https://new.vidnest.fun",
         "https://vidnest.fun",
         "https://vidnest.xyz",
-        "https://api.vidnest.fun"
+        "https://api.vidnest.fun",
+        "https://vidnest.net",
+        "https://vidnest.cc",
+        "https://vidnest.tv"
     )
 
     private val httpClient by lazy {
@@ -446,7 +449,13 @@ object VidnestNativeScraper {
                 headersMap["Referer"] = provider.defaultReferer
             }
             if (!headersMap.containsKey("Origin")) {
-                headersMap["Origin"] = "https://vidnest.fun"
+                headersMap["Origin"] = try {
+                    val uri = android.net.Uri.parse(provider.defaultReferer)
+                    val host = uri.host
+                    if (host != null) "${uri.scheme}://$host" else "https://vidnest.fun"
+                } catch (_: Exception) {
+                    "https://vidnest.fun"
+                }
             }
 
             val referer = headersMap["Referer"] ?: provider.defaultReferer

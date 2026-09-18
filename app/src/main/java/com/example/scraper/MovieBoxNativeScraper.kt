@@ -35,10 +35,11 @@ object MovieBoxNativeScraper {
      */
     suspend fun searchSubjectId(title: String): String? = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext null
+        val cleanTitle = title.replace(Regex("\\s*\\(\\d{4}\\)\\s*"), "").trim()
 
         // 1. Try Apuseencom Search API: GET https://api.apuseencom.com/webed-hdapp/v1/everyone-search?keyword={query}
         try {
-            val encodedTitle = URLEncoder.encode(title, "UTF-8")
+            val encodedTitle = URLEncoder.encode(cleanTitle, "UTF-8")
             val searchUrl = "$APUSEEN_BASE/v1/everyone-search?keyword=$encodedTitle"
             val request = Request.Builder()
                 .url(searchUrl)
@@ -110,7 +111,7 @@ object MovieBoxNativeScraper {
 
         // 1. Try Hakunamatata Multi-Source Resolver: GET https://hakunamatatavideo.com/subdub/v2?id={subject_id}&source=vidbox&format=hls
         try {
-            val sources = listOf("vidbox", "film", "netflix", "plex", "emby")
+            val sources = listOf("vidbox", "film", "netflix", "plex", "emby", "stream", "hls")
             for (source in sources) {
                 val hakunaUrl = "$HAKUNA_BASE/subdub/v2?id=$subjectId&source=$source&format=hls"
                 val request = Request.Builder()

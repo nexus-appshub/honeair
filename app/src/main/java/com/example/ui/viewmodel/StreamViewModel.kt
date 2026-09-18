@@ -320,10 +320,168 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _selectedChannelGroup.value = group
     }
 
-    val availableChannelGroups: StateFlow<List<String>> = _channelsState.map { state ->
+    val customPlaylists: StateFlow<List<com.example.data.database.CustomPlaylistEntity>> = AppDatabase.getDatabase(getApplication()).customPlaylistDao().getAllCustomPlaylistsFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val channelPreferences: StateFlow<List<com.example.data.database.ChannelPreferenceEntity>> = AppDatabase.getDatabase(getApplication()).channelPreferenceDao().getAllPreferencesFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun addCustomPlaylist(name: String, rawContent: String, source: String = "file", pathOrUrl: String = "") {
+        viewModelScope.launch {
+            val db = AppDatabase.getDatabase(getApplication())
+            db.customPlaylistDao().insertCustomPlaylist(
+                com.example.data.database.CustomPlaylistEntity(
+                    name = name,
+                    source = source,
+                    pathOrUrl = pathOrUrl,
+                    rawContent = rawContent
+                )
+            )
+            loadPlaylists(forceRefresh = true)
+        }
+    }
+
+    fun addCustomPlaylistFromUrl(name: String, url: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val raw = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.data.network.IptvParser.fetchRawContent(url)
+                }
+                if (raw.isNotBlank() && (raw.contains("#EXTM3U") || raw.contains("#EXTINF"))) {
+                    addCustomPlaylist(name, raw, "url", url)
+                    onResult(true, "Playlist imported successfully!")
+                } else {
+                    onResult(false, "Invalid playlist format. Must be a valid M3U file.")
+                }
+            } catch (e: Exception) {
+                onResult(false, "Failed to download playlist: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun deleteCustomPlaylist(playlistId: Long) {
+        viewModelScope.launch {
+            val db = AppDatabase.getDatabase(getApplication())
+            val all = db.customPlaylistDao().getAllCustomPlaylists()
+            val match = all.find { it.id == playlistId }
+            if (match != null) {
+                db.customPlaylistDao().deleteCustomPlaylist(match)
+            }
+            val currentPlaylist = _selectedPlaylist.value
+            if (currentPlaylist != null && currentPlaylist.url == "custom://$playlistId") {
+                clearSelectedPlaylist()
+            }
+            loadPlaylists(forceRefresh = true)
+        }
+    }
+
+    fun toggleHideChannel(channel: IptvChannel, hide: Boolean) {
+        viewModelScope.launch {
+            val db = AppDatabase.getDatabase(getApplication())
+            val prefs = db.channelPreferenceDao().getAllPreferences()
+            val existing = prefs.find { it.url == channel.url }
+            db.channelPreferenceDao().insertPreference(
+                com.example.data.database.ChannelPreferenceEntity(
+                    url = channel.url,
+                    name = channel.name,
+                    isHidden = hide,
+                    displayOrder = existing?.displayOrder ?: 0,
+                    customGroup = channel.group
+                )
+            )
+        }
+    }
+
+    fun moveChannel(channel: IptvChannel, up: Boolean, activeList: List<IptvChannel>) {
+        moveChannelByDelta(channel, if (up) -1 else 1, activeList)
+    }
+
+    fun moveChannelByDelta(channel: IptvChannel, delta: Int, activeList: List<IptvChannel>) {
+        viewModelScope.launch {
+            val currentState = _channelsState.value
+            if (currentState !is UiState.Success) return@launch
+            val fullList = currentState.data
+            
+            val index = activeList.indexOfFirst { it.url == channel.url }
+            if (index == -1) return@launch
+            val swapWithIndex = index + delta
+            if (swapWithIndex < 0 || swapWithIndex >= activeList.size) return@launch
+
+            val itemA = activeList[index]
+            val itemB = activeList[swapWithIndex]
+
+            val db = AppDatabase.getDatabase(getApplication())
+            val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
+
+            val originalOrderMap = fullList.mapIndexed { i, ch -> ch.url to i }.toMap()
+
+            val orderA = existingPrefs[itemA.url]?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[itemA.url] ?: 0) * 10)
+            val orderB = existingPrefs[itemB.url]?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[itemB.url] ?: 0) * 10)
+
+            val finalOrderA = if (orderA == orderB) orderB + 5 else orderB
+            val finalOrderB = orderA
+
+            val prefA = existingPrefs[itemA.url]
+            val prefB = existingPrefs[itemB.url]
+
+            val updatedEntities = mutableListOf<com.example.data.database.ChannelPreferenceEntity>()
+
+            updatedEntities.add(
+                com.example.data.database.ChannelPreferenceEntity(
+                    url = itemA.url,
+                    name = itemA.name,
+                    isHidden = prefA?.isHidden ?: false,
+                    displayOrder = finalOrderA,
+                    customGroup = prefA?.customGroup ?: itemA.group
+                )
+            )
+            updatedEntities.add(
+                com.example.data.database.ChannelPreferenceEntity(
+                    url = itemB.url,
+                    name = itemB.name,
+                    isHidden = prefB?.isHidden ?: false,
+                    displayOrder = finalOrderB,
+                    customGroup = prefB?.customGroup ?: itemB.group
+                )
+            )
+
+            db.channelPreferenceDao().insertPreferences(updatedEntities)
+        }
+    }
+
+    fun createCustomCategory(channels: List<IptvChannel>, categoryName: String) {
+        viewModelScope.launch {
+            val db = AppDatabase.getDatabase(getApplication())
+            val prefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
+            val newEntities = mutableListOf<com.example.data.database.ChannelPreferenceEntity>()
+            channels.forEach { channel ->
+                val currentPref = prefs[channel.url]
+                newEntities.add(
+                    com.example.data.database.ChannelPreferenceEntity(
+                        url = channel.url,
+                        name = channel.name,
+                        isHidden = currentPref?.isHidden ?: false,
+                        displayOrder = currentPref?.displayOrder ?: 0,
+                        customGroup = categoryName
+                    )
+                )
+            }
+            db.channelPreferenceDao().insertPreferences(newEntities)
+            _selectedChannelGroup.value = categoryName
+        }
+    }
+
+    val availableChannelGroups: StateFlow<List<String>> = combine(_channelsState, channelPreferences) { state, prefs ->
         if (state is UiState.Success) {
-            val groups = state.data.map { it.group.ifBlank { "General" } }.filter { it.isNotBlank() }.distinct()
-            listOf("All") + groups
+            val customUserGroups = prefs.mapNotNull { it.customGroup }.filter { it.isNotBlank() }.distinct()
+            val prefMap = prefs.associateBy { it.url }
+            val m3uGroups = state.data.map { ch ->
+                val customG = prefMap[ch.url]?.customGroup
+                if (!customG.isNullOrBlank()) customG else ch.group.ifBlank { "General" }
+            }.filter { it.isNotBlank() }.distinct()
+
+            val standardGroups = m3uGroups.filter { g -> !customUserGroups.any { cg -> cg.equals(g, ignoreCase = true) } }
+            listOf("All") + customUserGroups + standardGroups
         } else {
             listOf("All")
         }
@@ -2054,9 +2212,35 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val filteredChannels: StateFlow<List<IptvChannel>> = combine(_channelsState, _selectedChannelGroup, _channelSearchQuery) { state, group, query ->
+    val filteredChannels: StateFlow<List<IptvChannel>> = combine(_channelsState, _selectedChannelGroup, _channelSearchQuery, channelPreferences) { state, group, query, prefs ->
         if (state is UiState.Success) {
-            var list = state.data
+            val prefMap = prefs.associateBy { it.url }
+            var list = state.data.map { ch ->
+                val pref = prefMap[ch.url]
+                if (pref?.customGroup != null) {
+                    ch.copy(group = pref.customGroup)
+                } else {
+                    ch
+                }
+            }
+            
+            // Filter out hidden channels locally
+            list = list.filter { ch ->
+                val pref = prefMap[ch.url]
+                pref == null || !pref.isHidden
+            }
+            
+            val originalOrderMap = state.data.mapIndexed { index, ch -> ch.url to index }.toMap()
+            
+            // Sort based on local displayOrder index
+            list = list.sortedWith(Comparator { a, b ->
+                val prefA = prefMap[a.url]
+                val prefB = prefMap[b.url]
+                val orderA = prefA?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[a.url] ?: 0) * 10)
+                val orderB = prefB?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[b.url] ?: 0) * 10)
+                orderA.compareTo(orderB)
+            })
+
             if (group != "All") {
                 list = list.filter {
                     val g = it.group.ifBlank { "General" }
@@ -3001,7 +3185,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _playlistsState.value = UiState.Loading
             try {
-                val data = repository.getIndexPlaylists(forceRefresh)
+                val curated = repository.getIndexPlaylists(forceRefresh)
+                val db = AppDatabase.getDatabase(getApplication())
+                val custom = db.customPlaylistDao().getAllCustomPlaylists().map {
+                    IptvPlaylist(
+                        name = it.name,
+                        url = "custom://${it.id}",
+                        group = "My Playlists",
+                        logo = "https://img.icons8.com/color/96/playlist.png"
+                    )
+                }
+                val data = custom + curated
                 _playlistsState.value = UiState.Success(data)
                 // Do not auto-select playlist on startup so app opens on home page dashboard
                 if (data.isNotEmpty() && _selectedPlaylist.value == null) {
@@ -3029,6 +3223,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _selectedPlaylist.value = playlist
         _channelSearchQuery.value = ""
         _selectedChannelGroup.value = "All"
+        _isFullScreen.value = false
         loadChannels(playlist.url)
     }
 
@@ -3041,7 +3236,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _channelsState.value = UiState.Loading
             try {
-                var data = repository.getChannelsFromPlaylist(url)
+                var data = if (url.startsWith("custom://")) {
+                    val id = url.substringAfter("custom://").toLongOrNull() ?: 0L
+                    val db = AppDatabase.getDatabase(getApplication())
+                    val playlist = db.customPlaylistDao().getAllCustomPlaylists().find { it.id == id }
+                    if (playlist != null) {
+                        com.example.data.network.IptvParser.parseChannels(playlist.rawContent)
+                    } else {
+                        emptyList()
+                    }
+                } else {
+                    repository.getChannelsFromPlaylist(url)
+                }
                 
                 val currentPlaylist = _selectedPlaylist.value
                 val playlistName = currentPlaylist?.name?.lowercase() ?: ""
@@ -3113,6 +3319,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 
                 _channelsState.value = UiState.Success(data)
+                if (data.isNotEmpty()) {
+                    _activeChannel.value = data.first()
+                    _isFullScreen.value = false
+                }
             } catch (e: Exception) {
                 val currentPlaylist = _selectedPlaylist.value
                 val playlistName = currentPlaylist?.name?.lowercase() ?: ""

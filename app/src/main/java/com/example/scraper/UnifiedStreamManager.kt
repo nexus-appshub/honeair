@@ -14,6 +14,97 @@ import org.json.JSONObject
 object UnifiedStreamManager {
     private const val TAG = "UnifiedStreamManager"
     private val streamCache = java.util.concurrent.ConcurrentHashMap<String, ScrapedStreamResult>()
+    private val httpClient = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+
+    private fun resolveRelativeUrl(baseUrl: String, relativeUrl: String): String {
+        if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
+            return relativeUrl
+        }
+        return try {
+            val baseUri = java.net.URI(baseUrl)
+            baseUri.resolve(relativeUrl).toString()
+        } catch (_: Exception) {
+            if (relativeUrl.startsWith("/")) {
+                val scheme = if (baseUrl.startsWith("https")) "https" else "http"
+                val host = baseUrl.substringAfter("://").substringBefore("/")
+                "$scheme://$host$relativeUrl"
+            } else {
+                val baseDir = baseUrl.substringBeforeLast("/")
+                "$baseDir/$relativeUrl"
+            }
+        }
+    }
+
+    private suspend fun verifyStreamAlive(url: String, headers: Map<String, String>): Boolean = withContext(Dispatchers.IO) {
+        if (!url.startsWith("http")) return@withContext false
+        try {
+            val reqBuilder = Request.Builder().url(url)
+            headers.forEach { (k, v) -> reqBuilder.addHeader(k, v) }
+            val req = reqBuilder.build()
+            val resp = httpClient.newCall(req).execute()
+            val code = resp.code
+            if (code != 200 && code != 206) {
+                resp.close()
+                return@withContext false
+            }
+
+            val isM3u8 = url.contains(".m3u8", ignoreCase = true) ||
+                         url.contains(".txt", ignoreCase = true) ||
+                         (resp.header("Content-Type")?.contains("mpegurl", ignoreCase = true) == true)
+
+            if (isM3u8) {
+                val source = resp.body?.source() ?: run { resp.close(); return@withContext false }
+                source.request(8192)
+                val bodyStr = source.buffer.clone().readUtf8()
+                resp.close()
+
+                if (!bodyStr.contains("#EXTM3U")) return@withContext false
+                if (bodyStr.contains("404") || bodyStr.contains("Video not found") || bodyStr.contains("Access Denied") || bodyStr.contains("error")) return@withContext false
+
+                // Deep Child Playlist Verification for Master Playlists
+                if (bodyStr.contains("#EXT-X-STREAM-INF")) {
+                    val lines = bodyStr.lines()
+                    var childLine = ""
+                    for (i in lines.indices) {
+                        if (lines[i].contains("#EXT-X-STREAM-INF")) {
+                            for (j in (i + 1) until minOf(i + 5, lines.size)) {
+                                val candidate = lines[j].trim()
+                                if (candidate.isNotBlank() && !candidate.startsWith("#")) {
+                                    childLine = candidate
+                                    break
+                                }
+                            }
+                            if (childLine.isNotBlank()) break
+                        }
+                    }
+
+                    if (childLine.isNotBlank()) {
+                        val absoluteChildUrl = resolveRelativeUrl(url, childLine)
+                        val childReqBuilder = Request.Builder().url(absoluteChildUrl)
+                        headers.forEach { (k, v) -> childReqBuilder.addHeader(k, v) }
+                        val childResp = httpClient.newCall(childReqBuilder.build()).execute()
+                        val childCode = childResp.code
+                        childResp.close()
+                        if (childCode != 200 && childCode != 206) {
+                            Log.w(TAG, "Child playlist probe failed ($childCode) for: $absoluteChildUrl")
+                            return@withContext false
+                        }
+                    }
+                }
+                return@withContext true
+            } else {
+                resp.close()
+                return@withContext true
+            }
+        } catch (e: Exception) {
+            return@withContext false
+        }
+    }
 
     fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1): ScrapedStreamResult? {
         val key = "$tmdbId-$season-$episode"
@@ -230,7 +321,7 @@ object UnifiedStreamManager {
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
                         Log.d(TAG, "VidLink scraper WINNER: ${res.streamUrl}")
-                        resultChannel.trySend(res)
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "VidLink task error: ${e.message}")
@@ -249,7 +340,7 @@ object UnifiedStreamManager {
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
                         Log.d(TAG, "VidSrc scraper WINNER: ${res.streamUrl}")
-                        resultChannel.trySend(res)
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "VidSrc task error: ${e.message}")
@@ -268,7 +359,7 @@ object UnifiedStreamManager {
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
                         Log.d(TAG, "AutoEmbed scraper WINNER: ${res.streamUrl}")
-                        resultChannel.trySend(res)
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "AutoEmbed task error: ${e.message}")
@@ -286,7 +377,7 @@ object UnifiedStreamManager {
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
                         Log.d(TAG, "VidNest scraper WINNER: ${res.streamUrl}")
-                        resultChannel.trySend(res)
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "VidNest task error: ${e.message}")
@@ -304,10 +395,30 @@ object UnifiedStreamManager {
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
                         Log.d(TAG, "VidRock scraper WINNER: ${res.streamUrl}")
-                        resultChannel.trySend(res)
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "VidRock task error: ${e.message}")
+                }
+            }
+
+            // Task 6: MovieBox Concurrent Deep Extractor (Apuseen / Hakunamatata / Aoneroom)
+            val movieBoxJob = launch(Dispatchers.IO) {
+                try {
+                    val subjectId = MovieBoxNativeScraper.searchSubjectId(cleanTitle) ?: MovieBoxNativeScraper.searchSubjectId(finalTmdbId)
+                    if (!subjectId.isNullOrEmpty()) {
+                        val res = MovieBoxNativeScraper.getStreamInfo(
+                            subjectId = subjectId,
+                            season = if (effectiveIsTv) effectiveSeason else 0,
+                            episode = if (effectiveIsTv) episode else 0
+                        )
+                        if (res != null && res.streamUrl.isNotBlank()) {
+                            Log.d(TAG, "MovieBox scraper WINNER: ${res.streamUrl}")
+                            if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "MovieBox task error: ${e.message}")
                 }
             }
 
@@ -323,6 +434,7 @@ object UnifiedStreamManager {
             autoEmbedJob.cancel()
             vidnestJob.cancel()
             vidrockJob.cancel()
+            movieBoxJob.cancel()
 
             if (winningStream != null && winningStream.streamUrl.isNotBlank()) {
                 Log.d(TAG, "Multi-Server Winning Stream selected: ${winningStream.streamUrl}")

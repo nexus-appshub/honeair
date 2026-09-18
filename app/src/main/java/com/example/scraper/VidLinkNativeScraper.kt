@@ -29,7 +29,9 @@ object VidLinkNativeScraper {
         "https://vidlink.pro",
         "https://api.vidlink.pro",
         "https://vidlink.org",
-        "https://vidlink.to"
+        "https://vidlink.to",
+        "https://vidlink.net",
+        "https://vidlink.cc"
     )
 
     suspend fun extractStream(

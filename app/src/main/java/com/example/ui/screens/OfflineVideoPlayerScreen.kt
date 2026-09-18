@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Environment
 import android.view.ViewGroup
@@ -12,8 +13,12 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,14 +54,15 @@ import java.io.File
 
 /**
  * High-performance, hardware-accelerated Offline Video Player
- * Built identical to the movie and anime ExoPlayer (VideoPlayerScreen)
- * with support for portrait 16:9 view, immersive landscape fullscreen,
- * seekbar scrubbing, 10s skip controls, and multi-file playlist skipping.
+ * with touch-hold 2x speed boost, double tap +/-10s seek,
+ * swipe volume/brightness/seeking gestures, speed selection (0.5x - 3.0x),
+ * and non-fullscreen local video playlist list.
  */
 @OptIn(UnstableApi::class)
 @Composable
 fun OfflineVideoPlayerScreen(
     videoFile: File,
+    playlist: List<File> = emptyList(),
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -63,20 +71,30 @@ fun OfflineVideoPlayerScreen(
 
     // Playlist management for downloaded files
     var currentFile by remember { mutableStateOf(videoFile) }
-    val downloadedFiles = remember(currentFile) {
-        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-        if (dir != null && dir.exists()) {
-            dir.listFiles()?.filter {
-                it.isFile && (
-                    it.name.endsWith(".mp4", true) ||
-                    it.name.endsWith(".mkv", true) ||
-                    it.name.endsWith(".webm", true) ||
-                    it.name.endsWith(".ts", true)
-                )
-            }?.sortedByDescending { it.lastModified() } ?: listOf(currentFile)
+    val downloadedFiles = remember(currentFile, playlist) {
+        if (playlist.isNotEmpty()) {
+            playlist.distinctBy { it.absolutePath }
         } else {
-            listOf(currentFile)
-        }
+            val dirs = listOfNotNull(
+                context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
+                context.filesDir,
+                context.cacheDir
+            )
+            dirs.flatMap { dir ->
+                if (dir.exists()) {
+                    dir.listFiles()?.filter {
+                        it.isFile && (
+                            it.name.endsWith(".mp4", true) ||
+                            it.name.endsWith(".mkv", true) ||
+                            it.name.endsWith(".webm", true) ||
+                            it.name.endsWith(".ts", true)
+                        )
+                    } ?: emptyList()
+                } else {
+                    emptyList()
+                }
+            }.distinctBy { it.absolutePath }.sortedByDescending { it.lastModified() }
+        }.ifEmpty { listOf(currentFile) }
     }
 
     val currentFileIndex = downloadedFiles.indexOfFirst { it.absolutePath == currentFile.absolutePath }
@@ -93,6 +111,15 @@ fun OfflineVideoPlayerScreen(
     var playbackError by remember { mutableStateOf<String?>(null) }
     var useSoftwareFallback by remember { mutableStateOf(false) }
 
+    // Speed states
+    var baseSpeed by remember { mutableFloatStateOf(1.0f) }
+    var is2xBoosting by remember { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
+
+    // Gesture indicator overlay states
+    var gestureOverlayText by remember { mutableStateOf<String?>(null) }
+    var gestureOverlayIcon by remember { mutableStateOf<androidx.compose.ui.graphics.vector.ImageVector?>(null) }
+
     // Display title cleaned from filename
     val displayTitle = remember(currentFile) {
         currentFile.nameWithoutExtension
@@ -102,7 +129,6 @@ fun OfflineVideoPlayerScreen(
             .ifBlank { currentFile.name }
     }
 
-    // Hardware-accelerated Renderers Factory with intelligent fallback
     val renderersFactory = remember(useSoftwareFallback) {
         val sharedPrefs = context.getSharedPreferences("stream_app_prefs", Context.MODE_PRIVATE)
         val userDecoderIndex = if (useSoftwareFallback) 2 else sharedPrefs.getInt("setting_decoder_index", 0)
@@ -114,8 +140,6 @@ fun OfflineVideoPlayerScreen(
         )
     }
 
-    // Create ExoPlayer instance with DefaultExtractorsFactory supporting progressive MP4, TS, MKV, and WebM extractors
-    // Create ExoPlayer instance with DefaultExtractorsFactory supporting progressive MP4, TS, MKV, and WebM extractors
     val exoPlayer = remember(renderersFactory) {
         val extractorsFactory = androidx.media3.extractor.DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
@@ -124,7 +148,6 @@ fun OfflineVideoPlayerScreen(
                 androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
                 androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory.FLAG_IGNORE_SPLICE_INFO_STREAM
             )
-            .setFragmentedMp4ExtractorFlags(androidx.media3.extractor.mp4.FragmentedMp4Extractor.FLAG_WORKAROUND_IGNORE_TFDT_BOX)
 
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
             context,
@@ -138,9 +161,14 @@ fun OfflineVideoPlayerScreen(
             .build()
     }
 
+    // Synchronize player speed
+    LaunchedEffect(baseSpeed, is2xBoosting, exoPlayer) {
+        val targetSpeed = if (is2xBoosting) 2.0f else baseSpeed
+        exoPlayer.setPlaybackSpeed(targetSpeed)
+    }
+
     var detectedMime by remember(currentFile) { mutableStateOf<String?>(null) }
 
-    // Sniff file header bytes: if first byte is 0x47, it is MPEG-TS (even if file extension is .mp4)
     LaunchedEffect(currentFile) {
         try {
             if (currentFile.exists() && currentFile.length() > 0L) {
@@ -155,11 +183,10 @@ fun OfflineVideoPlayerScreen(
         } catch (_: Exception) {}
     }
 
-    // Load video file into player with explicit MIME detection and local subtitle attachment
     LaunchedEffect(currentFile, detectedMime, exoPlayer) {
         playbackError = null
         if (!currentFile.exists() || currentFile.length() <= 0L) {
-            playbackError = "Downloaded video file not found or empty."
+            playbackError = "Offline video file not found or empty."
             isBuffering = false
             return@LaunchedEffect
         }
@@ -168,35 +195,6 @@ fun OfflineVideoPlayerScreen(
             val mediaItemBuilder = MediaItem.Builder().setUri(uri)
             if (detectedMime != null) {
                 mediaItemBuilder.setMimeType(detectedMime)
-            }
-
-            // Check for sidecar subtitle files (.srt, .vtt, .ass) in same folder
-            val parent = currentFile.parentFile
-            if (parent != null) {
-                val base = currentFile.nameWithoutExtension
-                val subFile = listOf(
-                    File(parent, "$base.srt"),
-                    File(parent, "$base.vtt"),
-                    File(parent, "$base.ass")
-                ).firstOrNull { it.exists() && it.length() > 0 }
-
-                if (subFile != null) {
-                    val subMime = when (subFile.extension.lowercase()) {
-                        "srt" -> androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
-                        "vtt" -> androidx.media3.common.MimeTypes.TEXT_VTT
-                        "ass" -> androidx.media3.common.MimeTypes.TEXT_SSA
-                        else -> androidx.media3.common.MimeTypes.TEXT_VTT
-                    }
-                    mediaItemBuilder.setSubtitleConfigurations(
-                        listOf(
-                            MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(subFile))
-                                .setMimeType(subMime)
-                                .setLanguage("en")
-                                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                                .build()
-                        )
-                    )
-                }
             }
 
             exoPlayer.setMediaItem(mediaItemBuilder.build())
@@ -208,7 +206,6 @@ fun OfflineVideoPlayerScreen(
         }
     }
 
-    // Position & duration tracking loop
     LaunchedEffect(exoPlayer) {
         while (true) {
             isPlaying = exoPlayer.isPlaying
@@ -218,7 +215,6 @@ fun OfflineVideoPlayerScreen(
         }
     }
 
-    // Auto-hide controls after 4 seconds of playback
     LaunchedEffect(showControls, isPlaying) {
         if (showControls && isPlaying) {
             delay(4000)
@@ -226,7 +222,6 @@ fun OfflineVideoPlayerScreen(
         }
     }
 
-    // Player state listener and lifecycle cleanup
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -237,16 +232,13 @@ fun OfflineVideoPlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                android.util.Log.e("OfflineVideoPlayer", "Playback error on ${currentFile.name}: ${error.message}", error)
                 isBuffering = false
                 if (detectedMime != null) {
-                    // Self-healing fallback: Try playing without forcing the sniffed MIME type
                     detectedMime = null
                 } else if (!useSoftwareFallback) {
-                    // Seamless automatic fallback to software decoder mode on hardware codec issue
                     useSoftwareFallback = true
                 } else {
-                    playbackError = "Playback error: ${error.message ?: "Format or codec issue"}"
+                    playbackError = "Playback error: ${error.message ?: "Format issue"}"
                 }
             }
         }
@@ -258,7 +250,6 @@ fun OfflineVideoPlayerScreen(
         }
     }
 
-    // Back button handling: exit fullscreen first if active, otherwise exit player
     BackHandler {
         if (isFullscreen) {
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -268,7 +259,6 @@ fun OfflineVideoPlayerScreen(
         }
     }
 
-    // Window insets & orientation management
     LaunchedEffect(isFullscreen) {
         activity?.let { act ->
             val insetsController = WindowCompat.getInsetsController(act.window, act.window.decorView)
@@ -283,16 +273,142 @@ fun OfflineVideoPlayerScreen(
         }
     }
 
+    // Audio and Brightness Helper Logic
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
+    val maxVolume = remember { audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15 }
+
+    // Helper functions for gestures
+    fun adjustVolume(deltaY: Float) {
+        if (audioManager == null) return
+        val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val step = if (deltaY < 0) 1 else -1
+        val newVol = (currentVol + step).coerceIn(0, maxVolume)
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+        val pct = ((newVol.toFloat() / maxVolume.toFloat()) * 100).toInt()
+        gestureOverlayText = "Volume $pct%"
+        gestureOverlayIcon = if (newVol == 0) Icons.Default.VolumeOff else Icons.Default.VolumeUp
+    }
+
+    fun adjustBrightness(deltaY: Float) {
+        val act = activity ?: return
+        val lp = act.window.attributes
+        var currentB = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
+        val change = if (deltaY < 0) 0.05f else -0.05f
+        currentB = (currentB + change).coerceIn(0.05f, 1.0f)
+        lp.screenBrightness = currentB
+        act.window.attributes = lp
+        val pct = (currentB * 100).toInt()
+        gestureOverlayText = "Brightness $pct%"
+        gestureOverlayIcon = Icons.Default.Brightness6
+    }
+
+    // Speed Selection Dialog
+    if (showSpeedDialog) {
+        AlertDialog(
+            onDismissRequest = { showSpeedDialog = false },
+            title = { Text("Playback Speed", fontWeight = FontWeight.Bold, color = Color.White) },
+            text = {
+                Column {
+                    listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f).forEach { speed ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    baseSpeed = speed
+                                    showSpeedDialog = false
+                                }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${speed}x" + if (speed == 1.0f) " (Normal)" else "",
+                                color = if (baseSpeed == speed) Color(0xFFFF9800) else Color.White,
+                                fontWeight = if (baseSpeed == speed) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 16.sp
+                            )
+                            if (baseSpeed == speed) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFFF9800))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSpeedDialog = false }) {
+                    Text("Close", color = Color(0xFFFF9800))
+                }
+            },
+            containerColor = Color(0xFF1E222D)
+        )
+    }
+
     if (isFullscreen) {
         // Landscape Full-Screen Immersive Mode
         Box(
             modifier = modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { showControls = !showControls }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            if (tryAwaitRelease()) {
+                                is2xBoosting = false
+                            } else {
+                                is2xBoosting = false
+                            }
+                        },
+                        onDoubleTap = { offset ->
+                            val width = size.width
+                            if (offset.x < width * 0.35f) {
+                                exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0L))
+                                gestureOverlayText = "-10s"
+                                gestureOverlayIcon = Icons.Default.Replay10
+                            } else if (offset.x > width * 0.65f) {
+                                exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration))
+                                gestureOverlayText = "+10s"
+                                gestureOverlayIcon = Icons.Default.Forward10
+                            } else {
+                                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                            }
+                        },
+                        onTap = { showControls = !showControls },
+                        onLongPress = {
+                            is2xBoosting = true
+                        }
+                    )
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragEnd = {
+                            is2xBoosting = false
+                            gestureOverlayText = null
+                            gestureOverlayIcon = null
+                        },
+                        onDragCancel = {
+                            is2xBoosting = false
+                            gestureOverlayText = null
+                            gestureOverlayIcon = null
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val width = size.width
+                            if (kotlin.math.abs(dragAmount.y) > kotlin.math.abs(dragAmount.x)) {
+                                if (change.position.x < width / 2) {
+                                    adjustBrightness(dragAmount.y)
+                                } else {
+                                    adjustVolume(dragAmount.y)
+                                }
+                            } else {
+                                val seekDelta = (dragAmount.x * 200).toLong()
+                                val target = (exoPlayer.currentPosition + seekDelta).coerceIn(0L, exoPlayer.duration.coerceAtLeast(1L))
+                                exoPlayer.seekTo(target)
+                                gestureOverlayText = formatOfflineDuration(target)
+                                gestureOverlayIcon = Icons.Default.FastForward
+                            }
+                        }
+                    )
+                }
         ) {
             AndroidView(
                 factory = { ctx ->
@@ -306,11 +422,48 @@ fun OfflineVideoPlayerScreen(
                         )
                     }
                 },
-                update = { pv ->
-                    pv.resizeMode = resizeMode
-                },
+                update = { pv -> pv.resizeMode = resizeMode },
                 modifier = Modifier.fillMaxSize()
             )
+
+            // 2X Speed Boost Indicator
+            if (is2xBoosting) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.Black.copy(alpha = 0.75f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9800)),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("2.0X SPEED BOOST", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            // Swipe / Gesture Overlay Indicator
+            if (gestureOverlayText != null) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Black.copy(alpha = 0.8f),
+                    modifier = Modifier.align(Alignment.Center)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        gestureOverlayIcon?.let { icon ->
+                            Icon(icon, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(32.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                        Text(gestureOverlayText!!, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                }
+            }
 
             CompactOfflinePlayerControls(
                 title = displayTitle,
@@ -322,21 +475,15 @@ fun OfflineVideoPlayerScreen(
                 isFullscreen = true,
                 hasPrevious = hasPrevious,
                 hasNext = hasNext,
+                currentSpeed = baseSpeed,
                 onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                 onSeek = { exoPlayer.seekTo(it) },
                 onRewind10 = { exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0L)) },
                 onForward10 = { exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration)) },
-                onPreviousVideo = {
-                    if (hasPrevious) {
-                        currentFile = downloadedFiles[currentFileIndex - 1]
-                    }
-                },
-                onNextVideo = {
-                    if (hasNext) {
-                        currentFile = downloadedFiles[currentFileIndex + 1]
-                    }
-                },
+                onPreviousVideo = { if (hasPrevious) currentFile = downloadedFiles[currentFileIndex - 1] },
+                onNextVideo = { if (hasNext) currentFile = downloadedFiles[currentFileIndex + 1] },
                 onToggleFullscreen = { isFullscreen = false },
+                onOpenSpeedDialog = { showSpeedDialog = true },
                 onToggleAspectRatio = {
                     resizeMode = when (resizeMode) {
                         androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -346,74 +493,17 @@ fun OfflineVideoPlayerScreen(
                 },
                 onBack = { isFullscreen = false }
             )
-
-            if (playbackError != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.85f))
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Error",
-                            tint = Color(0xFFFF5252),
-                            modifier = Modifier.size(44.dp)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "Playback Error",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = playbackError ?: "Unable to decode video format",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.LightGray,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(
-                                onClick = {
-                                    useSoftwareFallback = true
-                                    playbackError = null
-                                    exoPlayer.prepare()
-                                    exoPlayer.play()
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
-                            ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Retry with SW Codec")
-                            }
-                            OutlinedButton(
-                                onClick = { isFullscreen = false },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                            ) {
-                                Text("Exit Fullscreen")
-                            }
-                        }
-                    }
-                }
-            }
         }
     } else {
-        // Portrait Mode with Clean Edge-to-Edge System Inset Padding
+        // Portrait Mode with Player Viewport + Non-Fullscreen Local Video List
         Scaffold(
             modifier = modifier.fillMaxSize(),
             contentWindowInsets = WindowInsets(0.dp),
             containerColor = Color(0xFF0B0D14)
         ) { paddingValues ->
             val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-            val effectiveTopPadding = if (statusBarTop > 0.dp) statusBarTop + 4.dp else 32.dp
+            val effectiveTopPadding = if (statusBarTop > 0.dp) statusBarTop + 4.dp else 24.dp
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -421,16 +511,70 @@ fun OfflineVideoPlayerScreen(
                     .padding(top = effectiveTopPadding)
                     .navigationBarsPadding()
             ) {
-                // 1. Compact 16:9 Video Player Viewport
+                // 1. Compact 16:9 Video Player Viewport with Gesture Support
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
                         .background(Color.Black)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { showControls = !showControls }
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = {
+                                    if (tryAwaitRelease()) {
+                                        is2xBoosting = false
+                                    } else {
+                                        is2xBoosting = false
+                                    }
+                                },
+                                onDoubleTap = { offset ->
+                                    val width = size.width
+                                    if (offset.x < width * 0.35f) {
+                                        exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0L))
+                                        gestureOverlayText = "-10s"
+                                        gestureOverlayIcon = Icons.Default.Replay10
+                                    } else if (offset.x > width * 0.65f) {
+                                        exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration))
+                                        gestureOverlayText = "+10s"
+                                        gestureOverlayIcon = Icons.Default.Forward10
+                                    } else {
+                                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                                    }
+                                },
+                                onTap = { showControls = !showControls },
+                                onLongPress = { is2xBoosting = true }
+                            )
+                        }
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragEnd = {
+                                    is2xBoosting = false
+                                    gestureOverlayText = null
+                                    gestureOverlayIcon = null
+                                },
+                                onDragCancel = {
+                                    is2xBoosting = false
+                                    gestureOverlayText = null
+                                    gestureOverlayIcon = null
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val width = size.width
+                                    if (kotlin.math.abs(dragAmount.y) > kotlin.math.abs(dragAmount.x)) {
+                                        if (change.position.x < width / 2) {
+                                            adjustBrightness(dragAmount.y)
+                                        } else {
+                                            adjustVolume(dragAmount.y)
+                                        }
+                                    } else {
+                                        val seekDelta = (dragAmount.x * 200).toLong()
+                                        val target = (exoPlayer.currentPosition + seekDelta).coerceIn(0L, exoPlayer.duration.coerceAtLeast(1L))
+                                        exoPlayer.seekTo(target)
+                                        gestureOverlayText = formatOfflineDuration(target)
+                                        gestureOverlayIcon = Icons.Default.FastForward
+                                    }
+                                }
+                            )
+                        }
                 ) {
                     AndroidView(
                         factory = { ctx ->
@@ -444,11 +588,48 @@ fun OfflineVideoPlayerScreen(
                                 )
                             }
                         },
-                        update = { pv ->
-                            pv.resizeMode = resizeMode
-                        },
+                        update = { pv -> pv.resizeMode = resizeMode },
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    // 2X Speed Boost Pill
+                    if (is2xBoosting) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color.Black.copy(alpha = 0.75f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9800)),
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("2.0X SPEED BOOST", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    // Gesture Overlay Text
+                    if (gestureOverlayText != null) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.Black.copy(alpha = 0.8f),
+                            modifier = Modifier.align(Alignment.Center)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                gestureOverlayIcon?.let { icon ->
+                                    Icon(icon, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(28.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
+                                Text(gestureOverlayText!!, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
+                    }
 
                     CompactOfflinePlayerControls(
                         title = displayTitle,
@@ -460,21 +641,15 @@ fun OfflineVideoPlayerScreen(
                         isFullscreen = false,
                         hasPrevious = hasPrevious,
                         hasNext = hasNext,
+                        currentSpeed = baseSpeed,
                         onPlayPause = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                         onSeek = { exoPlayer.seekTo(it) },
                         onRewind10 = { exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0L)) },
                         onForward10 = { exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration)) },
-                        onPreviousVideo = {
-                            if (hasPrevious) {
-                                currentFile = downloadedFiles[currentFileIndex - 1]
-                            }
-                        },
-                        onNextVideo = {
-                            if (hasNext) {
-                                currentFile = downloadedFiles[currentFileIndex + 1]
-                            }
-                        },
+                        onPreviousVideo = { if (hasPrevious) currentFile = downloadedFiles[currentFileIndex - 1] },
+                        onNextVideo = { if (hasNext) currentFile = downloadedFiles[currentFileIndex + 1] },
                         onToggleFullscreen = { isFullscreen = true },
+                        onOpenSpeedDialog = { showSpeedDialog = true },
                         onToggleAspectRatio = {
                             resizeMode = when (resizeMode) {
                                 androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -484,85 +659,27 @@ fun OfflineVideoPlayerScreen(
                         },
                         onBack = onBack
                     )
-
-                    if (playbackError != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.85f))
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = "Error",
-                                    tint = Color(0xFFFF5252),
-                                    modifier = Modifier.size(36.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Playback Error",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = playbackError ?: "Unable to decode video format",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.LightGray,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(
-                                        onClick = {
-                                            useSoftwareFallback = true
-                                            playbackError = null
-                                            exoPlayer.prepare()
-                                            exoPlayer.play()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
-                                    ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Retry SW Codec")
-                                    }
-                                    OutlinedButton(
-                                        onClick = onBack,
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                                    ) {
-                                        Text("Back")
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
 
-                // 2. Video Storyline, Metadata & Offline Controls Card
+                // 2. Non-Fullscreen Imported Local Offline Video Playlist List
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp)
-                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
                     Text(
                         text = displayTitle,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = Color.White,
+                        maxLines = 1
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    // Badges row
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
@@ -571,7 +688,7 @@ fun OfflineVideoPlayerScreen(
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.5f))
                         ) {
                             Text(
-                                text = "OFFLINE STORAGE",
+                                text = "OFFLINE PLAYLIST (${downloadedFiles.size} VIDEOS)",
                                 color = Color(0xFF81C784),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -579,133 +696,36 @@ fun OfflineVideoPlayerScreen(
                             )
                         }
 
-                        val fileExt = currentFile.extension.uppercase()
-                        if (fileExt.isNotEmpty()) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFFFF9800).copy(alpha = 0.2f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9800).copy(alpha = 0.4f))
-                            ) {
-                                Text(
-                                    text = fileExt,
-                                    color = Color(0xFFFFB74D),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
-                            }
-                        }
-
-                        val fileSizeMB = currentFile.length() / (1024 * 1024)
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF1E293B)
-                        ) {
-                            Text(
-                                text = "${fileSizeMB} MB",
-                                color = Color.LightGray,
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
+                        TextButton(onClick = { showSpeedDialog = true }) {
+                            Icon(Icons.Default.Speed, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Speed: ${baseSpeed}x", color = Color(0xFFFF9800), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Quick action bar (Skip -10s, Play/Pause, Skip +10s, Restart)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF141721))
-                            .padding(vertical = 10.dp, horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceAround,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0L)) }) {
-                            Icon(Icons.Default.Replay10, contentDescription = "Rewind 10s", tint = Color.White)
-                        }
-
-                        IconButton(onClick = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() }) {
-                            Icon(
-                                if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
-                                contentDescription = "Play/Pause",
-                                tint = Color(0xFFFF9800),
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-
-                        IconButton(onClick = { exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(exoPlayer.duration)) }) {
-                            Icon(Icons.Default.Forward10, contentDescription = "Forward 10s", tint = Color.White)
-                        }
-
-                        IconButton(onClick = { exoPlayer.seekTo(0L) }) {
-                            Icon(Icons.Default.RestartAlt, contentDescription = "Restart", tint = Color.LightGray)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Media File Info Card
                     Text(
-                        text = "File Information",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "Imported Video Playlist",
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFFF9800)
+                        color = Color.White
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF141721),
-                        modifier = Modifier.fillMaxWidth()
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("File Name", color = Color.Gray, fontSize = 12.sp)
-                                Text(currentFile.name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Playback Engine", color = Color.Gray, fontSize = 12.sp)
-                                Text("ExoPlayer HW+ Accelerated", color = Color(0xFF81C784), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Downloaded Playlist", color = Color.Gray, fontSize = 12.sp)
-                                Text("${currentFileIndex + 1} of ${downloadedFiles.size} videos", color = Color.White, fontSize = 12.sp)
-                            }
-                        }
-                    }
-
-                    if (downloadedFiles.size > 1) {
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Text(
-                            text = "More Downloads",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        downloadedFiles.take(10).forEach { file ->
+                        items(downloadedFiles) { file ->
                             val isCurrent = file.absolutePath == currentFile.absolutePath
                             Surface(
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 color = if (isCurrent) Color(0xFF1E293B) else Color(0xFF141721),
+                                border = if (isCurrent) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9800)) else null,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
                                     .clickable { currentFile = file }
                             ) {
                                 Row(
@@ -715,25 +735,40 @@ fun OfflineVideoPlayerScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        imageVector = if (isCurrent) Icons.Default.PlayArrow else Icons.Default.Movie,
+                                        imageVector = if (isCurrent) Icons.Default.PlayCircle else Icons.Default.Movie,
                                         contentDescription = null,
                                         tint = if (isCurrent) Color(0xFFFF9800) else Color.Gray,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = file.nameWithoutExtension,
-                                        color = if (isCurrent) Color(0xFFFF9800) else Color.White,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Text(
-                                        text = "${file.length() / (1024 * 1024)} MB",
-                                        color = Color.Gray,
-                                        fontSize = 11.sp
-                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = file.nameWithoutExtension,
+                                            color = if (isCurrent) Color(0xFFFF9800) else Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "${file.length() / (1024 * 1024)} MB • ${file.extension.uppercase()}",
+                                            color = Color.Gray,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    if (isCurrent) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0xFFFF9800).copy(alpha = 0.2f)
+                                        ) {
+                                            Text(
+                                                text = "PLAYING",
+                                                color = Color(0xFFFF9800),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -745,7 +780,7 @@ fun OfflineVideoPlayerScreen(
 }
 
 /**
- * Compact Player Controls Overlay identical to VideoPlayerScreen
+ * Compact Player Controls Overlay
  */
 @Composable
 fun CompactOfflinePlayerControls(
@@ -758,6 +793,7 @@ fun CompactOfflinePlayerControls(
     isFullscreen: Boolean,
     hasPrevious: Boolean = false,
     hasNext: Boolean = false,
+    currentSpeed: Float = 1.0f,
     onPlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
     onRewind10: () -> Unit,
@@ -765,6 +801,7 @@ fun CompactOfflinePlayerControls(
     onPreviousVideo: () -> Unit,
     onNextVideo: () -> Unit,
     onToggleFullscreen: () -> Unit,
+    onOpenSpeedDialog: () -> Unit,
     onToggleAspectRatio: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -778,7 +815,7 @@ fun CompactOfflinePlayerControls(
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.5f))
         ) {
-            // Top Bar: Back button, Title, Aspect Ratio & Fullscreen
+            // Top Bar: Back button, Title, Speed, Aspect Ratio & Fullscreen
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -816,6 +853,17 @@ fun CompactOfflinePlayerControls(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onOpenSpeedDialog,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Speed,
+                            contentDescription = "Speed Settings",
+                            tint = if (currentSpeed != 1.0f) Color(0xFFFF9800) else Color.White
+                        )
+                    }
+
                     IconButton(
                         onClick = onToggleAspectRatio,
                         modifier = Modifier.size(36.dp)
@@ -878,7 +926,6 @@ fun CompactOfflinePlayerControls(
                     )
                 }
 
-                // Main Play/Pause button or Buffering Spinner
                 Box(
                     modifier = Modifier
                         .size(52.dp)
@@ -998,8 +1045,9 @@ private fun formatOfflineDuration(ms: Long): String {
     val minutes = (totalSeconds / 60) % 60
     val hours = totalSeconds / 3600
     return if (hours > 0) {
-        String.format("%02d:%02d:%02d", hours, minutes, seconds)
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
     } else {
         String.format("%02d:%02d", minutes, seconds)
     }
 }
+

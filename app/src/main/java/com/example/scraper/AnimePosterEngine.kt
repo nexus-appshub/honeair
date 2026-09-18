@@ -163,7 +163,7 @@ object AnimePosterEngine {
                 .post(requestBody)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .header("User-Agent", "HomeAirTV/4.6.9 (Android)")
+                .header("User-Agent", "HomeAirTV/4.7 (Android)")
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
@@ -223,7 +223,7 @@ object AnimePosterEngine {
 
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "HomeAirTV/4.6.9 (Android)")
+                .header("User-Agent", "HomeAirTV/4.7 (Android)")
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
@@ -424,7 +424,7 @@ object AnimePosterEngine {
                 .post(requestBody)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .header("User-Agent", "HomeAirTV/4.6.9 (Android)")
+                .header("User-Agent", "HomeAirTV/4.7 (Android)")
                 .build()
 
             httpClient.newCall(request).execute().use { response ->

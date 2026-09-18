@@ -1,0 +1,1 @@
+sed -i 's/resultChannel.trySend(res)/if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")/' app/src/main/java/com/example/scraper/UnifiedStreamManager.kt
