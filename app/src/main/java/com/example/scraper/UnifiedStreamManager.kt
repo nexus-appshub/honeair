@@ -66,36 +66,6 @@ object UnifiedStreamManager {
                 if (!bodyStr.contains("#EXTM3U")) return@withContext false
                 if (bodyStr.contains("404") || bodyStr.contains("Video not found") || bodyStr.contains("Access Denied") || bodyStr.contains("error")) return@withContext false
 
-                // Deep Child Playlist Verification for Master Playlists
-                if (bodyStr.contains("#EXT-X-STREAM-INF")) {
-                    val lines = bodyStr.lines()
-                    var childLine = ""
-                    for (i in lines.indices) {
-                        if (lines[i].contains("#EXT-X-STREAM-INF")) {
-                            for (j in (i + 1) until minOf(i + 5, lines.size)) {
-                                val candidate = lines[j].trim()
-                                if (candidate.isNotBlank() && !candidate.startsWith("#")) {
-                                    childLine = candidate
-                                    break
-                                }
-                            }
-                            if (childLine.isNotBlank()) break
-                        }
-                    }
-
-                    if (childLine.isNotBlank()) {
-                        val absoluteChildUrl = resolveRelativeUrl(url, childLine)
-                        val childReqBuilder = Request.Builder().url(absoluteChildUrl)
-                        headers.forEach { (k, v) -> childReqBuilder.addHeader(k, v) }
-                        val childResp = httpClient.newCall(childReqBuilder.build()).execute()
-                        val childCode = childResp.code
-                        childResp.close()
-                        if (childCode != 200 && childCode != 206) {
-                            Log.w(TAG, "Child playlist probe failed ($childCode) for: $absoluteChildUrl")
-                            return@withContext false
-                        }
-                    }
-                }
                 return@withContext true
             } else {
                 resp.close()
@@ -156,7 +126,7 @@ object UnifiedStreamManager {
         Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime)")
 
         // 0. High-Speed Anime Native & API Resolver (Direct Native Extraction + HLS M3U8)
-        val isItemAnime = isAnime || AnimePosterEngine.isAnime(title = title, id = tmdbId) || tmdbId.startsWith("anikoto_") || tmdbId.startsWith("al_") || tmdbId.startsWith("mal_") || (tmdbId.contains("-") && tmdbId.any { it.isDigit() })
+        val isItemAnime = isAnime || tmdbId.startsWith("anikoto_") || tmdbId.startsWith("al_") || tmdbId.startsWith("mal_") || AnimePosterEngine.isAnime(title = title, id = tmdbId)
         if (isItemAnime) {
             try {
                 val slugKey = when {
@@ -292,6 +262,29 @@ object UnifiedStreamManager {
                         }
                     }
                     if (firstResult != null) break
+                }
+
+                if (firstResult == null) {
+                    // Fuzzy / Typo Fallback: Search with the longest, most significant words
+                    val cleanWords = baseQuery.split(" ")
+                        .map { it.trim().replace(Regex("[^a-zA-Z0-9]"), "") }
+                        .filter { it.length > 3 && it.lowercase() !in listOf("season", "episode", "legacy", "series", "movie", "show", "part") }
+                    if (cleanWords.isNotEmpty()) {
+                        val longestWordQuery = cleanWords.sortedByDescending { it.length }.take(2).joinToString(" ")
+                        Log.d(TAG, "Typo fallback: searching TMDB with longest words query: $longestWordQuery")
+                        firstResult = if (effectiveIsTv) {
+                            com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = longestWordQuery).results?.firstOrNull()
+                        } else {
+                            com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = longestWordQuery).results?.firstOrNull()
+                        }
+                        if (firstResult == null) {
+                            firstResult = if (effectiveIsTv) {
+                                com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = longestWordQuery).results?.firstOrNull()?.also { effectiveIsTv = false }
+                            } else {
+                                com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = longestWordQuery).results?.firstOrNull()?.also { effectiveIsTv = true }
+                            }
+                        }
+                    }
                 }
 
                 if (firstResult != null) {

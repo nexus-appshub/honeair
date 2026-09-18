@@ -257,7 +257,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     var mainScrapedVideoUrl by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf<String?>(null) }
     var mainScrapedHeaders by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf<Map<String, String>?>(null) }
     var isScrapingDirectStream by remember { mutableStateOf(false) }
-    var directScrapeSecondsRemaining by remember(imdbId, currentSeason, currentEpisode) { androidx.compose.runtime.mutableIntStateOf(60) }
+    var directScrapeSecondsRemaining by remember(imdbId, currentSeason, currentEpisode) { androidx.compose.runtime.mutableIntStateOf(0) }
     var directScrapeAttemptCount by remember(imdbId, currentSeason, currentEpisode) { androidx.compose.runtime.mutableIntStateOf(0) }
     var directScrapeStatusText by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf("Scanning 12+ cloud streams in parallel...") }
     var useExoPlayer by remember(nativeStreamUrl) { mutableStateOf(true) }
@@ -357,15 +357,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             directScrapeSecondsRemaining = 0
         } else {
             isScrapingDirectStream = true
-            directScrapeSecondsRemaining = 60
-
-            // Live 60-second countdown timer ticker
-            val tickerJob = scope.launch {
-                while (directScrapeSecondsRemaining > 0 && capturedVideoUrl.isNullOrBlank()) {
-                    delay(1000)
-                    directScrapeSecondsRemaining--
-                }
-            }
+            directScrapeSecondsRemaining = 0
 
             // Continuous parallel scraping loop across all cloud engines for up to 5 minutes (300 seconds)
             withContext(Dispatchers.IO) {
@@ -374,15 +366,11 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 while (capturedVideoUrl.isNullOrBlank() && (System.currentTimeMillis() - loopStartTime) < 300000L) {
                     try {
                         withContext(Dispatchers.Main) {
-                            directScrapeStatusText = if (directScrapeSecondsRemaining > 0) {
-                                when (iteration % 4) {
-                                    1 -> "Scanning 12+ cloud streams in parallel (VidLink, VidSrc, AutoEmbed)..."
-                                    2 -> "Racing deep extractors (VidRock, VidNest, MovieBox)..."
-                                    3 -> "Querying high-speed direct relays & mirrors..."
-                                    else -> "Aggressive parallel scraping active... Attempting direct HD stream"
-                                }
-                            } else {
-                                "Extended Deep Scan Active... Finding alternative direct cloud relays (Attempt $iteration)..."
+                            directScrapeStatusText = when (iteration % 4) {
+                                1 -> "Scanning 12+ cloud streams in parallel (VidLink, VidSrc, AutoEmbed)..."
+                                2 -> "Racing deep extractors (VidRock, VidNest, MovieBox)..."
+                                3 -> "Querying high-speed direct relays & mirrors..."
+                                else -> "Aggressive parallel scraping active... Attempting direct HD stream"
                             }
                         }
 
@@ -445,7 +433,6 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 }
 
                 withContext(Dispatchers.Main) {
-                    tickerJob.cancel()
                     isScrapingDirectStream = false
                 }
             }

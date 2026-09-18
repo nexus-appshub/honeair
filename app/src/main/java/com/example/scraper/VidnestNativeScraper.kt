@@ -43,6 +43,10 @@ object VidnestNativeScraper {
     private val BASE_URLS = listOf(
         "https://new.vidnest.fun",
         "https://vidnest.fun",
+        "https://new.vidnes.fun",
+        "https://vidnes.fun",
+        "https://api.vidnes.fun",
+        "https://vidnes.xyz",
         "https://vidnest.xyz",
         "https://api.vidnest.fun",
         "https://vidnest.net",
