@@ -1023,10 +1023,7 @@ fun AppNoticeDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
-                .padding(top = 4.dp, bottom = 28.dp),
+                .padding(horizontal = 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Header badge
@@ -1084,7 +1081,7 @@ fun AppNoticeDialog(
                     contentDescription = "Notice Image",
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp)
+                        .height(230.dp)
                         .clip(RoundedCornerShape(14.dp)),
                     contentScale = ContentScale.Crop
                 )

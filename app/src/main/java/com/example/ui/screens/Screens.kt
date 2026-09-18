@@ -17,12 +17,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebResourceRequest
-import android.view.ViewGroup
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.core.*
@@ -108,6 +102,7 @@ import com.example.ui.components.ExoPlayerView
 import com.example.ui.components.ShimmerAsyncImage
 import com.example.ui.components.PreloadImages
 import com.example.ui.components.CinemetaWebView
+import com.example.ui.components.MasterAnimeBrowserModal
 import com.example.subscription.SubscriptionManager
 import com.example.ui.components.OfficialGoogleLogo
 import com.example.ui.viewmodel.StreamViewModel
@@ -649,8 +644,7 @@ fun AnimatedHomeAirLogo(
 fun HomeAirTvBrandingHeader(
     selectedPlaylistName: String? = null,
     modifier: Modifier = Modifier,
-    clickTrigger: Int = 0,
-    isLiveTvHeader: Boolean = false
+    clickTrigger: Int = 0
 ) {
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val headerTextColor = if (isDark) Color.White else Color(0xFF1C1C1E)
@@ -710,7 +704,7 @@ fun HomeAirTvBrandingHeader(
                     color = headerTextColor
                 )
                 Text(
-                    text = if (isLiveTvHeader) "AIR " else "AIR",
+                    text = "AIR",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 17.sp,
@@ -724,23 +718,6 @@ fun HomeAirTvBrandingHeader(
                         )
                     )
                 )
-                if (isLiveTvHeader) {
-                    Text(
-                        text = "LIVE",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 17.sp,
-                            letterSpacing = 1.2.sp,
-                            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                listOf(
-                                    Color(0xFFFF4D4D),
-                                    Color(0xFFFF0000),
-                                    Color(0xFFB30000)
-                                )
-                            )
-                        )
-                    )
-                }
             }
         }
     }
@@ -934,6 +911,7 @@ fun HomeScreen(
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     var showCopyrightSheet by remember { mutableStateOf(false) }
     var showFloatingPlayerLimitSheet by remember { mutableStateOf(false) }
+    var showMasterAnimeBrowser by remember { mutableStateOf(false) }
     var activeWebPlayer by remember { mutableStateOf<WebPlayerState?>(null) }
     var selectedItemForDetail by remember { mutableStateOf<MediaItem?>(null) }
     var showNotificationPopup by remember { mutableStateOf(false) }
@@ -1244,8 +1222,7 @@ fun HomeScreen(
                             HomeAirTvBrandingHeader(
                                 selectedPlaylistName = if (isSportsViewMode) "Sports Zone" else selectedPlaylist?.name,
                                 modifier = Modifier,
-                                clickTrigger = screenClickCount,
-                                isLiveTvHeader = true
+                                clickTrigger = screenClickCount
                             )
                         }
 
@@ -3118,7 +3095,18 @@ fun HomeScreen(
             onShowFloatingPlayerLimit = {
                 showProfileSheet = false
                 showFloatingPlayerLimitSheet = true
+            },
+            onShowMasterAnime = {
+                showProfileSheet = false
+                showMasterAnimeBrowser = true
             }
+        )
+    }
+
+    if (showMasterAnimeBrowser) {
+        MasterAnimeBrowserModal(
+            url = "https://media.hmair.xyz",
+            onDismiss = { showMasterAnimeBrowser = false }
         )
     }
 
@@ -7420,7 +7408,7 @@ fun SettingsScreen(
     var showProfileSheet by remember { mutableStateOf(false) }
     var showWatchHistorySheet by remember { mutableStateOf(false) }
     var showWebVersionView by remember { mutableStateOf(false) }
-    var showMasterAnimeView by remember { mutableStateOf(false) }
+    var showMasterAnimeBrowser by remember { mutableStateOf(false) }
     var showSubscriptionSheet by remember { mutableStateOf(false) }
     var showSubscriptionPlanModalInProfile by remember { mutableStateOf(false) }
     var showHelpCenterSheet by remember { mutableStateOf(false) }
@@ -8042,9 +8030,9 @@ fun SettingsScreen(
             item {
                 SecretSettingRow(
                     title = "Master Anime",
-                    subtitle = "Stream anime directly in app",
-                    icon = Icons.Outlined.MovieFilter,
-                    onClick = { showMasterAnimeView = true }
+                    subtitle = "Stream exclusive anime collection",
+                    icon = Icons.Outlined.PlayCircle,
+                    onClick = { showMasterAnimeBrowser = true }
                 )
             }
 
@@ -8245,7 +8233,18 @@ fun SettingsScreen(
             onShowFloatingPlayerLimit = {
                 showProfileSheet = false
                 showFloatingPlayerLimitSheet = true
+            },
+            onShowMasterAnime = {
+                showProfileSheet = false
+                showMasterAnimeBrowser = true
             }
+        )
+    }
+
+    if (showMasterAnimeBrowser) {
+        MasterAnimeBrowserModal(
+            url = "https://media.hmair.xyz",
+            onDismiss = { showMasterAnimeBrowser = false }
         )
     }
 
@@ -9261,178 +9260,6 @@ fun SettingsScreen(
             url = "https://homeairtv.xubilaswebdevcorp.shop/",
             onDismiss = { showWebVersionView = false }
         )
-    }
-
-    if (showMasterAnimeView) {
-        MasterAnimeEmbeddedScreen(
-            url = "https://media.hmair.xyz",
-            onDismiss = { showMasterAnimeView = false }
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MasterAnimeEmbeddedScreen(
-    url: String = "https://media.hmair.xyz",
-    onDismiss: () -> Unit
-) {
-    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
-
-    BackHandler {
-        if (webViewInstance?.canGoBack() == true) {
-            webViewInstance?.goBack()
-        } else {
-            onDismiss()
-        }
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
-        val isDark = androidx.compose.foundation.isSystemInDarkTheme()
-        val bgColor = if (isDark) Color(0xFF101014) else Color(0xFFF4F4F8)
-        val iconColor = if (isDark) Color.White else Color(0xFF1C1C1E)
-
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = bgColor
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-            ) {
-                // Extremely slim/thin header bar (38.dp) with ONLY Back, Refresh, Close icons
-                Surface(
-                    color = if (isDark) Color(0xFF18181C) else Color(0xFFEFEFF4),
-                    tonalElevation = 2.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(38.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // Left: Back Icon
-                        IconButton(
-                            onClick = {
-                                if (webViewInstance?.canGoBack() == true) {
-                                    webViewInstance?.goBack()
-                                } else {
-                                    onDismiss()
-                                }
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = iconColor,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Right: Refresh & Close Icons
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            IconButton(
-                                onClick = { webViewInstance?.reload() },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh",
-                                    tint = iconColor,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            IconButton(
-                                onClick = onDismiss,
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = iconColor,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Edge-to-edge embedded web view
-                AndroidView(
-                    factory = { context ->
-                        WebView(context).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                databaseEnabled = true
-                                allowFileAccess = true
-                                allowContentAccess = true
-                                useWideViewPort = true
-                                loadWithOverviewMode = true
-                                mediaPlaybackRequiresUserGesture = false
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                setSupportMultipleWindows(true)
-                                userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                            }
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                    return false
-                                }
-                            }
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onCreateWindow(
-                                    view: WebView?,
-                                    isDialog: Boolean,
-                                    isUserGesture: Boolean,
-                                    resultMsg: android.os.Message?
-                                ): Boolean {
-                                    val newWebView = WebView(context).apply {
-                                        settings.javaScriptEnabled = true
-                                        settings.domStorageEnabled = true
-                                        webViewClient = object : WebViewClient() {
-                                            override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
-                                                req?.url?.let { view?.loadUrl(it.toString()) }
-                                                return true
-                                            }
-                                        }
-                                    }
-                                    val transport = resultMsg?.obj as? WebView.WebViewTransport
-                                    transport?.webView = newWebView
-                                    resultMsg?.sendToTarget()
-                                    return true
-                                }
-                            }
-                            loadUrl(url)
-                            webViewInstance = this
-                        }
-                    },
-                    update = { webView ->
-                        webViewInstance = webView
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
     }
 }
 
