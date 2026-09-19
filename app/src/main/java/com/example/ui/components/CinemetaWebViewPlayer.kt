@@ -355,6 +355,10 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             useExoPlayer = true
             isScrapingDirectStream = false
             directScrapeSecondsRemaining = 0
+        } else if (currentSeason == season && currentEpisode == episode) {
+            // Wait for the ViewModel's active parallel scraper to finish and update effectiveNativeUrl
+            isScrapingDirectStream = true
+            directScrapeStatusText = "Scanning 12+ cloud streams in parallel..."
         } else {
             isScrapingDirectStream = true
             directScrapeSecondsRemaining = 0
@@ -736,11 +740,11 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     }
 
     var resolvedTmdbId by remember(imdbId, title) {
-        mutableStateOf<String?>(if (imdbId.startsWith("tt") || (imdbId.isNotBlank() && imdbId.all { it.isDigit() })) imdbId else null)
+        mutableStateOf<String?>(if (imdbId.isNotBlank() && !imdbId.startsWith("tt") && imdbId.all { it.isDigit() }) imdbId else null)
     }
 
     LaunchedEffect(imdbId, title, isAnime) {
-        if (resolvedTmdbId == null || (!resolvedTmdbId!!.startsWith("tt") && !resolvedTmdbId!!.all { it.isDigit() })) {
+        if (resolvedTmdbId == null) {
             withContext(Dispatchers.IO) {
                 try {
                     val client = OkHttpClient.Builder()
@@ -748,41 +752,69 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         .readTimeout(6, TimeUnit.SECONDS)
                         .build()
 
-                    val cleanTitle = title
-                        .replace(Regex("""(?i)\s*(?:[-–—:]\s*)?(?:Season\s*\d+|[0-9]+(?:st|nd|rd|th)\s*Season|Part\s*\d+|Cour\s*\d+|Final\s*Season|Final\s*Chapter|II|III|IV|V|VI).*$"""), "")
-                        .replace(Regex("""(?i)\s*\((?:TV|Dub|Sub|Official|Uncensored)\)"""), "")
-                        .trim()
-                    val enc = java.net.URLEncoder.encode(if (cleanTitle.isNotBlank()) cleanTitle else title, "UTF-8")
-
                     var foundId: String? = null
 
-                    val searchTvUrl = "https://api.themoviedb.org/3/search/tv?query=$enc&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
-                    val req = Request.Builder().url(searchTvUrl).build()
-                    val resp = client.newCall(req).execute()
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string()
-                        if (!body.isNullOrEmpty()) {
-                            val j = JSONObject(body)
-                            val res = j.optJSONArray("results")
-                            if (res != null && res.length() > 0) {
-                                val numId = res.getJSONObject(0).optInt("id", 0)
-                                if (numId > 0) foundId = numId.toString()
+                    // Step 1: If IMDb ID is available, resolve true numerical TMDb ID using Find by External ID API (Crucial for TV shows on vidsrc.sbs)
+                    if (imdbId.startsWith("tt")) {
+                        val findUrl = "https://api.themoviedb.org/3/find/$imdbId?external_source=imdb_id&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
+                        val reqFind = Request.Builder().url(findUrl).build()
+                        val respFind = client.newCall(reqFind).execute()
+                        if (respFind.isSuccessful) {
+                            val body = respFind.body?.string()
+                            if (!body.isNullOrEmpty()) {
+                                val j = JSONObject(body)
+                                val tvResults = j.optJSONArray("tv_results")
+                                if (tvResults != null && tvResults.length() > 0) {
+                                    val numId = tvResults.getJSONObject(0).optInt("id", 0)
+                                    if (numId > 0) foundId = numId.toString()
+                                }
+                                if (foundId == null) {
+                                    val movieResults = j.optJSONArray("movie_results")
+                                    if (movieResults != null && movieResults.length() > 0) {
+                                        val numId = movieResults.getJSONObject(0).optInt("id", 0)
+                                        if (numId > 0) foundId = numId.toString()
+                                    }
+                                }
                             }
                         }
                     }
 
+                    // Step 2: Fallback to Title Search if External ID resolution was unsuccessful
                     if (foundId == null) {
-                        val searchMultiUrl = "https://api.themoviedb.org/3/search/multi?query=$enc&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
-                        val reqMulti = Request.Builder().url(searchMultiUrl).build()
-                        val respMulti = client.newCall(reqMulti).execute()
-                        if (respMulti.isSuccessful) {
-                            val body = respMulti.body?.string()
+                        val cleanTitle = title
+                            .replace(Regex("""(?i)\s*(?:[-–—:]\s*)?(?:Season\s*\d+|[0-9]+(?:st|nd|rd|th)\s*Season|Part\s*\d+|Cour\s*\d+|Final\s*Season|Final\s*Chapter|II|III|IV|V|VI).*$"""), "")
+                            .replace(Regex("""(?i)\s*\((?:TV|Dub|Sub|Official|Uncensored)\)"""), "")
+                            .trim()
+                        val enc = java.net.URLEncoder.encode(if (cleanTitle.isNotBlank()) cleanTitle else title, "UTF-8")
+
+                        val searchTvUrl = "https://api.themoviedb.org/3/search/tv?query=$enc&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
+                        val req = Request.Builder().url(searchTvUrl).build()
+                        val resp = client.newCall(req).execute()
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
                             if (!body.isNullOrEmpty()) {
                                 val j = JSONObject(body)
                                 val res = j.optJSONArray("results")
                                 if (res != null && res.length() > 0) {
                                     val numId = res.getJSONObject(0).optInt("id", 0)
                                     if (numId > 0) foundId = numId.toString()
+                                }
+                            }
+                        }
+
+                        if (foundId == null) {
+                            val searchMultiUrl = "https://api.themoviedb.org/3/search/multi?query=$enc&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
+                            val reqMulti = Request.Builder().url(searchMultiUrl).build()
+                            val respMulti = client.newCall(reqMulti).execute()
+                            if (respMulti.isSuccessful) {
+                                val body = respMulti.body?.string()
+                                if (!body.isNullOrEmpty()) {
+                                    val j = JSONObject(body)
+                                    val res = j.optJSONArray("results")
+                                    if (res != null && res.length() > 0) {
+                                        val numId = res.getJSONObject(0).optInt("id", 0)
+                                        if (numId > 0) foundId = numId.toString()
+                                    }
                                 }
                             }
                         }

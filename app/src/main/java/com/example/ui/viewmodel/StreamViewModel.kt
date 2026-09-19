@@ -98,6 +98,8 @@ data class AppControlConfig(
     val fancodeCode: String = "",
     val fancodeBannerUrl: String = "",
     val isFanCodeLocked: Boolean = false,
+    val isFanCodeSplashLocked: Boolean = true,
+    val isFanCodeTabLocked: Boolean = false,
     val isFanCodeGetCodeEnabled: Boolean = true,
     val fancodeTelegramUrl: String = "",
     val fancodeWebUrl: String = "",
@@ -128,6 +130,136 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     private lateinit var repository: StreamRepository
     private val mediaRepository = MediaRepository()
+    private val shortReelsRepository = com.example.data.repository.ShortReelsRepository()
+
+    // Airing Feed Merged State (combining Airing-1 & Airing-2 sources automatically)
+    private var airing1SessionId: String? = null
+    private var airing2SessionId: String? = null
+    private var airing1HasMore: Boolean = true
+    private var airing2HasMore: Boolean = true
+
+    private val _airingMergedState = MutableStateFlow(com.example.data.model.AiringFeedState())
+    val airingMergedState: StateFlow<com.example.data.model.AiringFeedState> = _airingMergedState.asStateFlow()
+
+    fun loadMergedAiringFeed(forceRefresh: Boolean = false) {
+        val currentState = _airingMergedState.value
+        if (currentState.isLoading) return
+        if (!forceRefresh && currentState.reels.isNotEmpty()) return
+
+        viewModelScope.launch {
+            _airingMergedState.update { it.copy(isLoading = true, error = null) }
+            
+            val fetchJob1 = async { shortReelsRepository.fetchInitialFeed(com.example.data.model.AiringSource.AIRING_1) }
+            val fetchJob2 = async { shortReelsRepository.fetchInitialFeed(com.example.data.model.AiringSource.AIRING_2) }
+
+            val res1 = fetchJob1.await()
+            val res2 = fetchJob2.await()
+
+            val combinedList = mutableListOf<com.example.data.model.ShortReel>()
+            var hadSuccess = false
+            var errorMessage: String? = null
+
+            if (res1 is com.example.data.repository.ShortReelsResult.Success) {
+                airing1SessionId = res1.sessionId
+                airing1HasMore = res1.hasMore
+                combinedList.addAll(res1.reels)
+                hadSuccess = true
+            } else if (res1 is com.example.data.repository.ShortReelsResult.Error) {
+                errorMessage = res1.message
+            }
+
+            if (res2 is com.example.data.repository.ShortReelsResult.Success) {
+                airing2SessionId = res2.sessionId
+                airing2HasMore = res2.hasMore
+                combinedList.addAll(res2.reels)
+                hadSuccess = true
+            } else if (res2 is com.example.data.repository.ShortReelsResult.Error && !hadSuccess) {
+                errorMessage = res2.message
+            }
+
+            val distinctReels = combinedList
+                .distinctBy { it.mediaUrl }
+                .distinctBy { it.id }
+
+            if (distinctReels.isNotEmpty()) {
+                _airingMergedState.update {
+                    it.copy(
+                        reels = distinctReels,
+                        isLoading = false,
+                        hasMore = airing1HasMore || airing2HasMore,
+                        error = null
+                    )
+                }
+            } else {
+                _airingMergedState.update {
+                    it.copy(
+                        reels = emptyList(),
+                        isLoading = false,
+                        error = errorMessage ?: "No reels available right now. Tap to retry."
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadMoreMergedAiringFeed() {
+        val currentState = _airingMergedState.value
+        if (currentState.isLoadingMore || !currentState.hasMore) return
+
+        viewModelScope.launch {
+            _airingMergedState.update { it.copy(isLoadingMore = true) }
+
+            val s1 = airing1SessionId
+            val s2 = airing2SessionId
+
+            val job1 = if (!s1.isNullOrBlank() && airing1HasMore) {
+                async { shortReelsRepository.fetchNextPage(s1) }
+            } else null
+
+            val job2 = if (!s2.isNullOrBlank() && airing2HasMore) {
+                async { shortReelsRepository.fetchNextPage(s2) }
+            } else null
+
+            val res1 = job1?.await()
+            val res2 = job2?.await()
+
+            val newItems = mutableListOf<com.example.data.model.ShortReel>()
+
+            if (res1 is com.example.data.repository.ShortReelsResult.Success) {
+                airing1SessionId = res1.sessionId ?: airing1SessionId
+                airing1HasMore = res1.hasMore
+                newItems.addAll(res1.reels)
+            } else if (res1 is com.example.data.repository.ShortReelsResult.Error && res1.isSessionExpired) {
+                airing1SessionId = null
+                airing1HasMore = false
+            }
+
+            if (res2 is com.example.data.repository.ShortReelsResult.Success) {
+                airing2SessionId = res2.sessionId ?: airing2SessionId
+                airing2HasMore = res2.hasMore
+                newItems.addAll(res2.reels)
+            } else if (res2 is com.example.data.repository.ShortReelsResult.Error && res2.isSessionExpired) {
+                airing2SessionId = null
+                airing2HasMore = false
+            }
+
+            val existingIds = currentState.reels.map { it.id }.toSet()
+            val existingUrls = currentState.reels.map { it.mediaUrl }.toSet()
+            val genuinelyNew = newItems.filter { it.id !in existingIds && it.mediaUrl !in existingUrls }
+
+            _airingMergedState.update {
+                it.copy(
+                    reels = it.reels + genuinelyNew,
+                    isLoadingMore = false,
+                    hasMore = airing1HasMore || airing2HasMore
+                )
+            }
+        }
+    }
+
+    fun retryMergedAiringFeed() {
+        loadMergedAiringFeed(forceRefresh = true)
+    }
 
     // Auth State
     private val _tabReselectEvent = MutableSharedFlow<Int>(extraBufferCapacity = 1)
@@ -206,6 +338,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 fancodeCode = p.getString("fancodeCode", "") ?: "",
                 fancodeBannerUrl = p.getString("fancodeBannerUrl", "") ?: "",
                 isFanCodeLocked = p.getBoolean("isFanCodeLocked", false),
+                isFanCodeSplashLocked = p.getBoolean("isFanCodeSplashLocked", true),
+                isFanCodeTabLocked = p.getBoolean("isFanCodeTabLocked", false),
                 isFanCodeGetCodeEnabled = p.getBoolean("isFanCodeGetCodeEnabled", true),
                 fancodeTelegramUrl = p.getString("fancodeTelegramUrl", "") ?: "",
                 fancodeWebUrl = p.getString("fancodeWebUrl", "") ?: "",
@@ -220,6 +354,32 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         } else null
     )
     val appControlConfig: StateFlow<AppControlConfig?> = _appControlConfig.asStateFlow()
+
+    // Bottom Nav customizer states
+    private val navPrefs by lazy { application.getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
+    private val _browseSlotType = MutableStateFlow(application.getSharedPreferences("app_settings", Context.MODE_PRIVATE).getString("browse_slot_replacement", "Browse") ?: "Browse")
+    val browseSlotType: StateFlow<String> = _browseSlotType.asStateFlow()
+
+    private val _airSlotType = MutableStateFlow(application.getSharedPreferences("app_settings", Context.MODE_PRIVATE).getString("air_slot_replacement", "Air") ?: "Air")
+    val airSlotType: StateFlow<String> = _airSlotType.asStateFlow()
+
+    private val _downloadsSlotType = MutableStateFlow(application.getSharedPreferences("app_settings", Context.MODE_PRIVATE).getString("downloads_slot_replacement", "Downloads") ?: "Downloads")
+    val downloadsSlotType: StateFlow<String> = _downloadsSlotType.asStateFlow()
+
+    fun updateBrowseSlotType(type: String) {
+        navPrefs.edit().putString("browse_slot_replacement", type).apply()
+        _browseSlotType.value = type
+    }
+
+    fun updateAirSlotType(type: String) {
+        navPrefs.edit().putString("air_slot_replacement", type).apply()
+        _airSlotType.value = type
+    }
+
+    fun updateDownloadsSlotType(type: String) {
+        navPrefs.edit().putString("downloads_slot_replacement", type).apply()
+        _downloadsSlotType.value = type
+    }
 
     // Media Hub State (Movies, Anime, K-Dramas, TV Shows, Short TV, Hindi Dubbed)
     private val _mediaState = MutableStateFlow<UiState<List<MediaItem>>>(UiState.Loading)
@@ -326,6 +486,52 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
     }.flowOn(kotlinx.coroutines.Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Discover Feed Items (Dynamic & Daily Randomized Shuffle with Latest Items Prioritized)
+    private val _discoverFeedItems = MutableStateFlow<List<MediaItem>>(emptyList())
+    val discoverFeedItems: StateFlow<List<MediaItem>> = _discoverFeedItems.asStateFlow()
+
+    private val _isDiscoverFeedRefreshing = MutableStateFlow(false)
+    val isDiscoverFeedRefreshing: StateFlow<Boolean> = _isDiscoverFeedRefreshing.asStateFlow()
+
+    fun refreshDiscoverFeed(forceReloadFromNetwork: Boolean = false) {
+        viewModelScope.launch {
+            _isDiscoverFeedRefreshing.value = true
+            if (forceReloadFromNetwork) {
+                loadMediaItems(forceRefresh = true)
+            }
+            val currentState = _mediaState.value
+            val list = if (currentState is UiState.Success) currentState.data else emptyList()
+            if (list.isNotEmpty()) {
+                val latest = latestReleases.value
+                val latestPool = if (latest.isNotEmpty()) latest.shuffled() else list.filter { (it.year.toIntOrNull() ?: 0) >= 2024 }.shuffled()
+                val otherPool = list.filter { it !in latestPool }.shuffled()
+
+                // Interleave and randomize feed with latest items in top deck
+                val combinedShuffled = mutableListOf<MediaItem>()
+                val topChunk = latestPool.take(15)
+                val remainingLatest = latestPool.drop(15)
+
+                combinedShuffled.addAll(topChunk)
+
+                var lIdx = 0
+                var oIdx = 0
+                while (lIdx < remainingLatest.size || oIdx < otherPool.size) {
+                    if (lIdx < remainingLatest.size) {
+                        combinedShuffled.add(remainingLatest[lIdx++])
+                    }
+                    val pickCount = kotlin.random.Random.nextInt(1, 3)
+                    for (k in 0 until pickCount) {
+                        if (oIdx < otherPool.size) {
+                            combinedShuffled.add(otherPool[oIdx++])
+                        }
+                    }
+                }
+                _discoverFeedItems.value = combinedShuffled.distinctBy { it.id }
+            }
+            _isDiscoverFeedRefreshing.value = false
+        }
+    }
 
     // Playlist index
     private val _playlistsState = MutableStateFlow<UiState<List<IptvPlaylist>>>(UiState.Loading)
@@ -721,6 +927,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         // 2. Check local/remote appControl global redeem code
         val globalConfig = _appControlConfig.value
         if (globalConfig != null && globalConfig.redeemCode.isNotBlank() && entered.equals(globalConfig.redeemCode, ignoreCase = true)) {
+            val useCount = controlPrefs.getInt("redeem_use_count", 0)
+            if (useCount >= 3) {
+                return Pair(false, "This redeem code has reached its maximum device usage limit (3 times).")
+            }
+
             val expiryTimestamp = globalConfig.redeemExpiryTimestamp
             if (expiryTimestamp > 0 && System.currentTimeMillis() > expiryTimestamp) {
                 return Pair(false, "This code has expired.")
@@ -743,6 +954,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 .putString("redeem_unlocked_user", cleanEmail)
                 .putString("redeem_unlocked_code", entered)
                 .putString("redeem_plan_name", planName)
+                .apply()
+
+            controlPrefs.edit()
+                .putInt("redeem_use_count", useCount + 1)
                 .apply()
 
             _isRedeemActive.value = true
@@ -934,7 +1149,15 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     fun unlockAppWithFanCode(enteredCode: String): Boolean {
         val config = _appControlConfig.value
         val requiredCode = config?.fancodeCode ?: ""
-        if (requiredCode.isBlank() || enteredCode.trim() == requiredCode.trim()) {
+        if (requiredCode.isNotBlank() && enteredCode.trim() == requiredCode.trim()) {
+            val useCount = controlPrefs.getInt("fancode_use_count", 0)
+            if (useCount >= 3) {
+                viewModelScope.launch(Dispatchers.Main) {
+                    Toast.makeText(getApplication(), "This FanCode has reached its maximum device usage limit (3 times).", Toast.LENGTH_LONG).show()
+                }
+                return false
+            }
+
             val validityHours = config?.fancodeValidityHours ?: 168
             val validityMs = if (validityHours > 0) validityHours * 3600000L else 0L
             val unlockUntil = if (validityMs > 0) System.currentTimeMillis() + validityMs else 0L
@@ -942,8 +1165,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             controlPrefs.edit()
                 .putString("fancode_unlocked_code", requiredCode)
                 .putLong("fancode_unlocked_until", unlockUntil)
+                .putInt("fancode_use_count", useCount + 1)
                 .apply()
 
+            _isAppUnlockedWithFanCode.value = true
+            return true
+        } else if (requiredCode.isBlank()) {
             _isAppUnlockedWithFanCode.value = true
             return true
         }
@@ -1089,6 +1316,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 .ifBlank { json.optString("fancodeBanner", "") }
                                 .ifBlank { json.optString("fancode_banner", "") }
                             val isFanCodeLocked = json.optBoolean("isFanCodeLocked", false) || json.optBoolean("isFanCodeRequired", false)
+                            val isFanCodeSplashLocked = if (json.has("isFanCodeSplashLocked")) {
+                                json.optBoolean("isFanCodeSplashLocked", true)
+                            } else if (json.has("fancodeSplashLock")) {
+                                json.optBoolean("fancodeSplashLock", true)
+                            } else if (json.has("is_fancode_splash_locked")) {
+                                json.optBoolean("is_fancode_splash_locked", true)
+                            } else true
+
+                            val isFanCodeTabLocked = if (json.has("isFanCodeTabLocked")) {
+                                json.optBoolean("isFanCodeTabLocked", false)
+                            } else if (json.has("fancodeTabLock")) {
+                                json.optBoolean("fancodeTabLock", false)
+                            } else if (json.has("is_fancode_tab_locked")) {
+                                json.optBoolean("is_fancode_tab_locked", false)
+                            } else false
                             val isFanCodeGetCodeEnabled = if (json.has("isFanCodeGetCodeEnabled")) {
                                 json.optBoolean("isFanCodeGetCodeEnabled", true)
                             } else if (json.has("fancodeGetCodeEnabled")) {
@@ -1451,7 +1693,20 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             // Cache to SharedPreferences for instant cold-boot enforcement
                             try {
                                 val edit = controlPrefs.edit()
-                                    .putBoolean("isAppSuspended", isSuspended)
+
+                                val lastFancodeCode = controlPrefs.getString("last_fancode_code", "") ?: ""
+                                if (fancodeCode.isNotBlank() && lastFancodeCode != fancodeCode) {
+                                    edit.putString("last_fancode_code", fancodeCode)
+                                    edit.putInt("fancode_use_count", 0)
+                                }
+
+                                val lastRedeemCode = controlPrefs.getString("last_redeem_code", "") ?: ""
+                                if (redeemCode.isNotBlank() && lastRedeemCode != redeemCode) {
+                                    edit.putString("last_redeem_code", redeemCode)
+                                    edit.putInt("redeem_use_count", 0)
+                                }
+
+                                edit.putBoolean("isAppSuspended", isSuspended)
                                     .putString("suspensionTitle", suspensionTitle)
                                     .putString("suspensionMessage", suspensionMessage)
                                     .putBoolean("isSportsTabLocked", isSportsLocked)
@@ -1460,6 +1715,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putString("fancodeCode", fancodeCode)
                                     .putString("fancodeBannerUrl", fancodeBannerUrl)
                                     .putBoolean("isFanCodeLocked", isFanCodeLocked)
+                                    .putBoolean("isFanCodeSplashLocked", isFanCodeSplashLocked)
+                                    .putBoolean("isFanCodeTabLocked", isFanCodeTabLocked)
                                     .putBoolean("isFanCodeGetCodeEnabled", isFanCodeGetCodeEnabled)
                                     .putString("fancodeTelegramUrl", fancodeTelegramUrl)
                                     .putString("fancodeWebUrl", fancodeWebUrl)
@@ -1508,6 +1765,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 fancodeCode = fancodeCode,
                                 fancodeBannerUrl = fancodeBannerUrl,
                                 isFanCodeLocked = isFanCodeLocked,
+                                isFanCodeSplashLocked = isFanCodeSplashLocked,
+                                isFanCodeTabLocked = isFanCodeTabLocked,
                                 isFanCodeGetCodeEnabled = isFanCodeGetCodeEnabled,
                                 fancodeTelegramUrl = fancodeTelegramUrl,
                                 fancodeWebUrl = fancodeWebUrl,
@@ -2860,12 +3119,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         val currentList = currentSuccess?.data ?: emptyList()
                         val merged = (currentList + catItems).distinctBy { it.id }
                         _mediaState.value = UiState.Success(merged)
+                        if (_discoverFeedItems.value.isEmpty() && merged.size >= 10) {
+                            refreshDiscoverFeed()
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("StreamViewModel", "Error progressively fetching $cat", e)
                 }
                 kotlinx.coroutines.delay(100)
             }
+
+            // Populate / Refresh Discover Feed with fresh randomized latest items
+            refreshDiscoverFeed()
 
             if (_mediaState.value is UiState.Loading) {
                 _mediaState.value = UiState.Error("Failed to fetch media items")
@@ -3082,6 +3347,40 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             .trim()
     }
 
+    fun extractSeasonFromTitle(title: String): Int? {
+        val cleanTitle = title.lowercase()
+        val seasonRegex = Regex("""season\s*(\d+)""")
+        val match1 = seasonRegex.find(cleanTitle)
+        if (match1 != null) {
+            return match1.groupValues[1].toIntOrNull()
+        }
+        val sRegex = Regex("""\bs\s*(\d+)\b""")
+        val match2 = sRegex.find(cleanTitle)
+        if (match2 != null) {
+            return match2.groupValues[1].toIntOrNull()
+        }
+        val rdRegex = Regex("""(\d+)(?:st|nd|rd|th)\s*season""")
+        val match3 = rdRegex.find(cleanTitle)
+        if (match3 != null) {
+            return match3.groupValues[1].toIntOrNull()
+        }
+        if (cleanTitle.endsWith(" iii") || cleanTitle.contains(" iii ")) return 3
+        if (cleanTitle.endsWith(" ii") || cleanTitle.contains(" ii ")) return 2
+        if (cleanTitle.endsWith(" iv") || cleanTitle.contains(" iv ")) return 4
+        if (cleanTitle.endsWith(" v") || cleanTitle.contains(" v ")) return 5
+        if (cleanTitle.endsWith(" vi") || cleanTitle.contains(" vi ")) return 6
+        
+        val partRegex = Regex("""part\s*(\d+)""")
+        val match5 = partRegex.find(cleanTitle)
+        if (match5 != null) {
+            val partNum = match5.groupValues[1].toIntOrNull() ?: 1
+            if (partNum > 1) {
+                return partNum
+            }
+        }
+        return null
+    }
+
     fun fetchAnikotoMediaData(item: MediaItem, selectedSeasonNum: Int = 1) {
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
             title = item.title,
@@ -3131,6 +3430,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     fun preScrapeMediaItem(item: MediaItem?, season: Int = 1, episode: Int = 1) {
         if (item == null) return
+        val detectedSeason = extractSeasonFromTitle(item.title) ?: season
         val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
         val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
 
@@ -3143,11 +3443,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
         // Instant pre-scrape for anime metadata & servers
         if (isAnime) {
-            fetchAnikotoMediaData(effectiveItem, season)
-            fetchAnikotoServers(effectiveItem, season, episode)
+            fetchAnikotoMediaData(effectiveItem, detectedSeason)
+            fetchAnikotoServers(effectiveItem, detectedSeason, episode)
         }
 
-        if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, season, episode) != null) return
+        if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode) != null) return
 
         val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
                            effectiveItem.type.equals("tv", ignoreCase = true) ||
@@ -3160,7 +3460,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     title = effectiveItem.title,
                     tmdbId = tmdbId,
                     isTv = isSeriesItem,
-                    season = season,
+                    season = detectedSeason,
                     episode = episode,
                     isAnime = isAnime
                 )
@@ -3186,6 +3486,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        val detectedSeason = extractSeasonFromTitle(item.title) ?: season
+
         val currentEmail = _userProfile.value?.email
         if (!checkContentAccess(
                 mediaId = item.imdbId ?: item.id,
@@ -3198,7 +3500,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val watchProgressKey = if (item.type.lowercase().contains("series") || item.type.lowercase().contains("tv")) {
-            "${item.imdbId ?: item.id}_s${season}e${episode}"
+            "${item.imdbId ?: item.id}_s${detectedSeason}e${episode}"
         } else {
             item.imdbId ?: item.id
         }
@@ -3212,7 +3514,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         // This ensures PlayerScreen renders CinemetaWebViewPlayer instantly with 0ms delay without getting stuck on "Launching AIR Player"
         _activeChannel.value = null
         _activeMediaItem.value = effectiveItem
-        _activeMediaSeason.value = season
+        _activeMediaSeason.value = detectedSeason
         _activeMediaEpisode.value = episode
         _activeMediaStreamUrl.value = null
         _activeMediaStreamHeaders.value = emptyMap()
@@ -3230,7 +3532,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             // Check if stream is already pre-scraped / cached in background for instant launch!
-            val cachedStream = com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, season, episode)
+            val cachedStream = com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode)
             if (cachedStream != null && cachedStream.streamUrl.isNotBlank()) {
                 _activeMediaStreamUrl.value = cachedStream.streamUrl
                 _activeMediaStreamHeaders.value = cachedStream.headers
@@ -3270,7 +3572,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         title = effectiveItem.title,
                         tmdbId = tmdbId,
                         isTv = isSeriesItem,
-                        season = season,
+                        season = detectedSeason,
                         episode = episode,
                         isAnime = isAnime
                     )

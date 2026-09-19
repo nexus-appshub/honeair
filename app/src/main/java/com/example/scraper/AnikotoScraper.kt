@@ -955,9 +955,9 @@ object AnikotoScraper {
             if (subServers.isEmpty()) {
                 subServers.add(
                     AnikotoServer(
-                        id = "HD-1",
-                        linkId = "HD-1",
-                        name = "Server 1",
+                        id = "sr-1",
+                        linkId = "sr-1",
+                        name = "sr-1",
                         type = "sub",
                         streamUrl = "",
                         rawUrl = "",
@@ -966,9 +966,9 @@ object AnikotoScraper {
                 )
                 subServers.add(
                     AnikotoServer(
-                        id = "HD-2",
-                        linkId = "HD-2",
-                        name = "Server 2",
+                        id = "sr-2",
+                        linkId = "sr-2",
+                        name = "sr-2",
                         type = "sub",
                         streamUrl = "",
                         rawUrl = "",
@@ -979,20 +979,36 @@ object AnikotoScraper {
 
             // Clean names for servers nicely
             val cleanSub = subServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
-                val displayName = when {
+                var displayName = when {
                     srv.id.isNotBlank() && !srv.id.startsWith("DEMON KING") -> srv.id
                     srv.name.isNotBlank() && !srv.name.startsWith("DEMON KING") -> srv.name
-                    else -> "Server ${idx + 1}"
+                    else -> "sr-${idx + 1}"
                 }
-                srv.copy(name = displayName)
+                if (displayName.contains("HD-", ignoreCase = true)) {
+                    displayName = displayName.replace("HD-", "sr-", ignoreCase = true)
+                    displayName = displayName.replace("hd-", "sr-", ignoreCase = true)
+                }
+                if (displayName.startsWith("Server", ignoreCase = true)) {
+                    displayName = displayName.replace("Server ", "sr-", ignoreCase = true)
+                        .replace("Server", "sr-", ignoreCase = true)
+                }
+                srv.copy(id = srv.id.replace("HD-", "sr-", ignoreCase = true).replace("hd-", "sr-", ignoreCase = true), name = displayName)
             }
             val cleanDub = dubServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
-                val displayName = when {
+                var displayName = when {
                     srv.id.isNotBlank() && !srv.id.startsWith("DEMON KING") -> srv.id
                     srv.name.isNotBlank() && !srv.name.startsWith("DEMON KING") -> srv.name
-                    else -> "Server ${idx + 1}"
+                    else -> "sr-${idx + 1}"
                 }
-                srv.copy(name = displayName)
+                if (displayName.contains("HD-", ignoreCase = true)) {
+                    displayName = displayName.replace("HD-", "sr-", ignoreCase = true)
+                    displayName = displayName.replace("hd-", "sr-", ignoreCase = true)
+                }
+                if (displayName.startsWith("Server", ignoreCase = true)) {
+                    displayName = displayName.replace("Server ", "sr-", ignoreCase = true)
+                        .replace("Server", "sr-", ignoreCase = true)
+                }
+                srv.copy(id = srv.id.replace("HD-", "sr-", ignoreCase = true).replace("hd-", "sr-", ignoreCase = true), name = displayName)
             }
 
             val finalWatchUrl = resolvedWatchUrl.ifBlank { directOrResolvedUrl ?: title }
@@ -1006,8 +1022,8 @@ object AnikotoScraper {
         } catch (e: Exception) {
             Log.e(TAG, "fetchAvailableServers error: ${e.message}", e)
             val fallbackSub = listOf(
-                AnikotoServer(id = "HD-1", linkId = "HD-1", name = "Server 1", type = "sub", referer = "$API_BASE_URL/"),
-                AnikotoServer(id = "HD-2", linkId = "HD-2", name = "Server 2", type = "sub", referer = "$API_BASE_URL/")
+                AnikotoServer(id = "sr-1", linkId = "sr-1", name = "sr-1", type = "sub", referer = "$API_BASE_URL/"),
+                AnikotoServer(id = "sr-2", linkId = "sr-2", name = "sr-2", type = "sub", referer = "$API_BASE_URL/")
             )
             AnikotoServerGroup(fallbackSub, emptyList(), title, episode)
         }

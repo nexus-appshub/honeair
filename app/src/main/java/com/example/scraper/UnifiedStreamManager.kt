@@ -15,8 +15,8 @@ object UnifiedStreamManager {
     private const val TAG = "UnifiedStreamManager"
     private val streamCache = java.util.concurrent.ConcurrentHashMap<String, ScrapedStreamResult>()
     private val httpClient = okhttp3.OkHttpClient.Builder()
-        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
@@ -44,7 +44,16 @@ object UnifiedStreamManager {
         if (!url.startsWith("http")) return@withContext false
         try {
             val reqBuilder = Request.Builder().url(url)
-            headers.forEach { (k, v) -> reqBuilder.addHeader(k, v) }
+            
+            // Standard browser-mimicking headers to prevent Cloudflare/WAF blockages
+            reqBuilder.addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+            reqBuilder.addHeader("Accept", "*/*")
+            reqBuilder.addHeader("Accept-Language", "en-US,en;q=0.9")
+            
+            headers.forEach { (k, v) -> 
+                reqBuilder.header(k, v)
+            }
+            
             val req = reqBuilder.build()
             val resp = httpClient.newCall(req).execute()
             val code = resp.code

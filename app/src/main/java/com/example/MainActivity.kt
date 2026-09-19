@@ -285,6 +285,26 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
     val isCheckingSuspension by viewModel.isCheckingSuspension.collectAsState()
     val isAppUnlockedWithFanCode by viewModel.isAppUnlockedWithFanCode.collectAsState()
     val showLaunchAdOverlay by viewModel.showLaunchAdOverlay.collectAsState()
+    val vipModalNotice by com.example.subscription.SubscriptionManager.vipConfig.collectAsState()
+
+    val activeNotice = remember(appControlConfig, vipModalNotice) {
+        val config = appControlConfig
+        if (config != null) {
+            config.notice ?: run {
+                val vNotice = vipModalNotice?.modalNotice
+                if (vNotice != null && (vNotice.title.isNotBlank() || vNotice.subtitle.isNotBlank())) {
+                    com.example.ui.viewmodel.AppNotice(
+                        title = vNotice.title.ifBlank { "Special Announcement" },
+                        message = vNotice.subtitle,
+                        imageUrl = null,
+                        buttonText = if (!vNotice.supportWhatsApp.isNullOrBlank()) "Contact Admin" else null,
+                        buttonUrl = if (!vNotice.supportWhatsApp.isNullOrBlank()) "https://wa.me/${vNotice.supportWhatsApp?.replace("+", "")?.replace(" ", "")?.trim()}" else null,
+                        isDismissible = true
+                    )
+                } else null
+            }
+        } else null
+    }
 
     // Full screen Pre-Splash / Pre-Lock Ad or Poster Overlay
     val launchAd = appControlConfig?.launchAdOverlay
@@ -318,35 +338,13 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             return
         }
 
-        // Global Fan Code Lock check from Admin Panel
-        if (config.isFanCodeLocked && config.fancodeCode.isNotBlank() && !isAppUnlockedWithFanCode) {
+        // Global Fan Code Lock check from Admin Panel (enforced on splash/startup if isFanCodeSplashLocked is enabled)
+        if (config.isFanCodeLocked && config.isFanCodeSplashLocked && config.fancodeCode.isNotBlank() && !isAppUnlockedWithFanCode) {
             GlobalFanCodeLockScreen(
                 viewModel = viewModel,
                 onRetry = { viewModel.fetchAppControlConfig() }
             )
             return
-        }
-
-        val vipModalNotice by com.example.subscription.SubscriptionManager.vipConfig.collectAsState()
-        val activeNotice = config.notice ?: run {
-            val vNotice = vipModalNotice?.modalNotice
-            if (vNotice != null && (vNotice.title.isNotBlank() || vNotice.subtitle.isNotBlank())) {
-                com.example.ui.viewmodel.AppNotice(
-                    title = vNotice.title.ifBlank { "Special Announcement" },
-                    message = vNotice.subtitle,
-                    imageUrl = null,
-                    buttonText = if (!vNotice.supportWhatsApp.isNullOrBlank()) "Contact Admin" else null,
-                    buttonUrl = if (!vNotice.supportWhatsApp.isNullOrBlank()) "https://wa.me/${vNotice.supportWhatsApp?.replace("+", "")?.replace(" ", "")?.trim()}" else null,
-                    isDismissible = true
-                )
-            } else null
-        }
-
-        activeNotice?.let { notice ->
-            AppNoticeDialog(
-                notice = notice,
-                onDismiss = { viewModel.dismissAppNotice() }
-            )
         }
     }
 
@@ -457,33 +455,90 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
     }
 
     val selectedAudioIndex by viewModel.audioIndex.collectAsState()
+    val browseSlotType by viewModel.browseSlotType.collectAsState()
+    val airSlotType by viewModel.airSlotType.collectAsState()
+    val downloadsSlotType by viewModel.downloadsSlotType.collectAsState()
 
     LaunchedEffect(selectedAudioIndex) {
         com.example.ui.theme.AppTranslation.applyAppLocale(context, selectedAudioIndex)
     }
 
-    // Create navigation items matching the screenshot
-    val navItems = remember(isAdmin, selectedAudioIndex) {
+    // Helper to resolve slot navigation item
+    fun getSlotNavItem(slotType: String, defaultTitle: String, defaultIcon: androidx.compose.ui.graphics.vector.ImageVector, tag: String): NavigationNavItem {
+        return when (slotType) {
+            "Browse" -> NavigationNavItem(
+                title = com.example.ui.theme.AppTranslation.getString("browse", selectedAudioIndex),
+                icon = Icons.Outlined.Dashboard,
+                testTag = tag
+            )
+            "Air" -> NavigationNavItem(
+                title = "Air",
+                icon = Icons.Default.Tv,
+                testTag = tag
+            )
+            "Live" -> NavigationNavItem(
+                title = "Live",
+                icon = Icons.Default.LiveTv,
+                testTag = tag
+            )
+            "Sports" -> NavigationNavItem(
+                title = "Sports",
+                icon = Icons.Default.SportsSoccer,
+                testTag = tag
+            )
+            "Master Anime", "Anime" -> NavigationNavItem(
+                title = "Anime",
+                icon = Icons.Default.AutoAwesome,
+                testTag = tag
+            )
+            "Airing" -> NavigationNavItem(
+                title = "Airing",
+                icon = Icons.Default.Movie,
+                testTag = tag
+            )
+            "Feeds" -> NavigationNavItem(
+                title = "Feeds",
+                icon = Icons.Default.DynamicFeed,
+                testTag = tag
+            )
+            "Downloads" -> NavigationNavItem(
+                title = com.example.ui.theme.AppTranslation.getString("downloads", selectedAudioIndex),
+                icon = Icons.Outlined.Download,
+                testTag = tag
+            )
+            else -> NavigationNavItem(
+                title = defaultTitle,
+                icon = defaultIcon,
+                testTag = tag
+            )
+        }
+    }
+
+    // Create navigation items matching the configured slots
+    val navItems = remember(isAdmin, selectedAudioIndex, browseSlotType, airSlotType, downloadsSlotType) {
         val baseList = mutableListOf(
             NavigationNavItem(
                 title = com.example.ui.theme.AppTranslation.getString("home", selectedAudioIndex),
                 icon = Icons.Default.Home,
                 testTag = "tab_home"
             ),
-            NavigationNavItem(
-                title = com.example.ui.theme.AppTranslation.getString("browse", selectedAudioIndex),
-                icon = Icons.Outlined.CalendarToday,
-                testTag = "tab_browse"
+            getSlotNavItem(
+                slotType = browseSlotType,
+                defaultTitle = com.example.ui.theme.AppTranslation.getString("browse", selectedAudioIndex),
+                defaultIcon = Icons.Outlined.Dashboard,
+                tag = "tab_browse"
             ),
-            NavigationNavItem(
-                title = "Air",
-                icon = Icons.Default.Tv,
-                testTag = "tab_settings"
+            getSlotNavItem(
+                slotType = airSlotType,
+                defaultTitle = "Air",
+                defaultIcon = Icons.Default.Tv,
+                tag = "tab_air"
             ),
-            NavigationNavItem(
-                title = com.example.ui.theme.AppTranslation.getString("downloads", selectedAudioIndex),
-                icon = Icons.Outlined.Download,
-                testTag = "tab_downloads"
+            getSlotNavItem(
+                slotType = downloadsSlotType,
+                defaultTitle = com.example.ui.theme.AppTranslation.getString("downloads", selectedAudioIndex),
+                defaultIcon = Icons.Outlined.Download,
+                tag = "tab_downloads"
             ),
             NavigationNavItem(
                 title = com.example.ui.theme.AppTranslation.getString("profile", selectedAudioIndex),
@@ -575,6 +630,14 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
     val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val mainBgColor = if (isSystemDark) SpaceBlack else Color(0xFFF5F5F7)
 
+    val currentSelectedSlotType = when (selectedTabIndex) {
+        1 -> browseSlotType
+        2 -> airSlotType
+        3 -> downloadsSlotType
+        else -> ""
+    }
+    val isBottomNavTabHidden = currentSelectedSlotType == "Feeds" || currentSelectedSlotType == "Airing"
+
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -582,7 +645,7 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             .background(mainBgColor),
         bottomBar = {
             AnimatedVisibility(
-                visible = isNavBarVisible && !isFullScreen && !isInPipMode && !isLandscape,
+                visible = isNavBarVisible && !isFullScreen && !isInPipMode && !isLandscape && !isBottomNavTabHidden,
                 enter = slideInVertically(
                     initialOffsetY = { it },
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
@@ -608,6 +671,15 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        // Inline Special Announcement (Stays directly above Navigation Bar, no overlap, edge-to-edge with no gap)
+                        val notice = activeNotice
+                        if (notice != null) {
+                            AppNoticeBottomPanel(
+                                notice = notice,
+                                onDismiss = { viewModel.dismissAppNotice() }
+                            )
+                        }
+
                         val isUserVip = viewModel.isUserPremium(userProfile?.email)
                         if (appControlConfig?.isAdsEnabled == true && !isUserVip) {
                             NonPremiumAdBanner(
@@ -715,6 +787,92 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                             }
                         )
                 ) {
+                    // Helper Composable to render any slot destination dynamically
+                    @Composable
+                    fun RenderNavigationSlotDestination(slotType: String) {
+                        when (slotType) {
+                            "Airing" -> {
+                                AiringFeedScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToPlayer = { navigateToTab(2) },
+                                    isHeaderVisible = isNavBarVisible
+                                )
+                            }
+                            "Air" -> {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    PlayerScreen(
+                                        viewModel = viewModel,
+                                        isMiniPlayer = false,
+                                        onMiniPlayerToggle = {
+                                            viewModel.popCurrentToFloating()
+                                            viewModel.setSelectedTabIndex(0)
+                                            Toast.makeText(context, "Minimized to Floating Multi-View Player", Toast.LENGTH_SHORT).show()
+                                        },
+                                        isInPipMode = isInPipMode,
+                                        onBackPress = performBackNavigation
+                                    )
+                                }
+                            }
+                            "Live" -> {
+                                HomeScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToPlayer = { navigateToTab(2) },
+                                    onNavigateToSettings = { navigateToTab(4) },
+                                    onNavigateToAirTab = { navigateToTab(2) },
+                                    onNavigateToMediaTab = { category ->
+                                        viewModel.setSelectedMediaCategory(category)
+                                        navigateToTab(1)
+                                    },
+                                    onBackPress = performBackNavigation,
+                                    isHeaderVisible = isNavBarVisible
+                                )
+                            }
+                            "Sports" -> {
+                                SportsHubScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToPlayer = { navigateToTab(2) },
+                                    onBack = performBackNavigation
+                                )
+                            }
+                            "Master Anime", "Anime" -> {
+                                com.example.ui.components.MasterAnimeBrowserScreen(
+                                    onBack = performBackNavigation
+                                )
+                            }
+                            "Downloads" -> {
+                                DownloadLibraryScreen(
+                                    viewModel = viewModel,
+                                    onBack = performBackNavigation
+                                )
+                            }
+                            "Feeds" -> {
+                                com.example.ui.screens.DiscoverFeedsScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToPlayer = { navigateToTab(2) },
+                                    onBackPress = performBackNavigation,
+                                    isHeaderVisible = isNavBarVisible
+                                )
+                            }
+                            else -> {
+                                val config = appControlConfig
+                                if (config != null && config.isFanCodeLocked && config.isFanCodeTabLocked && config.fancodeCode.isNotBlank() && !isAppUnlockedWithFanCode) {
+                                    GlobalFanCodeLockScreen(
+                                        viewModel = viewModel,
+                                        onRetry = { viewModel.fetchAppControlConfig() },
+                                        onBackPress = { viewModel.setSelectedTabIndex(0) }
+                                    )
+                                } else {
+                                    MediaHubScreen(
+                                        viewModel = viewModel,
+                                        onNavigateToPlayer = { navigateToTab(2) },
+                                        onNavigateToAirTab = { viewModel.setSelectedTabIndex(0) },
+                                        isHeaderVisible = isNavBarVisible
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Crossfade Transitions between navigation tabs
                     Crossfade(
                         targetState = selectedTabIndex,
@@ -723,7 +881,7 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                         when (targetIndex) {
                             0 -> HomeScreen(
                                 viewModel = viewModel,
-                                onNavigateToPlayer = { navigateToTab(2) }, // Auto-switch to player tab when channel clicked
+                                onNavigateToPlayer = { navigateToTab(2) },
                                 onNavigateToSettings = { navigateToTab(4) },
                                 onNavigateToAirTab = { navigateToTab(2) },
                                 onNavigateToMediaTab = { category ->
@@ -733,17 +891,9 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                                 onBackPress = performBackNavigation,
                                 isHeaderVisible = isNavBarVisible
                             )
-                            1 -> MediaHubScreen(
-                                viewModel = viewModel,
-                                onNavigateToPlayer = { navigateToTab(2) },
-                                onNavigateToAirTab = { viewModel.setSelectedTabIndex(0) },
-                                isHeaderVisible = isNavBarVisible
-                            )
-                            2 -> Box(Modifier.fillMaxSize()) // Player rendered above
-                            3 -> DownloadLibraryScreen(
-                                viewModel = viewModel,
-                                onBack = performBackNavigation
-                            )
+                            1 -> RenderNavigationSlotDestination(slotType = browseSlotType)
+                            2 -> RenderNavigationSlotDestination(slotType = airSlotType)
+                            3 -> RenderNavigationSlotDestination(slotType = downloadsSlotType)
                             4 -> SettingsScreen(
                                 viewModel = viewModel,
                                 onNavigateToPlayer = { navigateToTab(2) },
@@ -760,25 +910,15 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                     }
 
                     // Floating In-App Player Overlay & Multi-View PIP
-                    val isPlayerTab = selectedTabIndex == 2
-                    val mainActivityContext = androidx.compose.ui.platform.LocalContext.current
+                    val currentSelectedSlotType = when (selectedTabIndex) {
+                        1 -> browseSlotType
+                        2 -> airSlotType
+                        3 -> downloadsSlotType
+                        else -> ""
+                    }
+                    val isCurrentlyViewingAirPlayer = currentSelectedSlotType == "Air"
 
-                    if (isPlayerTab) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            PlayerScreen(
-                                viewModel = viewModel,
-                                isMiniPlayer = false,
-                                onMiniPlayerToggle = {
-                                    // Move current player stream to a floating window and return to home tab
-                                    viewModel.popCurrentToFloating()
-                                    viewModel.setSelectedTabIndex(0)
-                                    Toast.makeText(mainActivityContext, "Minimized to Floating Multi-View Player", Toast.LENGTH_SHORT).show()
-                                },
-                                isInPipMode = isInPipMode,
-                                onBackPress = performBackNavigation
-                            )
-                        }
-                    } else {
+                    if (!isCurrentlyViewingAirPlayer) {
                         // Display multiple draggable floating stream windows on top of browsing content
                         MultiFloatingPlayerOverlay(viewModel = viewModel)
                     }
@@ -1078,16 +1218,24 @@ fun AppNoticeDialog(
             }
 
             if (!notice.imageUrl.isNullOrBlank()) {
-                coil.compose.AsyncImage(
-                    model = notice.imageUrl,
-                    contentDescription = "Notice Image",
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(180.dp)
-                        .clip(RoundedCornerShape(14.dp)),
-                    contentScale = ContentScale.Crop
-                )
-                Spacer(modifier = Modifier.height(10.dp))
+                        .heightIn(min = 180.dp, max = 230.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    coil.compose.AsyncImage(
+                        model = notice.imageUrl,
+                        contentDescription = "Notice Image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 180.dp, max = 230.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             Text(
@@ -1152,10 +1300,174 @@ fun AppNoticeDialog(
 }
 
 @Composable
+fun AppNoticeBottomPanel(
+    notice: com.example.ui.viewmodel.AppNotice,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val bgColor = if (isDark) Color(0xFF141417) else Color(0xFFFFFFFF)
+    val textColor = if (isDark) Color.White else Color(0xFF1C1C1E)
+    val subTextColor = if (isDark) Color(0xFFB4B4C0) else Color(0xFF636366)
+    val borderColor = if (isDark) Color(0xFF2C2C32) else Color(0xFFE5E5EA)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = bgColor,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        border = BorderStroke(1.dp, borderColor),
+        shadowElevation = 16.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 520.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Header badge
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFFFF6B00).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Campaign,
+                            contentDescription = "Announcement",
+                            tint = Color(0xFFFF6B00),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "SPECIAL ANNOUNCEMENT",
+                            color = Color(0xFFFF8800),
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+                }
+
+                if (notice.isDismissible) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = subTextColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            // Notice Poster / Thumbnail Banner with heightened dimensions & Fit contentScale
+            if (!notice.imageUrl.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 180.dp, max = 240.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    coil.compose.AsyncImage(
+                        model = notice.imageUrl,
+                        contentDescription = "Notice Poster",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 180.dp, max = 240.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            Text(
+                text = notice.title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                color = textColor,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = notice.message,
+                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 19.sp, fontSize = 13.sp),
+                color = subTextColor,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (notice.isDismissible) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        border = BorderStroke(1.dp, borderColor),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = textColor),
+                        modifier = Modifier.weight(1f).height(42.dp)
+                    ) {
+                        Text("Dismiss", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                if (!notice.buttonUrl.isNullOrBlank() && !notice.buttonText.isNullOrBlank()) {
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(notice.buttonUrl)
+                                )
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(if (notice.isDismissible) 1.2f else 1f).height(42.dp)
+                    ) {
+                        Text(notice.buttonText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
 fun GlobalFanCodeLockScreen(
     viewModel: com.example.ui.viewmodel.StreamViewModel,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onBackPress: (() -> Unit)? = null
 ) {
+    androidx.activity.compose.BackHandler(enabled = onBackPress != null) {
+        onBackPress?.invoke()
+    }
+
     var enteredPasscode by remember { mutableStateOf("") }
     var passcodeError by remember { mutableStateOf(false) }
     var showGetCodeModal by remember { mutableStateOf(false) }
@@ -1226,6 +1538,7 @@ fun GlobalFanCodeLockScreen(
                         )
                 ) {
                     // Admin Banner Image Overlay if configured or default image matching image.png
+                    val isCustomBanner = appControlConfig?.fancodeBannerUrl?.isNotBlank() == true
                     coil.compose.AsyncImage(
                         model = bannerUrl,
                         contentDescription = "FanCode Banner",
@@ -1236,66 +1549,85 @@ fun GlobalFanCodeLockScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
-                                Brush.linearGradient(
-                                    colors = listOf(
-                                        Color(0xFFFF512F).copy(alpha = 0.85f),
-                                        Color(0xFFFF8800).copy(alpha = 0.85f)
-                                    )
+                                Brush.verticalGradient(
+                                    colors = if (isCustomBanner) {
+                                        listOf(
+                                            Color.Black.copy(alpha = 0.25f),
+                                            Color.Black.copy(alpha = 0.85f)
+                                        )
+                                    } else {
+                                        listOf(
+                                            Color(0xFFFF512F).copy(alpha = 0.82f),
+                                            Color(0xFFFF8800).copy(alpha = 0.88f)
+                                        )
+                                    }
                                 )
                             )
                     )
 
                     // Right-side calligraphic sports silhouettes & diagonal speed lines matching image.png
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .width(150.dp)
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.12f))
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
+                    if (!isCustomBanner) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.SportsBasketball,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.25f),
+                            Box(
                                 modifier = Modifier
-                                    .size(110.dp)
-                                    .padding(end = 12.dp)
-                            )
+                                    .fillMaxHeight()
+                                    .width(160.dp)
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.15f))
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SportsBasketball,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.22f),
+                                    modifier = Modifier
+                                        .size(120.dp)
+                                        .padding(end = 16.dp)
+                                )
+                            }
                         }
                     }
 
-                    // Content Text Column (Matching image.png typography exactly)
+                    // Content Text Column (Matching image.png typography exactly with shadow for beautiful readability)
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 20.dp, vertical = 18.dp),
-                        verticalArrangement = Arrangement.Center
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        verticalArrangement = Arrangement.Bottom
                     ) {
                         Text(
-                            text = "FANCODE",
+                            text = "REDEEM CODE",
                             style = MaterialTheme.typography.headlineLarge.copy(
-                                fontSize = 32.sp,
-                                fontWeight = FontWeight.Black,
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.ExtraBold,
                                 fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                letterSpacing = 2.5.sp
+                                letterSpacing = 3.sp,
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    color = Color.Black.copy(alpha = 0.5f),
+                                    offset = androidx.compose.ui.geometry.Offset(2f, 3f),
+                                    blurRadius = 4f
+                                )
                             ),
                             color = Color.White
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "More Sports. More Action.",
                             style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.Bold,
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    color = Color.Black.copy(alpha = 0.4f),
+                                    offset = androidx.compose.ui.geometry.Offset(1f, 1.5f),
+                                    blurRadius = 2f
+                                )
                             ),
                             color = Color.White
                         )
@@ -1303,12 +1635,37 @@ fun GlobalFanCodeLockScreen(
                         Text(
                             text = "Get access to live sports, exclusive content, and premium features with FanCode.",
                             style = MaterialTheme.typography.bodySmall.copy(
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 18.sp,
+                                shadow = androidx.compose.ui.graphics.Shadow(
+                                    color = Color.Black.copy(alpha = 0.4f),
+                                    offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                                    blurRadius = 2f
+                                )
                             ),
                             color = Color.White.copy(alpha = 0.95f),
-                            modifier = Modifier.fillMaxWidth(0.72f)
+                            modifier = Modifier.fillMaxWidth(0.85f)
                         )
+                    }
+
+                    // Back/Close Button for tab/overlay navigation control
+                    if (onBackPress != null) {
+                        IconButton(
+                            onClick = onBackPress,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(16.dp)
+                                .size(40.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
 
@@ -2070,7 +2427,7 @@ fun FanCodeGetCodeModal(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "FANCODE",
+                            text = "REDEEM CODE",
                             style = MaterialTheme.typography.headlineLarge.copy(
                                 fontSize = 32.sp,
                                 fontWeight = FontWeight.Black,
@@ -2526,7 +2883,7 @@ fun PremiumPaywallDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "FANCODE",
+                            text = "REDEEM CODE",
                             style = MaterialTheme.typography.headlineLarge.copy(
                                 fontSize = 32.sp,
                                 fontWeight = FontWeight.Black,

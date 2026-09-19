@@ -201,3 +201,154 @@ fun MasterAnimeBrowserModal(
         }
     }
 }
+
+@Composable
+fun MasterAnimeBrowserScreen(
+    url: String = "https://media.hmair.xyz",
+    onBack: () -> Unit = {}
+) {
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var customView by remember { mutableStateOf<android.view.View?>(null) }
+    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+
+    BackHandler {
+        if (webViewRef?.canGoBack() == true) {
+            webViewRef?.goBack()
+        } else {
+            onBack()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        if (customView != null) {
+            AndroidView(
+                factory = { customView!! },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(bottom = 72.dp)
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    color = Color(0xFF121214),
+                    border = BorderStroke(0.5.dp, Color(0xFF2C2C2E))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (webViewRef?.canGoBack() == true) {
+                                    webViewRef?.goBack()
+                                } else {
+                                    onBack()
+                                }
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { webViewRef?.reload() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                databaseEnabled = true
+                                allowFileAccess = true
+                                allowContentAccess = true
+                                loadWithOverviewMode = true
+                                useWideViewPort = true
+                                setSupportZoom(true)
+                                builtInZoomControls = true
+                                displayZoomControls = false
+                                mediaPlaybackRequiresUserGesture = false
+                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 AppEmbedded/1.0"
+                            }
+                            isHapticFeedbackEnabled = true
+                            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ): Boolean = false
+
+                                override fun onReceivedSslError(
+                                    view: WebView?,
+                                    handler: SslErrorHandler?,
+                                    error: SslError?
+                                ) {
+                                    handler?.proceed()
+                                }
+                            }
+
+                            webChromeClient = object : WebChromeClient() {
+                                override fun onShowCustomView(
+                                    view: android.view.View?,
+                                    callback: CustomViewCallback?
+                                ) {
+                                    customView = view
+                                    customViewCallback = callback
+                                }
+
+                                override fun onHideCustomView() {
+                                    customView = null
+                                    customViewCallback?.onCustomViewHidden()
+                                    customViewCallback = null
+                                }
+                            }
+
+                            loadUrl(url)
+                            webViewRef = this
+                        }
+                    },
+                    update = { view ->
+                        webViewRef = view
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+

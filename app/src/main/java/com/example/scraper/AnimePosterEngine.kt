@@ -310,35 +310,27 @@ object AnimePosterEngine {
         // Check for Japanese Kanji, Hiragana, Katakana unicode ranges
         if (title.any { it in '\u3040'..'\u309F' || it in '\u30A0'..'\u30FF' || it in '\u4E00'..'\u9FAF' }) return true
 
-        // Common anime titles, franchises, and keywords
-        val keywords = listOf(
-            "naruto", "boruto", "one piece", "demon slayer", "attack on titan", "jujutsu", "kaisen",
-            "my hero academia", "boku no hero", "bleach", "kono suba", "konosuba", "reincarnated",
-            "isekai", "solo leveling", "tensei", "sword art", "black clover", "frieren", "chainsaw man",
-            "blue lock", "spy x", "oshi no ko", "kaiju", "haikyu", "dr. stone", "dr stone", "baki",
-            "tokyo ghoul", "fairy tail", "death note", "hunter x", "slime", "classroom of the elite",
-            "dragon ball", "pokemon", "apothecary diaries", "elusive samurai", "failure frame",
-            "gundam", "bookworm", "ascendance of a", "honzuki", "overlord", "rezero", "re:zero",
-            "jobless reincarnation", "wind breaker", "hell's paradise", "hells paradise", "heavenly delusion",
-            "mashle", "undead unluck", "shangri-la", "delicious in dungeon", "dunmeshi", "metallic rouge",
-            "sengoku youko", "bucchigiri", "ninja kamui", "tsukimichi", "go! go! loser ranger!", "girls band cry",
-            "alya sometimes hides her feelings", "roshidere", "too many losing heroines", "makeine", "wistoria",
-            "monogatari", "senpai is an otokonoko", "mayonaka punch", "nokotan", "deer friend", "gintama",
-            "food wars", "shokugeki", "kaguya", "vinland", "steins;gate", "steins gate", "fullmetal alchemist",
-            "fmab", "code geass", "violet evergarden", "your lie in april", "cyberpunk edgerunners", "one punch man",
-            "mob psycho", "no game no life", "future diary", "mirai nikki", "another", "angel beats", "noragami",
-            "neon genesis", "evangelion", "cowboy bebop", "clannad", "toradora", "your name", "weathering with you",
-            "suzume", "silent voice", "spirited away", "howl's moving", "howls moving", "totoro", "mononoke",
-            "grave of the fireflies", "anohana", "erased", "monster", "pluto", "the fable", "bartender",
-            "world is dancing", "liar game", "inept villainess", "villainess", "futsutsuka", "danmachi",
-            "sakamoto", "dandadan", "uzumaki", "blue box", "ranma", "bleach", "trigun", "charlotte",
-            "horimiya", "bungo stray dogs", "haikyuu", "kuroko", "blue period", "dororo", "vinland saga",
-            "akame ga kill", "kill la kill", "assassination classroom", "sword art online", "fate/stay",
-            "fate stay", "fate/zero", "fate zero", "psycho-pass", "psycho pass", "gintama", "inuyasha",
-            "yu yu hakusho", "sailor moon", "digimon", "cardcaptor", "fruits basket", "ouran", "nana"
+        // Safe, specific anime titles and franchises that do not overlap with generic English words
+        val safeKeywords = listOf(
+            "naruto", "boruto", "one piece", "demon slayer", "attack on titan", "jujutsu kaisen",
+            "my hero academia", "boku no hero", "konosuba", "solo leveling", "black clover", "frieren",
+            "chainsaw man", "blue lock", "oshi no ko", "tokyo ghoul", "fairy tail", "death note",
+            "dragon ball", "pokemon", "gundam", "rezero", "re:zero", "vinland saga", "neon genesis",
+            "evangelion", "cowboy bebop", "clannad", "toradora", "spirited away", "howl's moving",
+            "howls moving", "totoro", "mononoke", "dandadan", "bungo stray dogs", "haikyuu", "kuroko",
+            "akame ga kill", "kill la kill", "assassination classroom", "sword art online", "psycho-pass",
+            "gintama", "inuyasha", "yu yu hakusho", "sailor moon", "digimon", "cardcaptor", "fruits basket",
+            "ouran"
         )
-        for (kw in keywords) {
-            if (t.contains(kw)) return true
+        
+        val cleanTitle = t.trim()
+        for (kw in safeKeywords) {
+            if (kw.contains(" ")) {
+                if (cleanTitle.contains(kw)) return true
+            } else {
+                val regex = "\\b${Regex.escape(kw)}\\b".toRegex()
+                if (regex.containsMatchIn(cleanTitle)) return true
+            }
         }
         return false
     }
