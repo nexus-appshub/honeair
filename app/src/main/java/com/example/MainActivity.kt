@@ -477,7 +477,7 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                 testTag = tag
             )
             "Live" -> NavigationNavItem(
-                title = "Live",
+                title = "Live TV",
                 icon = Icons.Default.LiveTv,
                 testTag = tag
             )
@@ -630,14 +630,6 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
     val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val mainBgColor = if (isSystemDark) SpaceBlack else Color(0xFFF5F5F7)
 
-    val currentSelectedSlotType = when (selectedTabIndex) {
-        1 -> browseSlotType
-        2 -> airSlotType
-        3 -> downloadsSlotType
-        else -> ""
-    }
-    val isBottomNavTabHidden = currentSelectedSlotType == "Feeds" || currentSelectedSlotType == "Airing"
-
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -645,7 +637,7 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
             .background(mainBgColor),
         bottomBar = {
             AnimatedVisibility(
-                visible = isNavBarVisible && !isFullScreen && !isInPipMode && !isLandscape && !isBottomNavTabHidden,
+                visible = isNavBarVisible && !isFullScreen && !isInPipMode && !isLandscape,
                 enter = slideInVertically(
                     initialOffsetY = { it },
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)

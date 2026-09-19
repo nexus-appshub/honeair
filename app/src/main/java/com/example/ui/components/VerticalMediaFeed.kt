@@ -271,7 +271,7 @@ fun VerticalMediaFeedCard(
 
                 val exoPlayer = remember(item.id, resolvedPreviewUrl) {
                     ExoPlayer.Builder(context).build().apply {
-                        val videoUrl = if (resolvedPreviewUrl.isNotBlank()) resolvedPreviewUrl else "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+                        val videoUrl = if (resolvedPreviewUrl.isNotBlank()) resolvedPreviewUrl else "https://assets.mixkit.co/videos/preview/mixkit-forest-stream-in-the-sunlight-529-large.mp4"
                         val media = Media3Item.fromUri(Uri.parse(videoUrl))
                         setMediaItem(media)
                         repeatMode = Player.REPEAT_MODE_ALL
@@ -285,9 +285,9 @@ fun VerticalMediaFeedCard(
                                 }
                             }
                             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                                if (videoUrl != "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4") {
+                                if (videoUrl != "https://assets.mixkit.co/videos/preview/mixkit-forest-stream-in-the-sunlight-529-large.mp4") {
                                     try {
-                                        setMediaItem(Media3Item.fromUri(Uri.parse("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4")))
+                                        setMediaItem(Media3Item.fromUri(Uri.parse("https://assets.mixkit.co/videos/preview/mixkit-forest-stream-in-the-sunlight-529-large.mp4")))
                                         prepare()
                                     } catch (_: Exception) {}
                                 }

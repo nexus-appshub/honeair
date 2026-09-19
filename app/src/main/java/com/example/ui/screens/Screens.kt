@@ -7484,6 +7484,7 @@ fun SettingsScreen(
 
     var showSignInSheetInSettings by remember { mutableStateOf(false) }
     var showProfileSheet by remember { mutableStateOf(false) }
+    var showAiringReelsScreen by remember { mutableStateOf(false) }
     var showDiscoverFeedsScreen by remember { mutableStateOf(false) }
     var showWatchHistorySheet by remember { mutableStateOf(false) }
     var showWebVersionView by remember { mutableStateOf(false) }
@@ -8110,6 +8111,15 @@ fun SettingsScreen(
 
             item {
                 SecretSettingRow(
+                    title = "Airing Reels",
+                    subtitle = "Watch curated short videos and anime reels",
+                    icon = Icons.Default.Movie,
+                    onClick = { showAiringReelsScreen = true }
+                )
+            }
+
+            item {
+                SecretSettingRow(
                     title = "Feeds",
                     subtitle = "Watch trending & latest discover video stream",
                     icon = Icons.Default.DynamicFeed,
@@ -8495,6 +8505,47 @@ fun SettingsScreen(
         isVisible = showSubscriptionPlanModalInProfile,
         onDismiss = { showSubscriptionPlanModalInProfile = false }
     )
+
+    if (showAiringReelsScreen) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showAiringReelsScreen = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                AiringFeedScreen(
+                    viewModel = viewModel,
+                    onNavigateToPlayer = {
+                        showAiringReelsScreen = false
+                        onNavigateToPlayer()
+                    },
+                    isHeaderVisible = true
+                )
+                // Back button overlay
+                IconButton(
+                    onClick = { showAiringReelsScreen = false },
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(12.dp)
+                        .size(40.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                        .align(Alignment.TopStart)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    }
 
     if (showDiscoverFeedsScreen) {
         androidx.compose.ui.window.Dialog(
@@ -9442,10 +9493,11 @@ fun SettingsScreen(
                 val slotOptions = listOf(
                     Triple("Browse", "Browse", Icons.Outlined.Dashboard),
                     Triple("Air", "Air Stream", Icons.Default.Tv),
-                    Triple("Live", "Live", Icons.Default.LiveTv),
+                    Triple("Live", "Live TV", Icons.Default.LiveTv),
                     Triple("Feeds", "Feeds", Icons.Default.DynamicFeed),
                     Triple("Sports", "Sports", Icons.Default.SportsSoccer),
                     Triple("Master Anime", "Anime Hub", Icons.Default.AutoAwesome),
+                    Triple("Airing", "Airing Reels", Icons.Default.Movie),
                     Triple("Downloads", "Downloads", Icons.Outlined.Download)
                 )
 

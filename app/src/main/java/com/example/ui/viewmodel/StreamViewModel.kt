@@ -360,7 +360,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _browseSlotType = MutableStateFlow(application.getSharedPreferences("app_settings", Context.MODE_PRIVATE).getString("browse_slot_replacement", "Browse") ?: "Browse")
     val browseSlotType: StateFlow<String> = _browseSlotType.asStateFlow()
 
-    private val _airSlotType = MutableStateFlow(application.getSharedPreferences("app_settings", Context.MODE_PRIVATE).getString("air_slot_replacement", "Air") ?: "Air")
+    private val _airSlotType = MutableStateFlow(
+        application.getSharedPreferences("app_settings", Context.MODE_PRIVATE).let { prefs ->
+            val saved = prefs.getString("air_slot_replacement", null)
+            if (saved == null || saved == "Airing") {
+                prefs.edit().putString("air_slot_replacement", "Air").apply()
+                "Air"
+            } else {
+                saved
+            }
+        }
+    )
     val airSlotType: StateFlow<String> = _airSlotType.asStateFlow()
 
     private val _downloadsSlotType = MutableStateFlow(application.getSharedPreferences("app_settings", Context.MODE_PRIVATE).getString("downloads_slot_replacement", "Downloads") ?: "Downloads")
