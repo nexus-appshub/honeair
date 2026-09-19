@@ -802,7 +802,7 @@ fun VerticalMediaFeedCard(
                                 val providers = listOf(
                                     "⚡ Fastest (Auto Parallel)" to "fastest_auto",
                                     "HINDI Server" to "delta",
-                                    "VidRock Server (Direct)" to "vidrock_direct",
+                                    "ZOZO Server (Direct)" to "vidrock_direct",
                                     "Flixer Server" to "filxer",
                                     "Prime Server" to "prime",
                                     "Hexa Server" to "hexa",
@@ -1153,7 +1153,7 @@ fun VerticalMediaFeedCard(
             val streamServers = listOf(
                 Triple("fastest_auto", "⚡ Fastest Direct", Color(0xFF00E5FF)),
                 Triple("delta", "HINDI", Color(0xFFFF9800)),
-                Triple("vidrock_direct", "VidRock (Direct)", Color(0xFFB388FF)),
+                Triple("vidrock_direct", "ZOZO (Direct)", Color(0xFFB388FF)),
                 Triple("filxer", "Flixer", Color(0xFF00E5FF)),
                 Triple("prime", "Prime", Color(0xFF00E676)),
                 Triple("hexa", "Hexa", Color(0xFFE040FB)),

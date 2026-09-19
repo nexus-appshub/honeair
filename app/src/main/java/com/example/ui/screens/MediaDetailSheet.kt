@@ -531,7 +531,7 @@ fun MediaDetailSheet(
                     // Active server badge
                     val activeLabel = when (selectedStreamServerKey) {
                         "delta" -> "HINDI"
-                        "vidrock_direct" -> "VIDROCK (Direct)"
+                        "vidrock_direct" -> "ZOZO (Direct)"
                         "filxer" -> "FLIXER"
                         "prime" -> "PRIME"
                         "hexa" -> "HEXA"
@@ -570,7 +570,7 @@ fun MediaDetailSheet(
                 val normalServers = listOf(
                     Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan),
                     Triple("delta", "HINDI", Color(0xFFFF9800)),
-                    Triple("vidrock_direct", "VidRock (Direct)", NeonPurple),
+                    Triple("vidrock_direct", "ZOZO (Direct)", NeonPurple),
                     Triple("filxer", "Flixer", NeonCyan),
                     Triple("prime", "Prime", Color(0xFF00E676)),
                     Triple("hexa", "Hexa", Color(0xFFE040FB)),

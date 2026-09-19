@@ -372,7 +372,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         withContext(Dispatchers.Main) {
                             directScrapeStatusText = when (iteration % 4) {
                                 1 -> "Scanning 12+ cloud streams in parallel (VidLink, VidSrc, AutoEmbed)..."
-                                2 -> "Racing deep extractors (VidRock, VidNest, MovieBox)..."
+                                2 -> "Racing deep extractors (ZOZO, VidNest, MovieBox)..."
                                 3 -> "Querying high-speed direct relays & mirrors..."
                                 else -> "Aggressive parallel scraping active... Attempting direct HD stream"
                             }
@@ -2431,7 +2431,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     "vidlink_direct" -> "VidLink (Pro)"
                                     "vidsrc_direct" -> "VidSrc (Multi)"
                                     "autoembed_direct" -> "AutoEmbed"
-                                    "vidrock_direct" -> "VidRock"
+                                    "vidrock_direct" -> "ZOZO"
                                     "delta" -> "HINDI"
                                     else -> currentVidnestServer?.displayName ?: "Server A"
                                 }
@@ -3024,7 +3024,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                             },
                                             label = {
                                                 Text(
-                                                    text = "VidRock (Direct)",
+                                                    text = "ZOZO (Direct)",
                                                     fontSize = 12.sp,
                                                     fontWeight = if (isVidrockSelected) FontWeight.Bold else FontWeight.Normal
                                                 )

@@ -676,7 +676,7 @@ object UnifiedStreamManager {
                 if (specificResult != null && specificResult.streamUrl.isNotBlank()) {
                     val serverName = when (preferredServerKey) {
                         "delta" -> "HINDI"
-                        "vidrock_direct" -> "VidRock (Direct)"
+                        "vidrock_direct" -> "ZOZO (Direct)"
                         "filxer" -> "Flixer"
                         "prime" -> "Prime"
                         "hexa" -> "Hexa"
@@ -706,7 +706,7 @@ object UnifiedStreamManager {
                 try {
                     val res = VidrockNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("vidrock_direct", "VidRock (Direct)", res))
+                        winnerChannel.trySend(StreamRaceWinner("vidrock_direct", "ZOZO (Direct)", res))
                     }
                 } catch (_: Exception) {}
             }
