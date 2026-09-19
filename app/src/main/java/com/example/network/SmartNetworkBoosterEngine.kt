@@ -174,7 +174,7 @@ object SmartNetworkBoosterEngine {
                     baseHeaders["sec-ch-ua-mobile"] = "?0"
                     baseHeaders["sec-ch-ua-platform"] = "\"Windows\""
                 }
-                urlLower.contains("kryntal.top") || urlLower.contains("megaplay") || urlLower.contains("anikoto") -> {
+                urlLower.contains("kryntal") || urlLower.contains("megaplay") || urlLower.contains("anikoto") || urlLower.contains("nexabloom") || urlLower.contains("quavex") || urlLower.contains("/anime/") -> {
                     if (!baseHeaders.containsKey("Referer")) baseHeaders["Referer"] = "https://megaplay.buzz/"
                     if (!baseHeaders.containsKey("Origin")) baseHeaders["Origin"] = "https://megaplay.buzz"
                     baseHeaders["sec-ch-ua"] = "\"Google Chrome\";v=\"120\", \"Chromium\";v=\"120\", \"Not?A_Brand\";v=\"24\""

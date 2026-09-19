@@ -1,6 +1,7 @@
 package com.example.scraper
 
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -8,15 +9,16 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import com.example.network.DiagnosticLoggingInterceptor
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
 import org.json.JSONObject
+import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 data class AnikotoAnimeItem(
     val id: String,
@@ -94,12 +96,153 @@ data class AnikotoStreamResult(
 
 object AnikotoScraper {
     private const val TAG = "AnikotoScraper"
-    const val API_BASE_URL = "https://media.hmair.xyz"
+    private const val BASE_URL = "https://anikoto.cz"
+    private const val AJAX_URL = "https://anikoto.cz/ajax"
     const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+    // Default AES decryption keys for Megaplay / Kryntal encrypted anime streams
+    private const val DEFAULT_MEGAPLAY_AES_KEY = "i?LMTAx0Q6,:}50U"
+    private const val DEFAULT_MEGAPLAY_AES_IV = "W0;27ToaUpl_P%'c"
+
+    @Volatile
+    private var cachedMegaplayAesKey: String = DEFAULT_MEGAPLAY_AES_KEY
+    @Volatile
+    private var cachedMegaplayAesIv: String = DEFAULT_MEGAPLAY_AES_IV
+
+    /**
+     * Sanitizes poster URL for safe loading across the app
+     */
+    fun sanitizePosterUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) return ""
+        if (trimmed.contains("anilist.co") || trimmed.contains("myanimelist.net") || trimmed.contains("tmdb.org")) {
+            return if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
+        }
+        return when {
+            trimmed.startsWith("//") -> "https:$trimmed"
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            trimmed.startsWith("/") -> "$BASE_URL$trimmed"
+            else -> "$BASE_URL/$trimmed"
+        }
+    }
+
+    /**
+     * Resolves watch URL from a title or slug
+     */
+    suspend fun resolveAnikotoWatchUrl(titleOrSlug: String): String? = withContext(Dispatchers.IO) {
+        val raw = titleOrSlug.trim()
+            .removePrefix("anikoto_")
+            .removePrefix("movie_")
+            .removePrefix("series_")
+            .trim()
+
+        if (raw.isBlank()) return@withContext null
+
+        if (raw.startsWith("http://") || raw.startsWith("https://") || raw.contains("/watch/")) {
+            return@withContext raw
+        }
+
+        val searchItems = searchOrFilterAnime(keyword = raw)
+        val matched = searchItems.firstOrNull()
+        matched?.watchUrl ?: "$BASE_URL/watch/${raw.lowercase().replace(Regex("[^a-z0-9]"), "-")}"
+    }
+
+    /**
+     * Decrypts AES-CBC encrypted stream data payload ("enc") from Megaplay / Kryntal / e1-player.
+     */
+    fun decryptMegaplayEnc(
+        enc: String,
+        customKey: String? = null,
+        customIv: String? = null
+    ): String? {
+        if (enc.isBlank()) return null
+        val keyStr = customKey ?: cachedMegaplayAesKey
+        val ivStr = customIv ?: cachedMegaplayAesIv
+
+        return try {
+            val keyBytes = ByteArray(32)
+            val rawKey = keyStr.toByteArray(Charsets.UTF_8)
+            System.arraycopy(rawKey, 0, keyBytes, 0, minOf(32, rawKey.size))
+
+            val ivBytes = ByteArray(16)
+            val rawIv = ivStr.toByteArray(Charsets.UTF_8)
+            System.arraycopy(rawIv, 0, ivBytes, 0, minOf(16, rawIv.size))
+
+            var cleanEnc = enc.replace('-', '+').replace('_', '/')
+            while (cleanEnc.length % 4 != 0) {
+                cleanEnc += "="
+            }
+            val cipherBytes = Base64.decode(cleanEnc, Base64.DEFAULT)
+
+            val secretKey = SecretKeySpec(keyBytes, "AES")
+            val ivSpec = IvParameterSpec(ivBytes)
+
+            // Try PKCS5Padding first (standard for Megaplay)
+            try {
+                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+                cipher.init(Cipher.DECRYPT_MODE, secretKey, ivSpec)
+                val decrypted = cipher.doFinal(cipherBytes)
+                val text = String(decrypted, Charsets.UTF_8).trim()
+                if (text.isNotBlank()) return text
+            } catch (_: Exception) {}
+
+            // Fallback to NoPadding
+            val cipherNoPad = Cipher.getInstance("AES/CBC/NoPadding")
+            cipherNoPad.init(Cipher.DECRYPT_MODE, secretKey, ivSpec)
+            val decryptedNoPad = cipherNoPad.doFinal(cipherBytes)
+            val rawText = String(decryptedNoPad, Charsets.UTF_8).trim()
+            rawText
+        } catch (e: Exception) {
+            Log.e(TAG, "decryptMegaplayEnc failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Dynamically updates AES keys if Megaplay updates its client scripts.
+     */
+    private fun refreshMegaplayKeysFromScript(embedOrigin: String) {
+        try {
+            val scripts = listOf(
+                "$embedOrigin/lib/newclient.min.js?v=4.17",
+                "$embedOrigin/lib/newclient.min.js",
+                "$embedOrigin/lib/e1-player.min.js"
+            )
+            for (scriptUrl in scripts) {
+                val req = Request.Builder()
+                    .url(scriptUrl)
+                    .header("User-Agent", DEFAULT_UA)
+                    .header("Referer", "$embedOrigin/")
+                    .build()
+                val res = httpClient.newCall(req).execute()
+                val body = res.body?.string() ?: ""
+                if (body.contains("trustAesKey") || body.contains("TRUST_AES_KEY")) {
+                    val keyMatch = Regex("""\[["'`]trustAesKey["'`]\s*,\s*["'`]TRUST_AES_KEY["'`]\]\s*,\s*["'`]?([^"'`]+)["'`]?""").find(body)
+                    val ivMatch = Regex("""\[["'`]trustAesIv["'`]\s*,\s*["'`]TRUST_AES_IV["'`]\]\s*,\s*["'`]?([^"'`]+)["'`]?""").find(body)
+                    val newKey = keyMatch?.groupValues?.get(1)?.trim()
+                    val newIv = ivMatch?.groupValues?.get(1)?.trim()
+                    if (!newKey.isNullOrBlank() && newKey.length >= 8) {
+                        cachedMegaplayAesKey = newKey
+                    }
+                    if (!newIv.isNullOrBlank() && newIv.length >= 8) {
+                        cachedMegaplayAesIv = newIv
+                    }
+                    Log.d(TAG, "Refreshed Megaplay AES keys from script: keyLen=${cachedMegaplayAesKey.length}, ivLen=${cachedMegaplayAesIv.length}")
+                    break
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed refreshing Megaplay keys: ${e.message}")
+        }
+    }
+
+    /**
+     * OkHttpClient equipped with diagnostic LoggingInterceptor to inspect all headers (Referer, UA, Origin)
+     * and bypass 403 Forbidden / Cloudflare anti-bot blocks.
+     */
     val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .addInterceptor(DiagnosticLoggingInterceptor(tag = "AnimeApi-Diagnostic", enforceBypassHeaders = true))
+            .addInterceptor(DiagnosticLoggingInterceptor(tag = "Anikoto-Scraper-Diagnostic", enforceBypassHeaders = true))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .followRedirects(true)
@@ -107,198 +250,32 @@ object AnikotoScraper {
             .build()
     }
 
-    private fun fetchJson(url: String): JSONObject? {
+    /**
+     * Helper to fetch HTML through the diagnostic OkHttpClient with Referer & User-Agent
+     */
+    private fun fetchHtml(url: String, referer: String = "$BASE_URL/"): String {
         return try {
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", DEFAULT_UA)
-                .header("Accept", "application/json")
+                .header("Referer", referer)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.9")
                 .build()
 
             val response = httpClient.newCall(request).execute()
-            val body = response.body?.string() ?: return null
-            JSONObject(body)
+            response.body?.string() ?: ""
         } catch (e: Exception) {
-            Log.e(TAG, "fetchJson error for $url: ${e.message}")
-            null
-        }
-    }
-
-    private fun makeAbsoluteUrl(url: String): String {
-        val trimmed = url.trim()
-        if (trimmed.isEmpty() || trimmed == "/" || trimmed.equals("null", ignoreCase = true)) return ""
-        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            trimmed
-        } else if (trimmed.startsWith("/")) {
-            "$API_BASE_URL$trimmed"
-        } else {
-            "$API_BASE_URL/$trimmed"
-        }
-    }
-
-    fun sanitizePosterUrl(rawUrl: String): String {
-        val trimmed = rawUrl.trim()
-        if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) return ""
-        if (trimmed.contains("anilist.co") || trimmed.contains("myanimelist.net") || trimmed.contains("tmdb.org")) {
-            return if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
-        }
-        if (trimmed.startsWith("/api/proxy") || trimmed.startsWith("/api/")) {
-            return "$API_BASE_URL$trimmed"
-        }
-        val target = when {
-            trimmed.startsWith("//") -> "https:$trimmed"
-            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
-            trimmed.startsWith("/") -> "https://anikoto.cz$trimmed"
-            else -> "https://anikoto.cz/$trimmed"
-        }
-        // If image is hosted on anipixcdn.co or anikoto.cz, route through media proxy to prevent 403 Forbidden
-        return if (target.contains("anipixcdn.co") || target.contains("anikoto.cz")) {
-            "$API_BASE_URL/api/proxy?url=${URLEncoder.encode(target, "UTF-8")}&referer=https%3A%2F%2Fanikoto.cz%2F"
-        } else {
-            target
+            Log.e(TAG, "fetchHtml failed for $url: ${e.message}")
+            ""
         }
     }
 
     /**
-     * Direct scraping of Anikoto filter page (https://anikoto.cz/filter) using Jsoup
-     */
-    private fun scrapeAnikotoFilterPage(
-        keyword: String? = null,
-        genre: String? = null,
-        page: Int = 1
-    ): List<AnikotoAnimeItem> {
-        val list = mutableListOf<AnikotoAnimeItem>()
-        try {
-            val queryParams = mutableListOf<String>()
-            if (!keyword.isNullOrBlank()) {
-                queryParams.add("keyword=${URLEncoder.encode(keyword.trim(), "UTF-8")}")
-            }
-            if (!genre.isNullOrBlank()) {
-                queryParams.add("genre=${URLEncoder.encode(genre.trim(), "UTF-8")}")
-            }
-            if (page > 1) {
-                queryParams.add("page=$page")
-            }
-            val qStr = if (queryParams.isNotEmpty()) "?" + queryParams.joinToString("&") else ""
-            val targetUrl = "https://anikoto.cz/filter$qStr"
-            Log.d(TAG, "Direct Anikoto Filter Scraping: $targetUrl")
-
-            val request = Request.Builder()
-                .url(targetUrl)
-                .header("User-Agent", DEFAULT_UA)
-                .header("Referer", "https://anikoto.cz/")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return list
-                val html = response.body?.string() ?: return list
-                val doc = org.jsoup.Jsoup.parse(html)
-                val cards = doc.select(".flw-item, .ani.poster.tip, .film_list-wrap .flw-item")
-                for (card in cards) {
-                    val titleEl = card.selectFirst(".film-name a, .dynamic-name, h3.film-name a, .film-detail .film-name")
-                    val title = titleEl?.text()?.trim() ?: card.selectFirst("a")?.attr("title")?.trim() ?: ""
-                    if (title.isBlank()) continue
-
-                    val link = titleEl?.attr("href") ?: card.selectFirst("a")?.attr("href") ?: ""
-                    val fullWatchUrl = if (link.startsWith("http")) link else "https://anikoto.cz${if (link.startsWith("/")) "" else "/"}$link"
-
-                    val imgEl = card.selectFirst("img.film-poster-img, .film-poster img, img")
-                    val posterRaw = imgEl?.attr("data-src")?.ifBlank { imgEl.attr("src") } ?: ""
-                    val poster = sanitizePosterUrl(posterRaw)
-
-                    val dataId = card.attr("data-id").ifBlank {
-                        card.selectFirst(".film-poster")?.attr("data-id") ?: link.substringAfterLast("/").substringBefore("?")
-                    }
-
-                    val subCount = card.selectFirst(".tick-sub, .tick-item.tick-sub")?.text()?.trim() ?: ""
-                    val dubCount = card.selectFirst(".tick-dub, .tick-item.tick-dub")?.text()?.trim() ?: ""
-                    val rating = card.selectFirst(".tick-rate, .rating, .fdi-item:contains(★)")?.text()?.replace("★", "")?.trim() ?: "8.5"
-                    val itemType = card.selectFirst(".fdi-item:not(:contains(★)), .tick-item")?.text()?.trim() ?: "TV"
-
-                    list.add(
-                        AnikotoAnimeItem(
-                            id = if (dataId.isNotBlank()) dataId else "ani_${list.size}",
-                            title = title,
-                            posterUrl = poster,
-                            watchUrl = fullWatchUrl,
-                            type = itemType,
-                            subCount = subCount,
-                            dubCount = dubCount,
-                            rating = rating,
-                            releaseYear = "2024",
-                            description = ""
-                        )
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "scrapeAnikotoFilterPage error: ${e.message}")
-        }
-        return list
-    }
-
-    /**
-     * Direct scraping of Anikoto Episode list (https://anikoto.cz/ajax/v2/episode/list/[ANIME_ID])
-     */
-    private fun scrapeAnikotoEpisodesDirect(animeIdOrWatchUrl: String): List<AnikotoEpisode> {
-        val list = mutableListOf<AnikotoEpisode>()
-        try {
-            val cleanId = if (animeIdOrWatchUrl.contains("/watch/")) {
-                animeIdOrWatchUrl.substringAfterLast("/watch/").substringBefore("?").substringAfterLast("-")
-            } else if (animeIdOrWatchUrl.all { it.isDigit() }) {
-                animeIdOrWatchUrl
-            } else {
-                animeIdOrWatchUrl.substringAfterLast("-")
-            }
-
-            if (cleanId.isNotBlank()) {
-                val ajaxUrl = "https://anikoto.cz/ajax/v2/episode/list/$cleanId"
-                val req = Request.Builder()
-                    .url(ajaxUrl)
-                    .header("User-Agent", DEFAULT_UA)
-                    .header("Referer", "https://anikoto.cz/")
-                    .header("X-Requested-With", "XMLHttpRequest")
-                    .build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string() ?: ""
-                        val html = if (body.startsWith("{")) {
-                            JSONObject(body).optString("html", "")
-                        } else {
-                            body
-                        }
-                        if (html.isNotBlank()) {
-                            val doc = org.jsoup.Jsoup.parse(html)
-                            val epElements = doc.select(".ep-item, a[data-id], .episodes-ul a, .ssl-item")
-                            for (el in epElements) {
-                                val epId = el.attr("data-id").ifBlank { el.attr("data-number") }
-                                val epNum = el.attr("data-number").toIntOrNull()
-                                    ?: el.text().filter { it.isDigit() }.toIntOrNull()
-                                    ?: (list.size + 1)
-                                val epTitle = el.attr("title").ifBlank { el.text().trim() }
-                                list.add(
-                                    AnikotoEpisode(
-                                        id = epId.ifBlank { "$epNum" },
-                                        number = epNum,
-                                        title = if (epTitle.isBlank()) "Episode $epNum" else epTitle,
-                                        dataIdsToken = epId
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "scrapeAnikotoEpisodesDirect error: ${e.message}")
-        }
-        return list
-    }
-
-    /**
-     * 1. Search & Discovery: Filter / Search / Browse Anime from https://media.hmair.xyz/api/anikoto/search
-     * with multi-tier fail-safe fallbacks (Jikan / MyAnimeList & TMDB Anime APIs) for 100% guaranteed HD posters
+     * 1. Search & Discovery: Filter / Search / Browse Anime from Anikoto
+     * Routes:
+     * - Search / Keyword: GET https://anikoto.cz/filter?keyword={query}
+     * - Filter parameters: genre, season, year, type, status, language, rating, sort_by, page
      */
     suspend fun searchOrFilterAnime(
         keyword: String? = null,
@@ -313,418 +290,549 @@ object AnikotoScraper {
         page: Int = 1
     ): List<AnikotoAnimeItem> = withContext(Dispatchers.IO) {
         val results = mutableListOf<AnikotoAnimeItem>()
-        
-        // Tier 1: Anikoto Central Server API
         try {
             val queryParams = mutableListOf<String>()
             if (!keyword.isNullOrBlank()) {
                 queryParams.add("keyword=${URLEncoder.encode(keyword.trim(), "UTF-8")}")
             }
-            if (!genre.isNullOrBlank()) {
-                queryParams.add("genre=${URLEncoder.encode(genre.trim(), "UTF-8")}")
-            }
-            if (!type.isNullOrBlank()) {
-                queryParams.add("type=${URLEncoder.encode(type.trim(), "UTF-8")}")
-            }
-            if (!language.isNullOrBlank()) {
-                queryParams.add("language=${URLEncoder.encode(language.trim(), "UTF-8")}")
-            }
+            if (!genre.isNullOrBlank()) queryParams.add("genre=${URLEncoder.encode(genre.trim(), "UTF-8")}")
+            if (!season.isNullOrBlank()) queryParams.add("season=${URLEncoder.encode(season.trim(), "UTF-8")}")
+            if (!year.isNullOrBlank()) queryParams.add("year=${URLEncoder.encode(year.trim(), "UTF-8")}")
+            if (!type.isNullOrBlank()) queryParams.add("type=${URLEncoder.encode(type.trim(), "UTF-8")}")
+            if (!status.isNullOrBlank()) queryParams.add("status=${URLEncoder.encode(status.trim(), "UTF-8")}")
+            if (!language.isNullOrBlank()) queryParams.add("language=${URLEncoder.encode(language.trim(), "UTF-8")}")
+            if (!rating.isNullOrBlank()) queryParams.add("rating=${URLEncoder.encode(rating.trim(), "UTF-8")}")
             if (!sortBy.isNullOrBlank()) {
                 queryParams.add("sort_by=${URLEncoder.encode(sortBy.trim(), "UTF-8")}")
+            } else if (keyword.isNullOrBlank()) {
+                queryParams.add("sort_by=latest-updated")
             }
-            if (page > 1) {
-                queryParams.add("page=$page")
-            }
+            if (page > 1) queryParams.add("page=$page")
 
-            val queryString = if (queryParams.isNotEmpty()) "?" + queryParams.joinToString("&") else ""
-            val url = "$API_BASE_URL/api/anikoto/search$queryString"
-            Log.d(TAG, "Calling Anime Search API: $url")
+            val url = "$BASE_URL/filter?${queryParams.joinToString("&")}"
+            Log.d(TAG, "Fetching Anikoto catalog via OkHttp: $url")
+            val html = fetchHtml(url, referer = "$BASE_URL/")
+            if (html.isBlank()) return@withContext emptyList()
 
-            val json = fetchJson(url)
-            if (json != null) {
-                val animeArray = json.optJSONArray("anime") ?: json.optJSONArray("results") ?: JSONArray()
-                for (i in 0 until animeArray.length()) {
-                    val itemObj = animeArray.optJSONObject(i) ?: continue
-                    val id = itemObj.optString("id", "")
-                    val title = itemObj.optString("title", "")
-                    val link = itemObj.optString("link", "")
-                    val rawPoster = itemObj.optString("poster", "")
-                    val poster = sanitizePosterUrl(rawPoster)
-                    val subCount = itemObj.optString("subCount", "")
-                    val dubCount = itemObj.optString("dubCount", "")
-                    val itemType = itemObj.optString("type", type ?: "TV")
-                    val ratingStr = itemObj.optString("rating", "")
-                    val releaseYear = itemObj.optString("releaseYear", "")
-                    val desc = itemObj.optString("description", "")
+            val doc = Jsoup.parse(html, BASE_URL)
+            val animeElements = doc.select("#list-items .item, .ani.items .item, .film_list-wrap .flw-item, .film_list .flw-item, .film_list-wrap .item, .flw-item")
+            
+            for (element in animeElements) {
+                try {
+                    val linkEl = element.selectFirst(".ani.poster a, a.name.d-title, a.film-poster-ahref, a[href*='/watch/'], a.dynamic-name")
+                    val title = element.selectFirst(".name.d-title, .film-name a, .dynamic-name, .title, h3.film-name")?.text()?.trim()
+                        ?: element.selectFirst("img")?.attr("alt")?.trim()
+                        ?: linkEl?.attr("title")?.trim()
+                        ?: ""
 
-                    if (title.isNotBlank()) {
-                        val fullWatchUrl = if (link.isNotBlank()) link else "$API_BASE_URL/watch/$id"
-                        results.add(
-                            AnikotoAnimeItem(
-                                id = id.ifBlank { "anime_$i" },
-                                title = title,
-                                posterUrl = poster,
-                                watchUrl = fullWatchUrl,
-                                type = itemType,
-                                subCount = subCount,
-                                dubCount = dubCount,
-                                rating = ratingStr,
-                                releaseYear = releaseYear,
-                                description = desc
-                            )
-                        )
+                    if (title.isBlank()) continue
+
+                    val relativeHref = linkEl?.attr("href") ?: ""
+                    val watchUrl = if (relativeHref.startsWith("http")) relativeHref else "$BASE_URL$relativeHref"
+
+                    val imgEl = element.selectFirst(".ani.poster img, img.film-poster-img, .film-poster img, img")
+                    var posterUrl = imgEl?.attr("src")?.takeIf { it.isNotBlank() }
+                        ?: imgEl?.attr("data-src")?.takeIf { it.isNotBlank() }
+                        ?: ""
+                    if (posterUrl.startsWith("//")) {
+                        posterUrl = "https:$posterUrl"
+                    } else if (posterUrl.startsWith("/") && !posterUrl.startsWith("//")) {
+                        posterUrl = "$BASE_URL$posterUrl"
                     }
+
+                    val typeText = element.selectFirst(".meta .right, .fdi-item, .tick-item.tick-type, .fdi-item.fdi-type")?.text()?.trim() ?: "TV"
+                    val subCount = element.selectFirst(".ep-status.sub, .tick-sub, .tick-item.tick-sub")?.text()?.trim() ?: ""
+                    val dubCount = element.selectFirst(".ep-status.dub, .tick-dub, .tick-item.tick-dub")?.text()?.trim() ?: ""
+                    val totalCount = element.selectFirst(".ep-status.total, .tick-eps, .tick-item.tick-eps")?.text()?.trim() ?: ""
+                    val desc = element.selectFirst(".description, .film-description, .text-dimmed")?.text()?.trim() ?: ""
+                    val rating = element.selectFirst(".tick-item.tick-rate, .tick-rate, .tick-imdb")?.text()?.trim() ?: ""
+                    val releaseYear = element.selectFirst(".fdi-item.fdi-duration, .release-year, .year")?.text()?.trim() ?: ""
+
+                    val id = extractSlugId(watchUrl).ifEmpty {
+                        title.lowercase().replace(Regex("[^a-z0-9]"), "-")
+                    }
+
+                    results.add(
+                        AnikotoAnimeItem(
+                            id = id,
+                            title = title,
+                            posterUrl = posterUrl,
+                            watchUrl = watchUrl,
+                            type = typeText,
+                            episodesInfo = if (totalCount.isNotEmpty()) "Ep $totalCount" else if (subCount.isNotEmpty()) "Ep $subCount" else "Full",
+                            rating = rating,
+                            subCount = subCount,
+                            dubCount = dubCount,
+                            description = desc,
+                            releaseYear = releaseYear
+                        )
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed parsing single anime element: ${e.message}")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "searchOrFilterAnime Tier 1 error: ${e.message}")
+            Log.e(TAG, "searchOrFilterAnime error: ${e.message}", e)
         }
+        results.distinctBy { it.watchUrl }
+    }
 
-        // Tier 2 Fallback: Direct Anikoto Filter Page Scraping
-        if (results.isEmpty()) {
-            val directList = scrapeAnikotoFilterPage(keyword = keyword, genre = genre, page = page)
-            if (directList.isNotEmpty()) {
-                results.addAll(directList)
+    /**
+     * Live Suggestion API: GET https://anikoto.cz/ajax/search/suggest?keyword={query}
+     */
+    suspend fun getLiveSuggestions(keyword: String): List<AnikotoAnimeItem> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<AnikotoAnimeItem>()
+        if (keyword.isBlank()) return@withContext emptyList()
+        try {
+            val encoded = URLEncoder.encode(keyword.trim(), "UTF-8")
+            val url = "$AJAX_URL/search/suggest?keyword=$encoded"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", DEFAULT_UA)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Referer", "$BASE_URL/")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            var resultHtml = body
+            if (body.startsWith("{")) {
+                val json = JSONObject(body)
+                resultHtml = json.optString("result", json.optString("html", body))
             }
-        }
 
-        // Tier 3 Fallback: AniList GraphQL Standard API
-        if (results.isEmpty()) {
-            try {
-                val aniListFormat = if (type?.lowercase() == "movie") "MOVIE" else if (type?.lowercase() == "tv") "TV" else null
-                val aniListItems = AnimePosterEngine.fetchAniListMediaPage(page = page, perPage = 25, format = aniListFormat)
-                if (aniListItems.isNotEmpty()) {
-                    results.addAll(aniListItems)
+            if (resultHtml.isNotBlank()) {
+                val doc = Jsoup.parse(resultHtml, BASE_URL)
+                val items = doc.select(".nav-item, .item, a[href*='/watch/'], a.ss-item")
+                for (el in items) {
+                    val linkEl = if (el.tagName() == "a") el else el.selectFirst("a[href*='/watch/']")
+                    val relativeHref = linkEl?.attr("href") ?: ""
+                    if (relativeHref.isBlank()) continue
+                    val watchUrl = if (relativeHref.startsWith("http")) relativeHref else "$BASE_URL$relativeHref"
+
+                    val title = el.selectFirst(".film-name, .name, .d-title, .title")?.text()?.trim()
+                        ?: linkEl?.attr("title")?.trim()
+                        ?: el.text().trim()
+                    if (title.isBlank()) continue
+
+                    val imgEl = el.selectFirst("img")
+                    var posterUrl = imgEl?.attr("src")?.takeIf { it.isNotBlank() }
+                        ?: imgEl?.attr("data-src")?.takeIf { it.isNotBlank() }
+                        ?: ""
+                    if (posterUrl.startsWith("//")) {
+                        posterUrl = "https:$posterUrl"
+                    } else if (posterUrl.startsWith("/") && !posterUrl.startsWith("//")) {
+                        posterUrl = "$BASE_URL$posterUrl"
+                    }
+
+                    val id = extractSlugId(watchUrl).ifEmpty {
+                        title.lowercase().replace(Regex("[^a-z0-9]"), "-")
+                    }
+
+                    results.add(
+                        AnikotoAnimeItem(
+                            id = id,
+                            title = title,
+                            posterUrl = posterUrl,
+                            watchUrl = watchUrl
+                        )
+                    )
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "AniList fallback error: ${e.message}")
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "getLiveSuggestions error: ${e.message}")
         }
+        results.distinctBy { it.watchUrl }
+    }
 
-        // Tier 4 Fallback: Jikan / MyAnimeList Anime REST API
-        if (results.isEmpty()) {
-            try {
-                val jikanUrl = if (!keyword.isNullOrBlank()) {
-                    "https://api.jikan.moe/v4/anime?q=${URLEncoder.encode(keyword.trim(), "UTF-8")}&limit=25&page=$page"
-                } else {
-                    val jikanType = if (type?.lowercase() == "movie") "movie" else "tv"
-                    "https://api.jikan.moe/v4/top/anime?type=$jikanType&page=$page&limit=25"
+    /**
+     * Enhanced Season Extraction API
+     */
+    suspend fun fetchSeasons(watchUrlOrSlug: String, animeTitle: String? = null): List<AnikotoSeason> = withContext(Dispatchers.IO) {
+        val seasons = mutableListOf<AnikotoSeason>()
+        try {
+            var fullUrl = watchUrlOrSlug
+            if (!fullUrl.startsWith("http")) {
+                fullUrl = "$BASE_URL/watch/$watchUrlOrSlug"
+            }
+            val html = fetchHtml(fullUrl, referer = "$BASE_URL/")
+            val doc = if (html.isNotBlank()) Jsoup.parse(html, fullUrl) else null
+
+            val pageTitle = doc?.selectFirst(".name.d-title, .film-name, h2.title, h1, .film-name a")?.text()?.trim()
+                ?: animeTitle ?: ""
+
+            // Helper to parse season number from title text
+            fun extractSeasonNumber(text: String, fallback: Int = 1): Int {
+                val sMatch = Regex("""(?i)\b(?:Season|S|Part|Cour)\s*(\d+)\b""").find(text)
+                if (sMatch != null) return sMatch.groupValues[1].toIntOrNull() ?: fallback
+                val ordMatch = Regex("""(?i)\b(\d+)(?:st|nd|rd|th)\s*Season\b""").find(text)
+                if (ordMatch != null) return ordMatch.groupValues[1].toIntOrNull() ?: fallback
+                val romanMatch = Regex("""(?i)\b(?:Season|S)\s*(I|II|III|IV|V|VI|VII|VIII)\b""").find(text)
+                if (romanMatch != null) {
+                    return when (romanMatch.groupValues[1].uppercase()) {
+                        "I" -> 1; "II" -> 2; "III" -> 3; "IV" -> 4; "V" -> 5; "VI" -> 6; "VII" -> 7; "VIII" -> 8; else -> fallback
+                    }
                 }
-                Log.d(TAG, "Calling Jikan Anime Fallback API: $jikanUrl")
-                val jikanJson = fetchJson(jikanUrl)
-                if (jikanJson != null) {
-                    val dataArr = jikanJson.optJSONArray("data")
-                    if (dataArr != null && dataArr.length() > 0) {
-                        for (i in 0 until dataArr.length()) {
-                            val aObj = dataArr.optJSONObject(i) ?: continue
-                            val malId = aObj.optString("mal_id", "")
-                            val title = aObj.optString("title_english").ifBlank { aObj.optString("title", "") }
-                            val images = aObj.optJSONObject("images")
-                            val jpg = images?.optJSONObject("jpg")
-                            val webp = images?.optJSONObject("webp")
-                            val poster = jpg?.optString("large_image_url") 
-                                ?: jpg?.optString("image_url") 
-                                ?: webp?.optString("large_image_url") 
-                                ?: ""
-                            val score = aObj.optDouble("score", 8.4)
-                            val yearVal = aObj.optInt("year", 2024).toString()
-                            val synopsis = aObj.optString("synopsis", "")
-                            val epCount = aObj.optInt("episodes", 12)
-                            val aType = aObj.optString("type", type ?: "TV")
+                if (Regex("""(?i)\bFinal\s*Season\b""").containsMatchIn(text)) return 4
+                return fallback
+            }
 
-                            if (title.isNotBlank()) {
-                                results.add(
-                                    AnikotoAnimeItem(
-                                        id = "mal_$malId",
-                                        title = title,
-                                        posterUrl = poster,
-                                        watchUrl = "$API_BASE_URL/watch/anime-$malId",
-                                        type = aType,
-                                        subCount = "$epCount",
-                                        dubCount = "$epCount",
-                                        rating = String.format("%.1f", score),
-                                        releaseYear = if (yearVal != "0") yearVal else "2024",
-                                        description = synopsis
+            val currentNum = extractSeasonNumber(pageTitle, 1)
+
+            // Add current page as a known season
+            seasons.add(
+                AnikotoSeason(
+                    number = currentNum,
+                    title = if (pageTitle.isNotBlank()) pageTitle else "Season $currentNum",
+                    watchUrl = fullUrl
+                )
+            )
+
+            // 1. Direct on-page season elements
+            if (doc != null) {
+                val seasonElements = doc.select(".os-list .os-item, .os-list a, .seasons-block a, .seasons-block .item, #seasons a, .dropdown-menu a[href*='/watch/'], #ani-seasons a, #ani-seasons .item, #w-related a[href*='/watch/'], .block_area-seasons a, .ss-list a[href*='/watch/']")
+                var counter = 1
+                for (el in seasonElements) {
+                    val href = el.attr("href") ?: ""
+                    if (href.contains("/watch/") && !href.contains("/episode/")) {
+                        val title = el.text().trim().ifEmpty { el.attr("title").trim() }.ifEmpty { "Season $counter" }
+                        val fullSeasonUrl = if (href.startsWith("http")) href else "$BASE_URL$href"
+                        val num = extractSeasonNumber(title, counter)
+                        if (seasons.none { it.watchUrl == fullSeasonUrl }) {
+                            seasons.add(
+                                AnikotoSeason(
+                                    number = num,
+                                    title = title,
+                                    watchUrl = fullSeasonUrl
+                                )
+                            )
+                            counter++
+                        }
+                    }
+                }
+
+                // 2. Fetch watch-order / relations via Ajax if animeDataId is present
+                var animeDataId = doc.selectFirst(".anis-watch-wrap[data-id], #wrapper[data-id], .film_detail[data-id], #detail-infor[data-id], [data-id]")?.attr("data-id") ?: ""
+                if (animeDataId.isBlank()) {
+                    val match = Regex("""(?:data-id|anime_id|animeId|movie_id|film_id|syncId)\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?""").find(html)
+                    if (match != null) {
+                        animeDataId = match.groupValues.getOrNull(1) ?: ""
+                    }
+                }
+                if (animeDataId.isBlank()) {
+                    val cleanPath = fullUrl.substringBefore("/ep-").substringBefore("?").trimEnd('/')
+                    val lastDash = cleanPath.substringAfterLast("-")
+                    if (lastDash.isNotBlank() && lastDash.length in 2..8) {
+                        animeDataId = lastDash
+                    }
+                }
+
+                if (animeDataId.isNotBlank()) {
+                    val woUrls = listOf(
+                        "$BASE_URL/api/watch-order/$animeDataId",
+                        "$AJAX_URL/watch-order/$animeDataId",
+                        "$AJAX_URL/season/list/$animeDataId"
+                    )
+                    for (woUrl in woUrls) {
+                        try {
+                            val request = Request.Builder()
+                                .url(woUrl)
+                                .header("User-Agent", DEFAULT_UA)
+                                .header("X-Requested-With", "XMLHttpRequest")
+                                .header("Referer", fullUrl)
+                                .build()
+                            val res = httpClient.newCall(request).execute()
+                            val body = res.body?.string() ?: ""
+                            var resultHtml = body
+                            if (body.startsWith("{")) {
+                                val jsObj = JSONObject(body)
+                                resultHtml = jsObj.optString("result", jsObj.optString("html", body))
+                            }
+                            if (resultHtml.isNotBlank()) {
+                                val woDoc = Jsoup.parse(resultHtml)
+                                val items = woDoc.select(".item a[href*='/watch/'], a[href*='/watch/']")
+                                for (el in items) {
+                                    val href = el.attr("href") ?: ""
+                                    if (href.contains("/watch/")) {
+                                        val fullSeasonUrl = if (href.startsWith("http")) href else "$BASE_URL$href"
+                                        val nameEl = el.selectFirst(".name, .d-title, .title") ?: el
+                                        val itemTitle = nameEl.text().trim().ifEmpty { el.attr("title").trim() }
+                                        if (itemTitle.isNotEmpty() && seasons.none { it.watchUrl == fullSeasonUrl }) {
+                                            val num = extractSeasonNumber(itemTitle, seasons.size + 1)
+                                            seasons.add(
+                                                AnikotoSeason(
+                                                    number = num,
+                                                    title = itemTitle,
+                                                    watchUrl = fullSeasonUrl
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "watch-order parsing error: ${e.message}")
+                        }
+                    }
+                }
+            }
+
+            // 3. Franchise search for all seasons
+            val baseTitleCandidate = if (pageTitle.isNotBlank()) pageTitle else (animeTitle ?: "")
+            val baseTitle = baseTitleCandidate
+                .replace(Regex("""(?i)\s*(?:[-–—:]\s*)?(?:Season\s*\d+|[0-9]+(?:st|nd|rd|th)\s*Season|Part\s*\d+|Cour\s*\d+|Final\s*Season|Final\s*Chapter|II|III|IV|V|VI).*$"""), "")
+                .replace(Regex("""(?i)\s*\((?:TV|Dub|Sub|Official)\)"""), "")
+                .trim()
+
+            if (baseTitle.length >= 3) {
+                try {
+                    val searchItems = searchOrFilterAnime(keyword = baseTitle, sortBy = "latest-updated")
+                    val normalizedBase = baseTitle.lowercase().replace(Regex("[^a-z0-9]"), "")
+
+                    for (sItem in searchItems) {
+                        val itemNorm = sItem.title.lowercase().replace(Regex("[^a-z0-9]"), "")
+                        val isRelatedFranchise = itemNorm.contains(normalizedBase) || normalizedBase.contains(itemNorm)
+                        val isExcluded = sItem.type.equals("Movie", ignoreCase = true) && !sItem.title.contains("Mugen Train", ignoreCase = true)
+
+                        if (isRelatedFranchise && !isExcluded) {
+                            val num = extractSeasonNumber(sItem.title, if (itemNorm == normalizedBase) 1 else seasons.size + 1)
+                            if (seasons.none { it.watchUrl == sItem.watchUrl }) {
+                                seasons.add(
+                                    AnikotoSeason(
+                                        number = num,
+                                        title = sItem.title,
+                                        watchUrl = sItem.watchUrl
                                     )
                                 )
                             }
                         }
                     }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Jikan fallback error: ${e.message}")
-            }
-        }
-
-        // Enhance results with AniList GraphQL / Jikan HD posters across all items
-        AnimePosterEngine.enhanceAnimeItems(results)
-    }
-
-    suspend fun getLiveSuggestions(keyword: String): List<AnikotoAnimeItem> = withContext(Dispatchers.IO) {
-        searchOrFilterAnime(keyword = keyword)
-    }
-
-    /**
-     * 2. Fetch All Seasons & Franchise Parts for an anime from API (Ensures all seasons, parts, cours, OVAs and movies are fetched)
-     */
-    suspend fun fetchSeasons(watchUrlOrSlug: String, animeTitle: String? = null, episode: Int = 1): List<AnikotoSeason> = withContext(Dispatchers.IO) {
-        val rawSeasonsList = mutableListOf<AnikotoSeason>()
-        val seenWatchUrls = mutableSetOf<String>()
-        val seenTitles = mutableSetOf<String>()
-
-        try {
-            val queryParams = mutableListOf<String>()
-            if (watchUrlOrSlug.startsWith("http") || watchUrlOrSlug.contains("/watch/")) {
-                queryParams.add("url=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
-            } else if (!animeTitle.isNullOrBlank()) {
-                queryParams.add("keyword=${URLEncoder.encode(animeTitle.trim(), "UTF-8")}")
-            } else {
-                queryParams.add("keyword=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
-            }
-            queryParams.add("ep=$episode")
-
-            val url = "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
-            Log.d(TAG, "Fetching Seasons from API: $url")
-            val json = fetchJson(url)
-
-            if (json != null) {
-                val seasonsArray = json.optJSONArray("seasons")
-                if (seasonsArray != null && seasonsArray.length() > 0) {
-                    for (i in 0 until seasonsArray.length()) {
-                        val sObj = seasonsArray.optJSONObject(i) ?: continue
-                        val title = sObj.optString("title", "Season ${i + 1}").trim()
-                        val link = sObj.optString("link", "").trim()
-                        val poster = sObj.optString("poster", "").trim()
-                        val subCount = sObj.optString("subCount", "")
-                        val dubCount = sObj.optString("dubCount", "")
-                        val finalWatch = link.ifBlank { watchUrlOrSlug }
-
-                        val cleanT = title.lowercase().trim()
-                        val normalizedWatch = finalWatch.removeSuffix("/").lowercase()
-
-                        if (!seenWatchUrls.contains(normalizedWatch) && !seenTitles.contains(cleanT)) {
-                            seenWatchUrls.add(normalizedWatch)
-                            seenTitles.add(cleanT)
-                            rawSeasonsList.add(
-                                AnikotoSeason(
-                                    number = i + 1,
-                                    title = title,
-                                    watchUrl = finalWatch,
-                                    posterUrl = poster,
-                                    subCount = subCount,
-                                    dubCount = dubCount
-                                )
-                            )
-                        }
-                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Franchise season search failed: ${e.message}")
                 }
             }
+
         } catch (e: Exception) {
-            Log.e(TAG, "fetchSeasons API error: ${e.message}", e)
+            Log.e(TAG, "fetchSeasons error: ${e.message}", e)
         }
 
-        // Deep Franchise Discovery: Search for all related parts, cours, specials & movies
-        // (e.g. Mushoku Tensei Season 1, Part 2, Season 2 Part 1, Season 2 Part 2, Season 3, OVA/Movie)
-        try {
-            val targetName = (animeTitle ?: watchUrlOrSlug).trim()
-            val cleanTarget = sanitizeSearchTitle(targetName)
-            val baseFranchise = cleanTarget
-                .substringBefore(":")
-                .substringBefore("–")
-                .substringBefore("-")
-                .replace(Regex("""(?i)\b(season|part|cour|the movie|movie|final|ova|special|chapter|arc)\b.*"""), "")
-                .trim()
-
-            if (baseFranchise.length >= 3) {
-                val franchiseResults = searchOrFilterAnime(keyword = baseFranchise)
-                val baseWords = baseFranchise.lowercase().split(Regex("""\s+""")).filter { it.length >= 3 }
-                for (item in franchiseResults) {
-                    val itemTitleLower = item.title.lowercase()
-                    val matchesFranchise = baseWords.isNotEmpty() && baseWords.all { itemTitleLower.contains(it) }
-                    if (matchesFranchise && item.watchUrl.isNotBlank()) {
-                        val normWatch = item.watchUrl.removeSuffix("/").lowercase()
-                        val normTitle = item.title.lowercase().trim()
-                        if (!seenWatchUrls.contains(normWatch) && !seenTitles.contains(normTitle)) {
-                            seenWatchUrls.add(normWatch)
-                            seenTitles.add(normTitle)
-                            rawSeasonsList.add(
-                                AnikotoSeason(
-                                    number = rawSeasonsList.size + 1,
-                                    title = item.title,
-                                    watchUrl = item.watchUrl,
-                                    posterUrl = item.posterUrl,
-                                    subCount = item.subCount,
-                                    dubCount = item.dubCount
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Franchise discovery error: ${e.message}")
+        if (seasons.isEmpty()) {
+            seasons.add(AnikotoSeason(number = 1, title = "Season 1", watchUrl = watchUrlOrSlug))
         }
 
-        if (rawSeasonsList.isEmpty()) {
-            rawSeasonsList.add(AnikotoSeason(number = 1, title = animeTitle ?: "Season 1", watchUrl = watchUrlOrSlug))
-        }
-
-        // Sort all franchise parts chronologically / logically
-        val sortedSeasons = rawSeasonsList.sortedWith(
-            compareBy<AnikotoSeason> { getSeasonSortRank(it.title).first }
-                .thenBy { getSeasonSortRank(it.title).second }
+        val distinctSeasons = seasons.distinctBy { it.watchUrl }
+        val sorted = distinctSeasons.sortedWith(
+            compareBy<AnikotoSeason> { it.number }
                 .thenBy { it.title }
         )
 
-        // Assign clean 1-based sequential season numbers so all parts are accessible
-        val finalSeasons = sortedSeasons.mapIndexed { index, season ->
-            season.copy(number = index + 1)
+        val finalSeasons = mutableListOf<AnikotoSeason>()
+        var nextNum = 1
+        for (s in sorted) {
+            val assignedNum = if (finalSeasons.none { it.number == s.number }) s.number else nextNum
+            finalSeasons.add(s.copy(number = assignedNum))
+            nextNum = maxOf(nextNum, assignedNum) + 1
         }
 
-        Log.d(TAG, "fetchSeasons resolved ${finalSeasons.size} parts/seasons for: ${animeTitle ?: watchUrlOrSlug}")
-        finalSeasons
-    }
-
-    private fun getSeasonSortRank(title: String): Pair<Int, Int> {
-        val lower = title.lowercase()
-        val isSpecial = lower.contains("movie") || lower.contains("ova") || lower.contains("special") || lower.contains("the movie")
-        
-        val sRegex = Regex("""(?i)(?:season|s)\s*(\d+)""")
-        val sMatch = sRegex.find(lower)
-        val seasonNum = sMatch?.groupValues?.get(1)?.toIntOrNull() ?: if (isSpecial) 999 else 1
-
-        val pRegex = Regex("""(?i)(?:part|cour)\s*(\d+)""")
-        val pMatch = pRegex.find(lower)
-        val partNum = pMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
-
-        return Pair(if (isSpecial) 999 else seasonNum, partNum)
+        finalSeasons.sortedBy { it.number }
     }
 
     /**
-     * 3. Fetch Anime Details from API
+     * Detail Extraction API
      */
-    suspend fun fetchAnimeDetails(watchUrlOrSlug: String, episode: Int = 1): AnikotoDetails? = withContext(Dispatchers.IO) {
+    suspend fun fetchAnimeDetails(watchUrlOrSlug: String): AnikotoDetails? = withContext(Dispatchers.IO) {
         try {
-            val queryParams = mutableListOf<String>()
-            if (watchUrlOrSlug.startsWith("http") || watchUrlOrSlug.contains("/watch/")) {
-                queryParams.add("url=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
-            } else {
-                queryParams.add("keyword=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
+            var fullUrl = watchUrlOrSlug
+            if (!fullUrl.startsWith("http")) {
+                fullUrl = "$BASE_URL/watch/$watchUrlOrSlug"
             }
-            queryParams.add("ep=$episode")
+            val html = fetchHtml(fullUrl, referer = "$BASE_URL/")
+            if (html.isBlank()) return@withContext null
 
-            val url = "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
-            val json = fetchJson(url) ?: return@withContext null
-
-            val animeObj = json.optJSONObject("anime")
-            val title = animeObj?.optString("title") ?: animeObj?.optString("baseTitle") ?: ""
-            val poster = animeObj?.optString("poster") ?: ""
-            val totalEpisodes = animeObj?.optInt("totalEpisodes", 0) ?: 0
-            val seasonsArray = json.optJSONArray("seasons")
-            val episodesArray = json.optJSONArray("allEpisodes")
-
-            val epCount = if (totalEpisodes > 0) totalEpisodes else (episodesArray?.length() ?: 12)
-            val seasonCount = if (seasonsArray != null && seasonsArray.length() > 0) seasonsArray.length() else 1
-
-            var finalPoster = sanitizePosterUrl(poster)
-            var finalDesc = ""
-            var finalRating = "8.5"
-            var finalYear = "2024"
-
-            // Enrich with AniList GraphQL / Jikan HD Metadata if needed
-            if (title.isNotBlank()) {
-                val enhanced = AnimePosterEngine.getAnimePosterAndBanner(title)
-                if (enhanced != null) {
-                    if (finalPoster.isBlank() || enhanced.posterUrl.isNotBlank()) {
-                        finalPoster = enhanced.posterUrl.ifBlank { finalPoster }
-                    }
-                    if (enhanced.description.isNotBlank()) finalDesc = enhanced.description
-                    if (enhanced.rating.isNotBlank()) finalRating = enhanced.rating
-                    if (enhanced.year.isNotBlank()) finalYear = enhanced.year
+            val doc = Jsoup.parse(html, fullUrl)
+            val title = doc.selectFirst(".name.d-title, .film-name, h2.title, h1")?.text()?.trim() ?: ""
+            
+            // Prefer itemprop="image" or thumbnail images from CDN (never logo.png)
+            val imgEl = doc.selectFirst("img[itemprop='image'], .ani.poster img, .film-poster img, .poster img[src*='thumbnail'], img[src*='anipixcdn.co'], img[src*='thumbnail']")
+                ?: doc.select("img").firstOrNull { 
+                    val src = it.attr("src")
+                    !src.contains("logo", ignoreCase = true) && (src.contains("http") || src.startsWith("/"))
                 }
+            var posterUrl = imgEl?.attr("src")?.takeIf { it.isNotBlank() }
+                ?: imgEl?.attr("data-src")?.takeIf { it.isNotBlank() }
+                ?: ""
+            if (posterUrl.startsWith("//")) {
+                posterUrl = "https:$posterUrl"
+            } else if (posterUrl.startsWith("/") && !posterUrl.startsWith("//")) {
+                posterUrl = "$BASE_URL$posterUrl"
             }
+
+            val description = doc.selectFirst(".description, .film-description, .text-dimmed")?.text()?.trim() ?: ""
+            val rating = doc.selectFirst(".rating, .imdb-rating, .tick-item.tick-imdb")?.text()?.trim() ?: ""
+            val releaseYear = doc.selectFirst(".year, .release-year")?.text()?.trim() ?: ""
+
+            val seasons = fetchSeasons(fullUrl, title)
+            val episodes = fetchEpisodes(fullUrl)
 
             return@withContext AnikotoDetails(
                 title = title,
-                posterUrl = finalPoster,
-                description = finalDesc,
-                rating = finalRating,
-                releaseYear = finalYear,
-                totalSeasons = seasonCount,
-                totalEpisodes = epCount
+                posterUrl = posterUrl,
+                description = description,
+                rating = rating,
+                releaseYear = releaseYear,
+                totalSeasons = seasons.size,
+                totalEpisodes = episodes.size
             )
         } catch (e: Exception) {
             Log.e(TAG, "fetchAnimeDetails error: ${e.message}", e)
-            null
         }
+        null
     }
 
     /**
-     * 4. Fetch Episode List for a given anime / season from API
+     * 2. Episode Extraction API
+     * Pipeline:
+     * - Checks internal anime ID from DOM, script tags, and URL slug
+     * - Hits GET https://anikoto.cz/ajax/episode/list/{anime_internal_id}
+     * - Hits fallback endpoints for full coverage
+     * - Parses each episode with episode_id (data-id) and data-ids token
      */
-    suspend fun fetchEpisodes(watchUrlOrSlug: String, episode: Int = 1): List<AnikotoEpisode> = withContext(Dispatchers.IO) {
+    suspend fun fetchEpisodes(watchUrlOrSlug: String): List<AnikotoEpisode> = withContext(Dispatchers.IO) {
         val episodes = mutableListOf<AnikotoEpisode>()
         try {
-            // First check direct episodes endpoint if slug/id is provided
-            val cleanSlug = watchUrlOrSlug.substringAfterLast("/watch/").substringBefore("?").trimEnd('/')
-            if (cleanSlug.isNotBlank() && !cleanSlug.startsWith("http")) {
-                val epUrl = "$API_BASE_URL/api/anikoto/episodes/${URLEncoder.encode(cleanSlug, "UTF-8")}"
-                val epJson = fetchJson(epUrl)
-                val epList = epJson?.optJSONArray("episodes") ?: epJson?.optJSONArray("allEpisodes")
-                if (epList != null && epList.length() > 0) {
-                    for (i in 0 until epList.length()) {
-                        val epObj = epList.optJSONObject(i) ?: continue
-                        val epNum = epObj.optString("episode", "${i + 1}").toIntOrNull() ?: (i + 1)
-                        val epTitle = epObj.optString("title", "Episode $epNum")
-                        val epId = epObj.optString("id", "$epNum")
-                        episodes.add(
-                            AnikotoEpisode(
-                                id = epId,
-                                number = epNum,
-                                title = if (epTitle.isBlank()) "Episode $epNum" else epTitle,
-                                dataIdsToken = epId
-                            )
-                        )
+            var fullUrl = watchUrlOrSlug
+            if (!fullUrl.startsWith("http")) {
+                fullUrl = "$BASE_URL/watch/$watchUrlOrSlug"
+            }
+
+            Log.d(TAG, "Fetching episode list for: $fullUrl (Referer: $fullUrl)")
+            val html = fetchHtml(fullUrl, referer = "$BASE_URL/")
+            val doc = if (html.isNotBlank()) Jsoup.parse(html, fullUrl) else null
+
+            // 1. Get internal anime ID from DOM, script tags, or URL slug
+            val animeDataIds = mutableListOf<String>()
+
+            if (doc != null) {
+                val dataIdAttr = doc.selectFirst(".anis-watch-wrap[data-id], #wrapper[data-id], .film_detail[data-id], #detail-infor[data-id], .watch-player[data-id], [data-id]")?.attr("data-id") ?: ""
+                if (dataIdAttr.isNotBlank() && dataIdAttr.length <= 15) {
+                    animeDataIds.add(dataIdAttr)
+                }
+
+                val inputId = doc.selectFirst("input#movie_id, input#anime_id, input[name='movie_id'], input[name='anime_id']")?.attr("value") ?: ""
+                if (inputId.isNotBlank() && !animeDataIds.contains(inputId)) {
+                    animeDataIds.add(inputId)
+                }
+
+                val scriptText = doc.html()
+                val match = Regex("""(?:data-id|anime_id|animeId|movie_id|film_id|syncId)\s*[:=]\s*["']?([a-zA-Z0-9_-]+)["']?""").find(scriptText)
+                if (match != null) {
+                    val idFromScript = match.groupValues.getOrNull(1) ?: ""
+                    if (idFromScript.isNotBlank() && !animeDataIds.contains(idFromScript)) {
+                        animeDataIds.add(idFromScript)
                     }
                 }
             }
 
-            // If empty, query stream get endpoint
-            if (episodes.isEmpty()) {
-                val queryParams = mutableListOf<String>()
-                if (watchUrlOrSlug.startsWith("http") || watchUrlOrSlug.contains("/watch/")) {
-                    queryParams.add("url=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
-                } else {
-                    queryParams.add("keyword=${URLEncoder.encode(watchUrlOrSlug.trim(), "UTF-8")}")
+            // Slug id e.g. solo-leveling-lh0li/ep-1 -> lh0li, or naruto-674 -> 674
+            val cleanPath = fullUrl.substringBefore("/ep-").substringBefore("?").trimEnd('/')
+            val lastDash = cleanPath.substringAfterLast("-").substringAfterLast("/")
+            if (lastDash.isNotBlank() && lastDash.length in 2..12 && !animeDataIds.contains(lastDash)) {
+                animeDataIds.add(lastDash)
+            }
+
+            val ajaxUrls = mutableListOf<String>()
+            for (id in animeDataIds) {
+                ajaxUrls.add("$AJAX_URL/episode/list/$id")
+                ajaxUrls.add("$BASE_URL/ajax/v2/episode/list/$id")
+                ajaxUrls.add("$BASE_URL/ajax/episode/list/$id")
+                ajaxUrls.add("$AJAX_URL/season/episodes/$id")
+                ajaxUrls.add("$AJAX_URL/panel?id=$id")
+            }
+
+            for (ajaxUrl in ajaxUrls) {
+                try {
+                    val request = Request.Builder()
+                        .url(ajaxUrl)
+                        .header("User-Agent", DEFAULT_UA)
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("Referer", fullUrl)
+                        .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                        .build()
+
+                    val res = httpClient.newCall(request).execute()
+                    val body = res.body?.string() ?: ""
+                    var resultHtml = body
+                    if (body.startsWith("{")) {
+                        val jsObj = JSONObject(body)
+                        resultHtml = jsObj.optString("result", jsObj.optString("html", jsObj.optString("data", body)))
+                    }
+
+                    if (resultHtml.isNotBlank()) {
+                        val epDoc = Jsoup.parse(resultHtml)
+                        val epElements = epDoc.select(".episodes.name a, .ep-range a, a[data-id], a[data-ids], a.ep-item, li[title] a, .episodes a, .ssl-item, .ep-item, a[href*='?ep='], a[href*='/ep-']")
+                        for (epEl in epElements) {
+                            val dataId = epEl.attr("data-id").ifEmpty { epEl.attr("data-ids") }.ifEmpty { epEl.attr("data-number") }.ifEmpty { epEl.attr("id") }
+                            val dataIds = epEl.attr("data-ids").ifEmpty { epEl.attr("data-id") }.ifEmpty { dataId }
+
+                            val num = epEl.attr("data-number").toIntOrNull()
+                                ?: epEl.attr("data-num").toIntOrNull()
+                                ?: epEl.attr("data-slug").toIntOrNull()
+                                ?: epEl.selectFirst(".ssli-order, .order, .ep-order, .num, .number, .ep-no")?.text()?.trim()?.toIntOrNull()
+                                ?: Regex("""[?&]ep=(\d+)""").find(epEl.attr("href"))?.groupValues?.get(1)?.toIntOrNull()
+                                ?: Regex("""/ep-(\d+)""").find(epEl.attr("href"))?.groupValues?.get(1)?.toIntOrNull()
+                                ?: Regex("""(?i)\b(?:Episode|Ep\.?|#)\s*(\d+)\b""").find(epEl.attr("title").ifEmpty { epEl.text() })?.groupValues?.get(1)?.toIntOrNull()
+                                ?: (episodes.size + 1)
+
+                            val rawTitle = epEl.attr("title").ifEmpty { epEl.parent()?.attr("title") ?: "" }
+                            val innerName = epEl.selectFirst(".ep-name, .ssli-detail .name, .d-title, .ep-title, .name")?.text()?.trim() ?: ""
+                            val title = when {
+                                innerName.isNotBlank() && !innerName.equals("Episode $num", ignoreCase = true) -> "Episode $num: $innerName"
+                                rawTitle.isNotBlank() -> rawTitle
+                                else -> epEl.text().trim().ifEmpty { "Episode $num" }
+                            }
+
+                            if (dataId.isNotBlank() && episodes.none { it.number == num }) {
+                                episodes.add(
+                                    AnikotoEpisode(
+                                        id = dataId,
+                                        number = num,
+                                        title = title,
+                                        dataIdsToken = dataIds
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    if (episodes.isNotEmpty()) break
+                } catch (e: Exception) {
+                    Log.w(TAG, "ajax episode list attempt failed for $ajaxUrl: ${e.message}")
                 }
-                queryParams.add("ep=$episode")
+            }
 
-                val url = "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
-                Log.d(TAG, "Fetching Episodes from API: $url")
-                val json = fetchJson(url)
-
-                if (json != null) {
-                    val allEpisodesArray = json.optJSONArray("allEpisodes")
-                    if (allEpisodesArray != null && allEpisodesArray.length() > 0) {
-                        for (i in 0 until allEpisodesArray.length()) {
-                            val epObj = allEpisodesArray.optJSONObject(i) ?: continue
-                            val epNum = epObj.optString("episode", "${i + 1}").toIntOrNull() ?: (i + 1)
-                            val epTitle = epObj.optString("title", "Episode $epNum")
-                            val epId = epObj.optString("id", "$epNum")
+            // Fallback: parse direct on-page episode links if ajax was empty
+            if (episodes.isEmpty() && doc != null) {
+                val onPageEps = doc.select(".episodes.name a, .ep-range a, a[data-id], a[data-ids], .ss-list a, .ep-item, a[href*='/ep-'], a[href*='?ep='], #episodes a, .film-episodes a")
+                for (epEl in onPageEps) {
+                    val href = epEl.attr("href")
+                    if (href.contains("/ep-") || href.contains("?ep=") || epEl.hasAttr("data-id") || epEl.hasAttr("data-number")) {
+                        val dataId = epEl.attr("data-id").ifEmpty { epEl.attr("data-ids") }.ifEmpty { epEl.attr("data-number") }
+                        val dataIds = epEl.attr("data-ids").ifEmpty { dataId }
+                        val num = epEl.attr("data-number").toIntOrNull()
+                            ?: epEl.attr("data-num").toIntOrNull()
+                            ?: Regex("""/ep-(\d+)""").find(href)?.groupValues?.get(1)?.toIntOrNull()
+                            ?: Regex("""[?&]ep=(\d+)""").find(href)?.groupValues?.get(1)?.toIntOrNull()
+                            ?: (episodes.size + 1)
+                        val rawTitle = epEl.attr("title").ifEmpty { epEl.text().trim() }
+                        val title = if (rawTitle.isNotBlank()) rawTitle else "Episode $num"
+                        if (episodes.none { it.number == num }) {
                             episodes.add(
                                 AnikotoEpisode(
-                                    id = epId,
-                                    number = epNum,
-                                    title = if (epTitle.isBlank()) "Episode $epNum" else epTitle,
-                                    dataIdsToken = epId
+                                    id = dataId,
+                                    number = num,
+                                    title = title,
+                                    dataIdsToken = dataIds
                                 )
                             )
-                        }
-                    } else {
-                        val animeObj = json.optJSONObject("anime")
-                        val totalEp = animeObj?.optInt("totalEpisodes", 12) ?: 12
-                        for (i in 1..totalEp) {
-                            episodes.add(AnikotoEpisode(id = "$i", number = i, title = "Episode $i", dataIdsToken = "$i"))
                         }
                     }
                 }
@@ -734,23 +842,324 @@ object AnikotoScraper {
         }
 
         if (episodes.isEmpty()) {
-            val directEps = scrapeAnikotoEpisodesDirect(watchUrlOrSlug)
-            if (directEps.isNotEmpty()) {
-                episodes.addAll(directEps)
-            }
-        }
-
-        if (episodes.isEmpty()) {
-            for (i in 1..12) {
-                episodes.add(AnikotoEpisode(id = "$i", number = i, title = "Episode $i", dataIdsToken = "$i"))
-            }
+            episodes.add(AnikotoEpisode(id = "1", number = 1, title = "Episode 1"))
         }
 
         episodes.distinctBy { it.number }.sortedBy { it.number }
     }
 
     /**
-     * 5. Fetch available SUB & DUB streaming servers from API in parallel for high speed
+     * 3. Server & Sub/Dub Sources Extraction API
+     * Routes:
+     * - GET https://anikoto.cz/ajax/episode/servers?episodeId={episode_id}
+     * - GET https://anikoto.cz/ajax/server/list?servers={dataIdsToken}
+     */
+    suspend fun fetchServers(dataIdsToken: String, refererUrl: String = BASE_URL): List<AnikotoServer> = withContext(Dispatchers.IO) {
+        val servers = mutableListOf<AnikotoServer>()
+        if (dataIdsToken.isBlank()) return@withContext servers
+        try {
+            val urls = listOf(
+                "$AJAX_URL/episode/servers?episodeId=${URLEncoder.encode(dataIdsToken, "UTF-8")}",
+                "$AJAX_URL/server/list?servers=${URLEncoder.encode(dataIdsToken, "UTF-8")}"
+            )
+
+            for (url in urls) {
+                try {
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("User-Agent", DEFAULT_UA)
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("Referer", refererUrl)
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    val body = response.body?.string() ?: ""
+                    var resultHtml = body
+                    if (body.startsWith("{")) {
+                        val jsObj = JSONObject(body)
+                        resultHtml = jsObj.optString("result", jsObj.optString("html", body))
+                    }
+
+                    if (resultHtml.isNotBlank()) {
+                        val doc = Jsoup.parse(resultHtml)
+                        val serverItems = doc.select(".servers li[data-link-id], .server-item[data-link-id], .ps__-list .item, [data-link-id], [data-id], .btn-server")
+                        for (item in serverItems) {
+                            val linkId = item.attr("data-link-id").ifEmpty { item.attr("data-id") }.trim()
+                            var name = item.text().trim().ifEmpty { "Server" }
+                            val parentWithType = item.parents().firstOrNull { it.hasAttr("data-type") }
+                            val type = parentWithType?.attr("data-type")
+                                ?: item.attr("data-type").takeIf { it.isNotBlank() }
+                                ?: if (item.parents().any { it.className().contains("dub", ignoreCase = true) || it.id().contains("dub", ignoreCase = true) }) "dub" else "sub"
+                            val svId = item.attr("data-sv-id").ifEmpty { item.attr("data-server-id") }.trim()
+
+                            if (name == "-1" || name.equals("null", ignoreCase = true) || name.contains("vid", ignoreCase = true) || name.contains("stream", ignoreCase = true) || name.contains("play", ignoreCase = true)) {
+                                name = "Server"
+                            }
+
+                            if (linkId.isNotBlank() && linkId != "-1" && !linkId.equals("null", ignoreCase = true)) {
+                                servers.add(
+                                    AnikotoServer(
+                                        id = svId,
+                                        linkId = linkId,
+                                        name = name,
+                                        type = type
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    if (servers.isNotEmpty()) break
+                } catch (e: Exception) {
+                    Log.w(TAG, "fetchServers attempt failed for $url: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchServers error: ${e.message}")
+        }
+        servers
+    }
+
+    /**
+     * 4. Embed Iframe / Video Source Decryption API
+     * Routes:
+     * - GET https://anikoto.cz/ajax/episode/sources?id={server_data_id}
+     * - GET https://anikoto.cz/ajax/server?get={linkId}
+     * Response: {"type": "iframe", "link": "https://megacloud.tv/embed-2/e-1/{hash}?z=", "server": 1}
+     */
+    suspend fun extractServerEmbedUrl(linkId: String, refererUrl: String = BASE_URL): String? = withContext(Dispatchers.IO) {
+        try {
+            val encodedId = URLEncoder.encode(linkId, "UTF-8")
+            val urls = listOf(
+                "$AJAX_URL/episode/sources?id=$encodedId",
+                "$AJAX_URL/server?get=$encodedId",
+                "$BASE_URL/ajax/v2/episode/sources?id=$encodedId"
+            )
+
+            for (url in urls) {
+                try {
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("User-Agent", DEFAULT_UA)
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("Referer", refererUrl)
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    val body = response.body?.string() ?: ""
+                    if (body.startsWith("{")) {
+                        val json = JSONObject(body)
+                        val resultObj = json.optJSONObject("result")
+                        var embedUrl = resultObj?.optString("link", resultObj.optString("url", "")) 
+                            ?: json.optString("link", json.optString("url", ""))
+                        if (embedUrl.isNotBlank()) {
+                            if (embedUrl.startsWith("//")) {
+                                embedUrl = "https:$embedUrl"
+                            } else if (embedUrl.startsWith("/")) {
+                                embedUrl = "$BASE_URL$embedUrl"
+                            }
+                            return@withContext embedUrl
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "extractServerEmbedUrl attempt failed for $url: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "extractServerEmbedUrl error: ${e.message}")
+        }
+        null
+    }
+
+    /**
+     * 5. Deep Master M3U8 & Subtitles Extractor from Embed Player
+     */
+    suspend fun extractM3u8AndSubtitlesFromEmbed(embedUrl: String): AnikotoStreamResult? = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Deep Scraping Embed Player: $embedUrl")
+            val embedUri = Uri.parse(embedUrl)
+            val host = embedUri.host ?: "megaplay.buzz"
+            val embedOrigin = "${embedUri.scheme ?: "https"}://$host"
+
+            val request = Request.Builder()
+                .url(embedUrl)
+                .header("User-Agent", DEFAULT_UA)
+                .header("Referer", BASE_URL)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val html = response.body?.string() ?: ""
+
+            var m3u8Url: String? = null
+            val subtitles = mutableListOf<AnikotoSubtitle>()
+
+            // 1. Gather all candidate IDs from HTML attributes, data-realid, and URL path
+            val doc = Jsoup.parse(html)
+            val playerEl = doc.selectFirst("#megaplay-player, [data-id], .fix-area")
+            val realIdAttr = playerEl?.attr("data-realid")?.takeIf { it.isNotBlank() }
+            val dataIdAttr = playerEl?.attr("data-id")?.takeIf { it.isNotBlank() }
+            val pathId = Regex("""/(\d+)(?:/|$)""").find(embedUrl)?.groupValues?.get(1)
+            val lastSeg = embedUri.lastPathSegment?.substringBefore("?") ?: ""
+            val lastSegId = if (lastSeg.all { it.isDigit() } && lastSeg.isNotBlank()) lastSeg else null
+
+            val candidateIds = listOfNotNull(realIdAttr, pathId, lastSegId, dataIdAttr).distinct()
+            Log.d(TAG, "Embed candidate IDs: $candidateIds from $embedUrl")
+
+            // 2. Query stream/getSources endpoint
+            for (candidateId in candidateIds) {
+                if (m3u8Url != null) break
+                val sourceEndpoints = listOf(
+                    "$embedOrigin/stream/getSources?id=$candidateId",
+                    "$embedOrigin/stream/getSourcesNew?id=$candidateId",
+                    "$embedOrigin/embed-2/ajax/e-1/getSources?id=$candidateId",
+                    "$embedOrigin/ajax/getSources?id=$candidateId"
+                )
+
+                for (sourceUrl in sourceEndpoints) {
+                    try {
+                        val srcReq = Request.Builder()
+                            .url(sourceUrl)
+                            .header("User-Agent", DEFAULT_UA)
+                            .header("Referer", embedUrl)
+                            .header("Origin", embedOrigin)
+                            .header("X-Requested-With", "XMLHttpRequest")
+                            .build()
+
+                        val srcRes = httpClient.newCall(srcReq).execute()
+                        val srcBody = srcRes.body?.string() ?: ""
+                        if (srcRes.isSuccessful && srcBody.startsWith("{")) {
+                            val json = JSONObject(srcBody)
+                            
+                            // Check sources object or array
+                            val sourcesObj = json.optJSONObject("sources")
+                            val fileFromObj = sourcesObj?.optString("file", "")
+                            if (!fileFromObj.isNullOrBlank()) {
+                                m3u8Url = fileFromObj
+                            } else {
+                                val sourcesArr = json.optJSONArray("sources")
+                                if (sourcesArr != null && sourcesArr.length() > 0) {
+                                    val firstItem = sourcesArr.optJSONObject(0)
+                                    val fileFromArr = firstItem?.optString("file", "")
+                                    if (!fileFromArr.isNullOrBlank()) {
+                                        m3u8Url = fileFromArr
+                                    }
+                                }
+                            }
+
+                            // Check encrypted payload ("enc") if unencrypted sources not found
+                            if (m3u8Url.isNullOrBlank()) {
+                                val enc = json.optString("enc", "")
+                                if (enc.isNotBlank()) {
+                                    var decText = decryptMegaplayEnc(enc)
+                                    if (decText.isNullOrBlank() || !decText.contains("m3u8")) {
+                                        refreshMegaplayKeysFromScript(embedOrigin)
+                                        decText = decryptMegaplayEnc(enc)
+                                    }
+                                    if (!decText.isNullOrBlank()) {
+                                        Log.d(TAG, "Decrypted Megaplay payload successfully")
+                                        if (decText.startsWith("{")) {
+                                            try {
+                                                val decJson = JSONObject(decText)
+                                                val f = decJson.optString("file", "")
+                                                if (f.isNotBlank()) {
+                                                    m3u8Url = f
+                                                }
+                                            } catch (_: Exception) {}
+                                        }
+                                        if (m3u8Url.isNullOrBlank()) {
+                                            val m = Regex("""https?://[^\s"']+\.m3u8[^\s"']*""").find(decText)
+                                            if (m != null) {
+                                                m3u8Url = m.value
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Extract subtitle tracks
+                            val tracksArr = json.optJSONArray("tracks")
+                            if (tracksArr != null) {
+                                for (i in 0 until tracksArr.length()) {
+                                    val track = tracksArr.optJSONObject(i) ?: continue
+                                    val file = track.optString("file", "")
+                                    val label = track.optString("label", "English")
+                                    val kind = track.optString("kind", "")
+                                    if (file.isNotBlank() && (kind == "captions" || file.endsWith(".vtt") || file.endsWith(".srt") || kind.isEmpty())) {
+                                        if (subtitles.none { it.url == file }) {
+                                            subtitles.add(
+                                                AnikotoSubtitle(
+                                                    url = file,
+                                                    lang = track.optString("lang", label.take(2).lowercase()),
+                                                    label = label,
+                                                    default = track.optBoolean("default", false)
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!m3u8Url.isNullOrBlank()) {
+                                break
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Source endpoint attempt failed for $sourceUrl: ${e.message}")
+                    }
+                }
+            }
+
+            // 3. Fallback: inspect nested iframe if needed
+            if (m3u8Url.isNullOrBlank()) {
+                val iframeSrc = doc.selectFirst("iframe[src]")?.attr("src")
+                if (!iframeSrc.isNullOrBlank() && !iframeSrc.startsWith("javascript") && iframeSrc != embedUrl) {
+                    val fullIframeUrl = if (iframeSrc.startsWith("http")) iframeSrc else "$embedOrigin$iframeSrc"
+                    val subRes = extractM3u8AndSubtitlesFromEmbed(fullIframeUrl)
+                    if (subRes != null && subRes.streamUrl.isNotBlank()) {
+                        return@withContext subRes
+                    }
+                }
+            }
+
+            // 4. Fallback Regex Parsing if not resolved
+            if (m3u8Url.isNullOrBlank()) {
+                val m3u8Regexes = listOf(
+                    """(?:file|source|src)\s*:\s*["'](https?://[^"']+\.m3u8[^"']*)["']""".toRegex(),
+                    """["'](https?://[^"']+\.m3u8[^"']*)["']""".toRegex(),
+                    """https?://[a-zA-Z0-9.\-_/:]+\.m3u8[a-zA-Z0-9._\-%&=?]*""".toRegex()
+                )
+
+                for (regex in m3u8Regexes) {
+                    val match = regex.find(html)
+                    if (match != null) {
+                        m3u8Url = match.groupValues.getOrNull(1) ?: match.value
+                        if (m3u8Url.isNotBlank()) break
+                    }
+                }
+            }
+
+            if (!m3u8Url.isNullOrBlank()) {
+                Log.d(TAG, "Successfully extracted master M3U8: $m3u8Url")
+                val streamHeaders = mapOf(
+                    "User-Agent" to DEFAULT_UA,
+                    "Referer" to "$embedOrigin/",
+                    "Origin" to embedOrigin
+                )
+
+                return@withContext AnikotoStreamResult(
+                    streamUrl = m3u8Url,
+                    headers = streamHeaders,
+                    referer = "$embedOrigin/",
+                    subtitles = subtitles
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "extractM3u8AndSubtitlesFromEmbed error: ${e.message}")
+        }
+        null
+    }
+
+    /**
+     * 6. High-Level Universal Extractor
      */
     suspend fun fetchAvailableServers(
         title: String,
@@ -758,377 +1167,126 @@ object AnikotoScraper {
         episode: Int = 1
     ): AnikotoServerGroup = withContext(Dispatchers.IO) {
         try {
-            val cleanTitle = sanitizeSearchTitle(title)
-            val rawClean = title.removePrefix("anikoto_").removePrefix("movie_").removePrefix("series_").trim()
-            val effectiveEp = if (episode <= 0) 1 else episode
-            Log.d(TAG, "Fetching available SUB / DUB servers via API for: $cleanTitle (raw: $rawClean, Ep $effectiveEp)")
-
-            val subServers = mutableListOf<AnikotoServer>()
-            val dubServers = mutableListOf<AnikotoServer>()
-            var resolvedWatchUrl = ""
-
-            // 1. First resolve exact Anikoto watch URL or slug
-            val directOrResolvedUrl = resolveAnikotoWatchUrl(rawClean) ?: resolveAnikotoWatchUrl(cleanTitle)
-            if (!directOrResolvedUrl.isNullOrBlank()) {
-                resolvedWatchUrl = directOrResolvedUrl
-            }
-
-            val queriesToTry = mutableListOf<String>()
-            if (!directOrResolvedUrl.isNullOrBlank()) {
-                queriesToTry.add(directOrResolvedUrl)
-            }
-            if (rawClean.startsWith("http://") || rawClean.startsWith("https://") || rawClean.contains("/watch/")) {
-                if (!queriesToTry.contains(rawClean)) queriesToTry.add(rawClean)
-            } else if (isAnikotoSlug(rawClean)) {
-                val slugWatch = "https://anikoto.cz/watch/$rawClean/ep-$effectiveEp"
-                if (!queriesToTry.contains(slugWatch)) queriesToTry.add(slugWatch)
-                if (!queriesToTry.contains(rawClean)) queriesToTry.add(rawClean)
-            }
-            if (!queriesToTry.contains(cleanTitle)) queriesToTry.add(cleanTitle)
-
-            val withoutArticle = cleanTitle.replace(Regex("^(The|A|An)\\s+", RegexOption.IGNORE_CASE), "").trim()
-            if (withoutArticle.isNotBlank() && !queriesToTry.contains(withoutArticle)) {
-                queriesToTry.add(withoutArticle)
-            }
-
-            if (season > 1) {
-                queriesToTry.add("$cleanTitle Season $season")
-                if (withoutArticle.isNotBlank()) queriesToTry.add("$withoutArticle Season $season")
-            }
-
-            val baseFranchise = cleanTitle.substringBefore(":").substringBefore("-").trim()
-            if (baseFranchise.isNotBlank() && !queriesToTry.contains(baseFranchise)) {
-                if (season > 1) queriesToTry.add("$baseFranchise Season $season")
-                queriesToTry.add(baseFranchise)
-            }
-
-            // Execute parallel fetch for candidate queries across SUB & DUB
-            for (queryCandidate in queriesToTry) {
-                if (subServers.isNotEmpty() && dubServers.isNotEmpty()) break
-
-                val subDeferred = async {
-                    val subUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "sub")
-                    fetchJson(subUrl)
-                }
-                val dubDeferred = async {
-                    val dubUrl = buildStreamGetUrl(title = queryCandidate, episode = effectiveEp, type = "dub")
-                    fetchJson(dubUrl)
-                }
-
-                val subJson = subDeferred.await()
-                val dubJson = dubDeferred.await()
-
-                if (subJson != null && subJson.optBoolean("success") == true) {
-                    if (resolvedWatchUrl.isBlank()) {
-                        val animeWatch = subJson.optJSONObject("anime")?.optString("watchUrl", "") ?: ""
-                        if (animeWatch.isNotBlank()) resolvedWatchUrl = animeWatch
+            Log.d(TAG, "Fetching available SUB / DUB servers for: $title (Ep $episode)")
+            val matchedWatchUrl = if (title.startsWith("http") || title.contains("anikoto.cz") || title.contains("/watch/")) {
+                title
+            } else {
+                var searchResults = searchOrFilterAnime(keyword = title)
+                
+                // Fallback 1: If empty, try splitting by typical punctuation and search first part
+                if (searchResults.isEmpty()) {
+                    val splitTitle = title.split(Regex("[:\\-–—]")).first().trim()
+                    if (splitTitle.isNotBlank() && splitTitle != title) {
+                        Log.d(TAG, "Fallback 1: Searching Anikoto with split prefix: $splitTitle")
+                        searchResults = searchOrFilterAnime(keyword = splitTitle)
                     }
-
-                    // First: Always add selectedStream as primary playable stream if available
-                    val selectedStreamObj = subJson.optJSONObject("selectedStream")
-                    if (selectedStreamObj != null) {
-                        val sUrl = makeAbsoluteUrl(selectedStreamObj.optString("streamUrl", ""))
-                        if (sUrl.isNotBlank()) {
-                            val referer = selectedStreamObj.optString("referer", "https://anikoto.cz/")
-                            val srvId = selectedStreamObj.optString("server", "HD-1")
-                            val srvAudio = selectedStreamObj.optString("audioType", "SUB").uppercase()
-                            val tracks = parseSubtitles(selectedStreamObj.optJSONArray("tracks"))
-                            val prioServer = AnikotoServer(
-                                id = srvId,
-                                linkId = sUrl,
-                                name = srvId,
-                                type = srvAudio.lowercase(),
-                                streamUrl = sUrl,
-                                rawUrl = sUrl,
-                                referer = referer,
-                                tracks = tracks
-                            )
-                            if (srvAudio == "DUB") {
-                                if (dubServers.none { it.id == prioServer.id }) dubServers.add(0, prioServer)
-                            } else {
-                                if (subServers.none { it.id == prioServer.id }) subServers.add(0, prioServer)
-                            }
-                        }
-                    }
-
-                    val availableServers = subJson.optJSONArray("availableServers")
-                    if (availableServers != null && availableServers.length() > 0) {
-                        for (i in 0 until availableServers.length()) {
-                            val srvObj = availableServers.optJSONObject(i) ?: continue
-                            val srvName = srvObj.optString("name", "Server ${i + 1}")
-                            val srvId = srvObj.optString("server", "HD-${i + 1}")
-                            val audioType = srvObj.optString("audioType", "SUB").uppercase()
-                            val isPlayableDirectly = srvObj.optBoolean("isPlayableDirectly", true)
-                            val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
-                            val rawUrl = srvObj.optString("rawUrl", "")
-                            val referer = srvObj.optString("referer", "https://anikoto.cz/")
-                            val tracks = parseSubtitles(srvObj.optJSONArray("tracks"))
-
-                            val isDownloadMirror = !isPlayableDirectly || streamUrl.contains("pahe") || streamUrl.contains("nekostream")
-                            val displayName = when {
-                                isDownloadMirror && (srvId.contains("p") || srvId.contains("1080") || srvId.contains("720") || srvId.contains("360")) -> "$srvId (Mirror)"
-                                srvName.isNotBlank() && !srvName.startsWith("DEMON KING") -> srvName
-                                srvId.isNotBlank() && !srvId.startsWith("DEMON KING") -> srvId
-                                else -> "Server ${i + 1}"
-                            }
-
-                            val parsedServer = AnikotoServer(
-                                id = srvId,
-                                linkId = streamUrl.ifBlank { rawUrl },
-                                name = displayName,
-                                type = audioType.lowercase(),
-                                streamUrl = streamUrl,
-                                rawUrl = rawUrl,
-                                referer = referer,
-                                tracks = tracks
-                            )
-
-                            if (audioType == "DUB") {
-                                if (dubServers.none { it.id == parsedServer.id && it.streamUrl == parsedServer.streamUrl }) {
-                                    if (isDownloadMirror) dubServers.add(parsedServer) else dubServers.add(0, parsedServer)
-                                }
-                            } else {
-                                if (subServers.none { it.id == parsedServer.id && it.streamUrl == parsedServer.streamUrl }) {
-                                    if (isDownloadMirror) subServers.add(parsedServer) else subServers.add(0, parsedServer)
-                                }
-                            }
-                        }
-                    } else {
-                        val selected = subJson.optJSONObject("selectedStream")
-                        if (selected != null && subServers.isEmpty()) {
-                            val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
-                            if (sUrl.isNotBlank()) {
-                                val referer = selected.optString("referer", "https://anikoto.cz/")
-                                val srvId = selected.optString("server", "HD-1")
-                                val tracks = parseSubtitles(selected.optJSONArray("tracks"))
-                                subServers.add(
-                                    AnikotoServer(
-                                        id = srvId,
-                                        linkId = sUrl,
-                                        name = srvId,
-                                        type = "sub",
-                                        streamUrl = sUrl,
-                                        rawUrl = sUrl,
-                                        referer = referer,
-                                        tracks = tracks
-                                    )
-                                )
-                            }
-                        }
+                }
+                
+                // Fallback 2: Try first 3 words
+                if (searchResults.isEmpty()) {
+                    val words = title.split(" ")
+                    if (words.size > 3) {
+                        val firstWords = words.take(3).joinToString(" ").trim()
+                        Log.d(TAG, "Fallback 2: Searching Anikoto with first 3 words: $firstWords")
+                        searchResults = searchOrFilterAnime(keyword = firstWords)
                     }
                 }
 
-                if (dubJson != null && dubJson.optBoolean("success") == true) {
-                    val availableServers = dubJson.optJSONArray("availableServers")
-                    if (availableServers != null && availableServers.length() > 0) {
-                        for (i in 0 until availableServers.length()) {
-                            val srvObj = availableServers.optJSONObject(i) ?: continue
-                            val srvId = srvObj.optString("server", "HD-${i + 1}")
-                            val srvName = srvObj.optString("name", "Server ${i + 1}")
-                            val audioType = srvObj.optString("audioType", "DUB").uppercase()
-                            val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
-                            val rawUrl = srvObj.optString("rawUrl", "")
-                            val referer = srvObj.optString("referer", "https://anikoto.cz/")
-                            val tracks = parseSubtitles(srvObj.optJSONArray("tracks"))
-
-                            if (audioType == "DUB") {
-                                val parsedServer = AnikotoServer(
-                                    id = srvId,
-                                    linkId = streamUrl.ifBlank { rawUrl },
-                                    name = if (srvName.isNotBlank() && !srvName.startsWith("DEMON KING")) srvName else srvId,
-                                    type = "dub",
-                                    streamUrl = streamUrl,
-                                    rawUrl = rawUrl,
-                                    referer = referer,
-                                    tracks = tracks
-                                )
-                                if (dubServers.none { it.id == parsedServer.id && it.streamUrl == parsedServer.streamUrl }) {
-                                    dubServers.add(parsedServer)
-                                }
-                            }
-                        }
+                // Fallback 3: Try removing apostrophes and quotes
+                if (searchResults.isEmpty()) {
+                    val cleanTitle = title.replace(Regex("['’\"‘]"), "").trim()
+                    if (cleanTitle != title) {
+                        Log.d(TAG, "Fallback 3: Searching Anikoto with clean title: $cleanTitle")
+                        searchResults = searchOrFilterAnime(keyword = cleanTitle)
                     }
                 }
+
+                // Fallback 4: Try first 2 words
+                if (searchResults.isEmpty()) {
+                    val words = title.split(" ")
+                    if (words.size > 2) {
+                        val firstTwoWords = words.take(2).joinToString(" ").trim()
+                        Log.d(TAG, "Fallback 4: Searching Anikoto with first 2 words: $firstTwoWords")
+                        searchResults = searchOrFilterAnime(keyword = firstTwoWords)
+                    }
+                }
+
+                if (searchResults.isEmpty()) {
+                    Log.w(TAG, "No search results found on Anikoto for: $title after all fallbacks")
+                    return@withContext AnikotoServerGroup(emptyList(), emptyList(), "", episode)
+                }
+
+                val cleanTarget = title.lowercase().replace(Regex("[^a-z0-9]"), "")
+                val matchedAnime = searchResults.minByOrNull { item ->
+                    val cleanItem = item.title.lowercase().replace(Regex("[^a-z0-9]"), "")
+                    when {
+                        cleanItem == cleanTarget -> 0
+                        cleanItem == "${cleanTarget}tv" || cleanItem == "tv${cleanTarget}" -> 1
+                        item.type.equals("tv", ignoreCase = true) && cleanItem.startsWith(cleanTarget) && !cleanItem.contains("road") && !cleanItem.contains("ova") && !cleanItem.contains("special") -> 2
+                        cleanTarget.startsWith(cleanItem) && !cleanItem.contains("road") && !cleanItem.contains("ova") -> 3
+                        cleanItem.startsWith(cleanTarget) && !cleanItem.contains("road") && !cleanItem.contains("ova") && !cleanItem.contains("special") -> 5
+                        cleanTarget.contains(cleanItem) && !cleanItem.contains("road") && !cleanItem.contains("ova") -> 6
+                        cleanItem.contains(cleanTarget) && !cleanItem.contains("road") && !cleanItem.contains("ova") -> 8
+                        else -> 100
+                    }
+                } ?: searchResults.first()
+                matchedAnime.watchUrl
             }
 
-            // Ensure at least fallback servers exist so UI is always interactive
-            if (subServers.isEmpty()) {
-                subServers.add(
-                    AnikotoServer(
-                        id = "sr-1",
-                        linkId = "sr-1",
-                        name = "sr-1",
-                        type = "sub",
-                        streamUrl = "",
-                        rawUrl = "",
-                        referer = "$API_BASE_URL/"
-                    )
-                )
-                subServers.add(
-                    AnikotoServer(
-                        id = "sr-2",
-                        linkId = "sr-2",
-                        name = "sr-2",
-                        type = "sub",
-                        streamUrl = "",
-                        rawUrl = "",
-                        referer = "$API_BASE_URL/"
-                    )
-                )
+            val seasons = fetchSeasons(matchedWatchUrl, title)
+            val seasonWatchUrl = seasons.find { it.number == season }?.watchUrl ?: matchedWatchUrl
+
+            val episodes = fetchEpisodes(seasonWatchUrl)
+            val targetEp = episodes.firstOrNull { it.number == episode }
+                ?: episodes.firstOrNull()
+                ?: return@withContext AnikotoServerGroup(emptyList(), emptyList(), seasonWatchUrl, episode)
+
+            val allServers = fetchServers(targetEp.dataIdsToken, seasonWatchUrl)
+            
+            // Clean server names and number them cleanly (Server 1, Server 2, Server 3)
+            val subServers = allServers.filter {
+                val t = it.type.lowercase()
+                t == "sub" || t == "hsub"
+            }.distinctBy { it.linkId }.mapIndexed { idx, srv ->
+                srv.copy(name = "Server ${idx + 1}")
             }
 
-            // Clean names for servers nicely
-            val cleanSub = subServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
-                var displayName = when {
-                    srv.id.isNotBlank() && !srv.id.startsWith("DEMON KING") -> srv.id
-                    srv.name.isNotBlank() && !srv.name.startsWith("DEMON KING") -> srv.name
-                    else -> "sr-${idx + 1}"
-                }
-                if (displayName.contains("HD-", ignoreCase = true)) {
-                    displayName = displayName.replace("HD-", "sr-", ignoreCase = true)
-                    displayName = displayName.replace("hd-", "sr-", ignoreCase = true)
-                }
-                if (displayName.startsWith("Server", ignoreCase = true)) {
-                    displayName = displayName.replace("Server ", "sr-", ignoreCase = true)
-                        .replace("Server", "sr-", ignoreCase = true)
-                }
-                srv.copy(id = srv.id.replace("HD-", "sr-", ignoreCase = true).replace("hd-", "sr-", ignoreCase = true), name = displayName)
-            }
-            val cleanDub = dubServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
-                var displayName = when {
-                    srv.id.isNotBlank() && !srv.id.startsWith("DEMON KING") -> srv.id
-                    srv.name.isNotBlank() && !srv.name.startsWith("DEMON KING") -> srv.name
-                    else -> "sr-${idx + 1}"
-                }
-                if (displayName.contains("HD-", ignoreCase = true)) {
-                    displayName = displayName.replace("HD-", "sr-", ignoreCase = true)
-                    displayName = displayName.replace("hd-", "sr-", ignoreCase = true)
-                }
-                if (displayName.startsWith("Server", ignoreCase = true)) {
-                    displayName = displayName.replace("Server ", "sr-", ignoreCase = true)
-                        .replace("Server", "sr-", ignoreCase = true)
-                }
-                srv.copy(id = srv.id.replace("HD-", "sr-", ignoreCase = true).replace("hd-", "sr-", ignoreCase = true), name = displayName)
+            val dubServers = allServers.filter {
+                it.type.lowercase() == "dub"
+            }.distinctBy { it.linkId }.mapIndexed { idx, srv ->
+                srv.copy(name = "Server ${idx + 1}")
             }
 
-            val finalWatchUrl = resolvedWatchUrl.ifBlank { directOrResolvedUrl ?: title }
-            Log.d(TAG, "API resolved ${cleanSub.size} SUB servers and ${cleanDub.size} DUB servers for $cleanTitle (watchUrl: $finalWatchUrl)")
-            AnikotoServerGroup(
-                subServers = cleanSub,
-                dubServers = cleanDub,
-                watchUrl = finalWatchUrl,
-                episodeNum = episode
+            Log.d(TAG, "Fetched ${subServers.size} SUB servers and ${dubServers.size} DUB servers for $title")
+            return@withContext AnikotoServerGroup(
+                subServers = subServers,
+                dubServers = dubServers,
+                watchUrl = seasonWatchUrl,
+                episodeNum = targetEp.number
             )
         } catch (e: Exception) {
             Log.e(TAG, "fetchAvailableServers error: ${e.message}", e)
-            val fallbackSub = listOf(
-                AnikotoServer(id = "sr-1", linkId = "sr-1", name = "sr-1", type = "sub", referer = "$API_BASE_URL/"),
-                AnikotoServer(id = "sr-2", linkId = "sr-2", name = "sr-2", type = "sub", referer = "$API_BASE_URL/")
-            )
-            AnikotoServerGroup(fallbackSub, emptyList(), title, episode)
+            AnikotoServerGroup(emptyList(), emptyList(), "", episode)
         }
     }
 
-    /**
-     * 6. Extract Direct Playable Stream from a specific selected server
-     */
     suspend fun extractStreamFromServer(
         server: AnikotoServer,
-        watchUrl: String = "",
+        watchUrl: String = BASE_URL,
         episode: Int = 1
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
-            val isDub = server.type.lowercase() == "dub"
-            val targetType = if (isDub) "dub" else "sub"
-            val effectiveEp = if (episode <= 0) 1 else episode
-            val cleanKw = watchUrl.removePrefix("anikoto_").trim()
-
-            // 1. If server already has a direct playable streamUrl (/api/stream/..., /api/proxy, or .m3u8)
-            if (server.streamUrl.isNotBlank() && (server.streamUrl.contains("/api/stream/") || server.streamUrl.contains("/api/proxy") || server.streamUrl.contains(".m3u8") || server.streamUrl.contains("master.m3u8"))) {
-                val finalUrl = makeAbsoluteUrl(server.streamUrl)
-                val referer = if (server.referer.isNotBlank()) server.referer else "https://anikoto.cz/"
-                Log.d(TAG, "extractStreamFromServer using direct server streamUrl: $finalUrl")
-                return@withContext ScrapedStreamResult(
-                    streamUrl = finalUrl,
-                    headers = mapOf(
-                        "User-Agent" to DEFAULT_UA,
-                        "Referer" to referer
-                    ),
-                    referer = referer,
-                    subtitles = server.tracks
-                )
-            }
-
-            // 2. Query the stream API with server ID and specific requested episode
-            val queryUrl = buildStreamGetUrl(
-                title = if (cleanKw.isNotBlank()) cleanKw else server.id,
-                episode = effectiveEp,
-                type = targetType,
-                server = if (server.id.contains("p") || server.id.contains("Mirror")) null else server.id
-            )
-            Log.d(TAG, "extractStreamFromServer querying: $queryUrl for Ep $effectiveEp")
-            val json = fetchJson(queryUrl)
-            val selected = json?.optJSONObject("selectedStream")
-            if (selected != null) {
-                val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
-                if (sUrl.isNotBlank()) {
-                    val referer = selected.optString("referer", "https://anikoto.cz/")
-                    val subtitles = parseSubtitles(selected.optJSONArray("tracks"))
+            val fullWatchUrl = if (watchUrl.isNotBlank()) watchUrl else BASE_URL
+            val embedUrl = extractServerEmbedUrl(server.linkId, fullWatchUrl)
+            if (!embedUrl.isNullOrBlank()) {
+                Log.d(TAG, "Extracting stream from server [${server.name}] embed: $embedUrl")
+                val streamResult = extractM3u8AndSubtitlesFromEmbed(embedUrl)
+                if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
                     return@withContext ScrapedStreamResult(
-                        streamUrl = sUrl,
-                        headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer),
-                        referer = referer,
-                        subtitles = if (subtitles.isNotEmpty()) subtitles else server.tracks
-                    )
-                }
-            }
-
-            // Fallback: Query direct stream by title
-            val fallbackDirect = getStreamByTitle(
-                title = if (cleanKw.isNotBlank()) cleanKw else watchUrl,
-                episode = effectiveEp,
-                preferDub = isDub
-            )
-            if (fallbackDirect != null && fallbackDirect.streamUrl.isNotBlank()) {
-                return@withContext fallbackDirect
-            }
-
-            // Fallback 1: If server.streamUrl is a direct HLS or MP4 stream
-            if (server.streamUrl.isNotBlank() && (server.streamUrl.endsWith(".m3u8") || server.streamUrl.endsWith(".mp4") || (server.streamUrl.contains("/m3u8") && !server.streamUrl.contains("/api/")))) {
-                val finalUrl = makeAbsoluteUrl(server.streamUrl)
-                val headers = mutableMapOf(
-                    "User-Agent" to DEFAULT_UA,
-                    "Referer" to if (server.referer.isNotBlank()) server.referer else "https://anikoto.cz/"
-                )
-                Log.d(TAG, "extractStreamFromServer returning direct server URL: $finalUrl")
-                return@withContext ScrapedStreamResult(
-                    streamUrl = finalUrl,
-                    headers = headers,
-                    referer = headers["Referer"] ?: "https://anikoto.cz/",
-                    subtitles = server.tracks
-                )
-            }
-
-            // Fallback: Use App Native Scraper directly on server linkId / rawUrl
-            val embedCandidate = server.linkId.ifBlank { server.rawUrl }
-            if (embedCandidate.isNotBlank()) {
-                val nativeResolved = UniversalAnimeDownloadScraper.resolveDirectMediaStream(
-                    embedUrl = embedCandidate,
-                    fallbackReferer = if (server.referer.isNotBlank()) server.referer else "https://anikoto.cz/"
-                )
-                if (nativeResolved.directUrl.isNotBlank()) {
-                    return@withContext ScrapedStreamResult(
-                        streamUrl = nativeResolved.directUrl,
-                        headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to nativeResolved.referer),
-                        referer = nativeResolved.referer,
-                        subtitles = nativeResolved.tracks.map {
-                            SubtitleTrack(
-                                url = it.url,
-                                lang = it.lang,
-                                label = it.label,
-                                default = it.default
-                            )
-                        }
+                        streamUrl = streamResult.streamUrl,
+                        headers = streamResult.headers,
+                        referer = streamResult.referer,
+                        subtitles = streamResult.subtitles.map { SubtitleTrack(it.url, it.lang, it.label, it.default) }
                     )
                 }
             }
@@ -1138,9 +1296,6 @@ object AnikotoScraper {
         null
     }
 
-    /**
-     * 7. Primary Endpoint: Get Instant Stream M3U8 & Subtitles from API
-     */
     suspend fun getStreamByTitle(
         title: String,
         season: Int = 1,
@@ -1148,336 +1303,90 @@ object AnikotoScraper {
         preferDub: Boolean = false
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
-            val effectiveEp = if (episode <= 0) 1 else episode
-            val audioType = if (preferDub) "dub" else "sub"
-            val cleanTitle = sanitizeSearchTitle(title)
-            val rawClean = title.removePrefix("anikoto_").removePrefix("movie_").removePrefix("series_").trim()
-            Log.d(TAG, "Initiating High-Power Anime API stream fetch for: $cleanTitle (S$season Ep $effectiveEp, audio: $audioType)")
-
-            // 1. Resolve exact Anikoto watch URL or slug
-            val directOrResolvedUrl = resolveAnikotoWatchUrl(rawClean) ?: resolveAnikotoWatchUrl(cleanTitle)
-            val queriesToTry = mutableListOf<String>()
-            if (!directOrResolvedUrl.isNullOrBlank()) {
-                queriesToTry.add(directOrResolvedUrl)
-            }
-            if (rawClean.startsWith("http://") || rawClean.startsWith("https://") || rawClean.contains("/watch/")) {
-                if (!queriesToTry.contains(rawClean)) queriesToTry.add(rawClean)
-            } else if (isAnikotoSlug(rawClean)) {
-                val slugWatch = "https://anikoto.cz/watch/$rawClean/ep-$effectiveEp"
-                if (!queriesToTry.contains(slugWatch)) queriesToTry.add(slugWatch)
-                if (!queriesToTry.contains(rawClean)) queriesToTry.add(rawClean)
-            }
-            if (!queriesToTry.contains(cleanTitle)) queriesToTry.add(cleanTitle)
-
-            val withoutArticle = cleanTitle.replace(Regex("^(The|A|An)\\s+", RegexOption.IGNORE_CASE), "").trim()
-            if (withoutArticle.isNotBlank() && !queriesToTry.contains(withoutArticle)) {
-                queriesToTry.add(withoutArticle)
-            }
-
-            var json: JSONObject? = null
-
-            for (candidate in queriesToTry) {
-                val apiUrl = buildStreamGetUrl(title = candidate, episode = effectiveEp, type = audioType)
-                val res = fetchJson(apiUrl)
-                if (res != null && res.optBoolean("success") == true) {
-                    val stream = res.optJSONObject("selectedStream")
-                    val servers = res.optJSONArray("availableServers")
-                    if (stream != null || (servers != null && servers.length() > 0)) {
-                        json = res
-                        break
-                    }
-                }
-            }
-
-            // Parse valid selectedStream from JSON response
-            if (json != null && json.optBoolean("success") == true) {
-                val selectedStream = json.optJSONObject("selectedStream")
-                if (selectedStream != null) {
-                    val rawStreamUrl = selectedStream.optString("streamUrl", "")
-                    if (rawStreamUrl.isNotBlank()) {
-                        val finalStreamUrl = makeAbsoluteUrl(rawStreamUrl)
-                        val referer = selectedStream.optString("referer", "$API_BASE_URL/")
-                        val subtitles = parseSubtitles(selectedStream.optJSONArray("tracks"))
-
-                        Log.d(TAG, "Anime Stream API successfully resolved: $finalStreamUrl with ${subtitles.size} subtitles")
-                        return@withContext ScrapedStreamResult(
-                            streamUrl = finalStreamUrl,
-                            headers = mapOf(
-                                "User-Agent" to DEFAULT_UA,
-                                "Referer" to referer
-                            ),
-                            referer = referer,
-                            subtitles = subtitles
-                        )
-                    }
+            Log.d(TAG, "Initiating Anikoto deep stream search for anime: $title (S$season Ep $episode)")
+            
+            val matchedWatchUrl = if (title.startsWith("http") || title.contains("anikoto.cz") || title.contains("/watch/")) {
+                title
+            } else {
+                // Step 1: Search Anikoto
+                val searchResults = searchOrFilterAnime(keyword = title)
+                if (searchResults.isEmpty()) {
+                    Log.w(TAG, "No search results found on Anikoto for: $title")
+                    return@withContext null
                 }
 
-                // Check availableServers inside JSON response
-                val availableServers = json.optJSONArray("availableServers")
-                if (availableServers != null && availableServers.length() > 0) {
-                    for (i in 0 until availableServers.length()) {
-                        val sObj = availableServers.optJSONObject(i) ?: continue
-                        val rawStream = sObj.optString("streamUrl", "").ifBlank { sObj.optString("rawUrl", "") }
-                        if (rawStream.isNotBlank()) {
-                            val resolvedUrl = makeAbsoluteUrl(rawStream)
-                            val referer = sObj.optString("referer", "$API_BASE_URL/")
-                            Log.d(TAG, "Anime Stream resolved via availableServers array: $resolvedUrl")
+                val cleanTarget = title.lowercase().replace(Regex("[^a-z0-9]"), "")
+                val matchedAnime = searchResults.minByOrNull { item ->
+                    val cleanItem = item.title.lowercase().replace(Regex("[^a-z0-9]"), "")
+                    when {
+                        cleanItem == cleanTarget -> 0
+                        cleanItem == "${cleanTarget}tv" || cleanItem == "tv${cleanTarget}" -> 1
+                        item.type.equals("tv", ignoreCase = true) && cleanItem.startsWith(cleanTarget) && !cleanItem.contains("road") && !cleanItem.contains("ova") && !cleanItem.contains("special") -> 2
+                        cleanItem.startsWith(cleanTarget) && !cleanItem.contains("road") && !cleanItem.contains("ova") && !cleanItem.contains("special") -> 5
+                        cleanItem.contains(cleanTarget) && !cleanItem.contains("road") && !cleanItem.contains("ova") -> 10
+                        else -> 100
+                    }
+                } ?: searchResults.first()
+
+                Log.d(TAG, "Matched Anikoto anime: ${matchedAnime.title} (${matchedAnime.watchUrl})")
+                matchedAnime.watchUrl
+            }
+
+            // Step 2: Fetch season watch URL
+            val seasons = fetchSeasons(matchedWatchUrl, title)
+            val seasonWatchUrl = seasons.find { it.number == season }?.watchUrl ?: matchedWatchUrl
+
+            // Step 3: Fetch episodes
+            val episodes = fetchEpisodes(seasonWatchUrl)
+            val targetEp = episodes.firstOrNull { it.number == episode }
+                ?: episodes.firstOrNull()
+                ?: return@withContext null
+
+            Log.d(TAG, "Selected Episode: #${targetEp.number} (token: ${targetEp.dataIdsToken.take(15)}...)")
+
+            // Step 4: Fetch servers
+            val servers = fetchServers(targetEp.dataIdsToken, seasonWatchUrl)
+            if (servers.isEmpty()) {
+                Log.w(TAG, "No streaming servers found for episode ${targetEp.number}")
+                return@withContext null
+            }
+
+            // Filter preferDub if requested, otherwise prioritize sub
+            val preferredServers = if (preferDub) {
+                servers.filter { it.type.equals("dub", ignoreCase = true) } + servers.filter { !it.type.equals("dub", ignoreCase = true) }
+            } else {
+                servers.filter { it.type.equals("sub", ignoreCase = true) } + servers.filter { !it.type.equals("sub", ignoreCase = true) }
+            }
+
+            // Step 5: Pick server and extract embed URL
+            for (srv in preferredServers) {
+                try {
+                    val embedUrl = extractServerEmbedUrl(srv.linkId, seasonWatchUrl)
+                    if (!embedUrl.isNullOrBlank()) {
+                        Log.d(TAG, "Extracted Embed URL: $embedUrl from ${srv.name}")
+                        val streamResult = extractM3u8AndSubtitlesFromEmbed(embedUrl)
+                        if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
                             return@withContext ScrapedStreamResult(
-                                streamUrl = resolvedUrl,
-                                headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer),
-                                referer = referer,
-                                subtitles = emptyList()
+                                streamUrl = streamResult.streamUrl,
+                                headers = streamResult.headers,
+                                referer = streamResult.referer,
+                                subtitles = streamResult.subtitles.map { SubtitleTrack(it.url, it.lang, it.label, it.default) }
                             )
                         }
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed server attempt ${srv.name}: ${e.message}")
                 }
-            }
-
-            // Fallback: Extract from available servers directly via fetchAvailableServers
-            try {
-                val serverGroup = fetchAvailableServers(title = cleanTitle, season = season, episode = effectiveEp)
-                val allServers = (serverGroup.subServers + serverGroup.dubServers).distinctBy { it.id.ifBlank { it.streamUrl } }
-                for (srv in allServers) {
-                    val serverStream = extractStreamFromServer(
-                        server = srv,
-                        watchUrl = directOrResolvedUrl ?: cleanTitle,
-                        episode = effectiveEp
-                    )
-                    if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
-                        return@withContext ScrapedStreamResult(
-                            streamUrl = serverStream.streamUrl,
-                            headers = serverStream.headers,
-                            referer = serverStream.referer,
-                            subtitles = serverStream.subtitles
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Available servers extraction error: ${e.message}")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "getStreamByTitle error: ${e.message}", e)
+            Log.e(TAG, "getStreamByTitle failed: ${e.message}", e)
         }
         null
     }
 
     /**
-     * Resolves the exact Anikoto watchUrl by querying search with aliases & calculating title similarity
+     * Builds a Media3 MediaItem with all scraped subtitle tracks configured
      */
-    suspend fun resolveAnikotoWatchUrl(titleOrSlug: String): String? = withContext(Dispatchers.IO) {
-        val raw = titleOrSlug.trim()
-            .removePrefix("anikoto_")
-            .removePrefix("movie_")
-            .removePrefix("series_")
-            .trim()
-
-        if (raw.isBlank()) return@withContext null
-
-        // 1. If it's already a full watch URL
-        if (raw.startsWith("http://") || raw.startsWith("https://") || raw.contains("/watch/")) {
-            val path = raw.substringAfter("/watch/").substringBefore("?").substringBefore("/")
-            // If it's only digits, it's an AniList ID, not an Anikoto watch URL
-            if (!path.all { it.isDigit() } && path.isNotBlank()) {
-                return@withContext raw
-            }
-        }
-
-        // 2. If it's an Anikoto slug (e.g. though-i-am-an-inept-villainess-5e26f, world-is-dancing, liar-game-kcq5v)
-        if (isAnikotoSlug(raw)) {
-            return@withContext "https://anikoto.cz/watch/$raw"
-        }
-
-        // 3. Smart title alias resolution & search matching
-        val cleanTitle = sanitizeSearchTitle(raw)
-        val withoutArticles = cleanTitle
-            .replace(Regex("^(The|A|An)\\s+", RegexOption.IGNORE_CASE), "")
-            .trim()
-
-        val candidateQueries = mutableListOf<String>()
-        if (cleanTitle.isNotBlank()) candidateQueries.add(cleanTitle)
-        if (withoutArticles.isNotBlank() && !candidateQueries.contains(withoutArticles)) candidateQueries.add(withoutArticles)
-
-        // Try AniList metadata for English & Romaji titles
-        try {
-            val metadata = AnimePosterEngine.getAnimePosterAndBanner(cleanTitle)
-            if (metadata != null) {
-                if (metadata.titleEnglish.isNotBlank() && !candidateQueries.contains(metadata.titleEnglish)) {
-                    candidateQueries.add(metadata.titleEnglish)
-                }
-                if (metadata.titleRomaji.isNotBlank()) {
-                    val romajiClean = sanitizeSearchTitle(metadata.titleRomaji)
-                    if (!candidateQueries.contains(romajiClean)) candidateQueries.add(romajiClean)
-                    val romajiShort = romajiClean.substringBefore(":").substringBefore("-").trim()
-                    if (romajiShort.isNotBlank() && !candidateQueries.contains(romajiShort)) {
-                        candidateQueries.add(romajiShort)
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-
-        // Add significant individual keywords (>= 4 chars)
-        val words = withoutArticles.split(Regex("\\s+")).filter { it.length >= 4 && !it.equals("season", true) }
-        for (w in words) {
-            if (!candidateQueries.contains(w)) candidateQueries.add(w)
-        }
-
-        // Search candidates against API and score results
-        for (query in candidateQueries) {
-            val searchResults = searchOrFilterAnime(keyword = query)
-            if (searchResults.isEmpty()) continue
-
-            // Find best match based on similarity score
-            val bestMatch = searchResults.maxByOrNull { item ->
-                scoreTitleMatch(target = cleanTitle, candidate = item.title, withoutArticles = withoutArticles)
-            }
-
-            if (bestMatch != null && bestMatch.watchUrl.isNotBlank()) {
-                val score = scoreTitleMatch(target = cleanTitle, candidate = bestMatch.title, withoutArticles = withoutArticles)
-                if (score > 30) {
-                    Log.d(TAG, "Resolved watchUrl for '$raw' -> '${bestMatch.title}' (${bestMatch.watchUrl}) with score $score")
-                    return@withContext bestMatch.watchUrl
-                }
-            }
-        }
-
-        null
-    }
-
-    private fun scoreTitleMatch(target: String, candidate: String, withoutArticles: String): Int {
-        val t = target.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
-        val c = candidate.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
-        val wa = withoutArticles.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
-
-        if (t == c || wa == c) return 100
-        if (c.contains(wa) || wa.contains(c)) return 90
-        if (c.contains(t) || t.contains(c)) return 85
-
-        val targetWords = wa.split(Regex("\\s+")).filter { it.length > 2 }
-        val candidateWords = c.split(Regex("\\s+")).filter { it.length > 2 }
-        if (targetWords.isNotEmpty() && candidateWords.isNotEmpty()) {
-            val matchedWords = targetWords.count { tw -> candidateWords.any { cw -> cw == tw || (cw.length >= 4 && (cw.contains(tw) || tw.contains(cw))) } }
-            val ratio = (matchedWords * 100) / targetWords.size
-            if (ratio >= 50) return 50 + ratio / 2
-        }
-
-        return 0
-    }
-
-    private fun isAnikotoSlug(text: String): Boolean {
-        val clean = text.trim().lowercase()
-        if (clean.contains(" ") || clean.contains(":") || clean.contains("?") || clean.contains("/") || clean.contains("http")) return false
-        // e.g. "though-i-am-an-inept-villainess-5e26f", "world-is-dancing", "liar-game-kcq5v", "solo-leveling-season-2-19413"
-        return Regex("""^[a-z0-9]+(?:-[a-z0-9]+)+$""").matches(clean)
-    }
-
-    private fun buildStreamGetUrl(title: String, episode: Int, type: String, server: String? = null): String {
-        val clean = title
-            .removePrefix("anikoto_")
-            .removePrefix("movie_")
-            .removePrefix("series_")
-            .trim()
-        val epParam = if (episode <= 0) 1 else episode
-        val queryParams = mutableListOf<String>()
-
-        if (clean.startsWith("http://") || clean.startsWith("https://") || clean.contains("/watch/")) {
-            val base = if (clean.contains("?")) clean.substringBefore("?") else clean
-            val adjustedUrl = if (base.contains(Regex("""/ep-\d+"""))) {
-                base.replace(Regex("""/ep-\d+"""), "/ep-$epParam")
-            } else {
-                base
-            }
-            queryParams.add("url=${URLEncoder.encode(adjustedUrl, "UTF-8")}")
-        } else if (isAnikotoSlug(clean)) {
-            val watchUrl = "https://anikoto.cz/watch/$clean/ep-$epParam"
-            queryParams.add("url=${URLEncoder.encode(watchUrl, "UTF-8")}")
-            queryParams.add("animeId=${URLEncoder.encode(clean, "UTF-8")}")
-        } else {
-            queryParams.add("keyword=${URLEncoder.encode(clean, "UTF-8")}")
-        }
-        queryParams.add("ep=$epParam")
-        queryParams.add("type=$type")
-        if (!server.isNullOrBlank()) {
-            queryParams.add("server=${URLEncoder.encode(server.trim(), "UTF-8")}")
-        }
-        return "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
-    }
-
-    private fun sanitizeSearchTitle(title: String): String {
-        val trimmed = title.trim()
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.contains("/watch/")) {
-            return trimmed
-        }
-        return trimmed
-            .removePrefix("anikoto_")
-            .removePrefix("movie_")
-            .removePrefix("series_")
-            .replace(Regex("""\[.*?\]"""), "")
-            .replace(Regex("""\(.*?\)"""), "")
-            .replace(Regex("""\s+"""), " ")
-            .trim()
-    }
-
-    private fun parseSubtitles(tracksArray: JSONArray?): List<SubtitleTrack> {
-        val list = mutableListOf<SubtitleTrack>()
-        if (tracksArray == null) return list
-        for (i in 0 until tracksArray.length()) {
-            val trackObj = tracksArray.optJSONObject(i) ?: continue
-            val file = trackObj.optString("file", "")
-            val label = trackObj.optString("label", "English")
-            val isDefault = trackObj.optBoolean("default", false)
-
-            if (file.isNotBlank()) {
-                val fullSubtitleUrl = makeAbsoluteUrl(file)
-                val langCode = when {
-                    label.contains("Eng", ignoreCase = true) -> "en"
-                    label.contains("Spa", ignoreCase = true) -> "es"
-                    label.contains("Ara", ignoreCase = true) -> "ar"
-                    label.contains("Fre", ignoreCase = true) || label.contains("Fra", ignoreCase = true) -> "fr"
-                    label.contains("Ger", ignoreCase = true) || label.contains("Deu", ignoreCase = true) -> "de"
-                    label.contains("Ita", ignoreCase = true) -> "it"
-                    label.contains("Por", ignoreCase = true) -> "pt"
-                    label.contains("Rus", ignoreCase = true) -> "ru"
-                    label.contains("Jap", ignoreCase = true) || label.contains("Jpn", ignoreCase = true) -> "ja"
-                    label.contains("Ben", ignoreCase = true) || label.contains("Bangla", ignoreCase = true) -> "bn"
-                    label.contains("Hin", ignoreCase = true) -> "hi"
-                    label.contains("Kor", ignoreCase = true) -> "ko"
-                    label.contains("Chi", ignoreCase = true) || label.contains("Zho", ignoreCase = true) -> "zh"
-                    label.contains("Vie", ignoreCase = true) -> "vi"
-                    label.contains("Ind", ignoreCase = true) -> "id"
-                    label.contains("Tur", ignoreCase = true) -> "tr"
-                    label.contains("Tha", ignoreCase = true) -> "th"
-                    else -> "en"
-                }
-                list.add(
-                    SubtitleTrack(
-                        url = fullSubtitleUrl,
-                        lang = langCode,
-                        label = label,
-                        default = isDefault
-                    )
-                )
-            }
-        }
-        return list
-    }
-
-    // Helper functions for backwards compatibility with downloader and tools
-    fun extractServerEmbedUrl(linkId: String, referer: String): String? {
-        return if (linkId.isNotBlank()) makeAbsoluteUrl(linkId) else null
-    }
-
-    suspend fun extractM3u8AndSubtitlesFromEmbed(embedUrl: String): AnikotoStreamResult? = withContext(Dispatchers.IO) {
-        val absUrl = makeAbsoluteUrl(embedUrl)
-        AnikotoStreamResult(
-            streamUrl = absUrl,
-            headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to "$API_BASE_URL/"),
-            referer = "$API_BASE_URL/",
-            subtitles = emptyList(),
-            serverName = "Server",
-            isM3u8 = true
-        )
-    }
-
     @OptIn(androidx.media3.common.util.UnstableApi::class)
     fun buildMediaItem(streamResult: AnikotoStreamResult): MediaItem {
         val mediaItemBuilder = MediaItem.Builder()
@@ -1497,5 +1406,15 @@ object AnikotoScraper {
         }
 
         return mediaItemBuilder.build()
+    }
+
+    private fun extractSlugId(url: String): String {
+        return try {
+            val path = Uri.parse(url).path ?: ""
+            val segments = path.split("/").filter { it.isNotBlank() }
+            segments.lastOrNull { it != "ep-1" && it != "ep" } ?: ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 }
