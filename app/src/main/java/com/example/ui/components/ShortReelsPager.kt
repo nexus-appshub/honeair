@@ -1,5 +1,9 @@
 package com.example.ui.components
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -186,7 +190,7 @@ private fun SingleReelPlayerItem(
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(20000)
             .setReadTimeoutMs(30000)
-            .setUserAgent("HomeAirTV-Android/4.7")
+            .setUserAgent("HomeAirTV-Android/4.7.1")
 
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
@@ -274,6 +278,31 @@ private fun SingleReelPlayerItem(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // BroadcastReceiver for instant cutoff when screen is powered off
+    DisposableEffect(context, exoPlayer) {
+        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        val screenOffReceiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                    exoPlayer.playWhenReady = false
+                    exoPlayer.pause()
+                }
+            }
+        }
+        try {
+            context.registerReceiver(screenOffReceiver, filter)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        onDispose {
+            try {
+                context.unregisterReceiver(screenOffReceiver)
+            } catch (e: Exception) {
+                // Ignore if already unregistered
+            }
         }
     }
 

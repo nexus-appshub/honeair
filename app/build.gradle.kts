@@ -17,8 +17,8 @@ android {
     applicationId = "com.homeairtv.xubilas"
     minSdk = 24
     targetSdk = 36
-    versionCode = 470
-    versionName = "4.7"
+    versionCode = 471
+    versionName = "4.7.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
