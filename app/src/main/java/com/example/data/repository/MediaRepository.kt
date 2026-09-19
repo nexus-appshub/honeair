@@ -911,7 +911,7 @@ class MediaRepository {
                                                             MediaItem(
                                                                 id = mId,
                                                                 title = mName,
-                                                                category = if (isSeries) "Anime & Series" else "Movies",
+                                                                category = if (isSeries) "Series" else "Movies",
                                                                 imageUrl = mPoster.ifBlank { "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=500&q=80" },
                                                                 rating = mRating.ifBlank { "8.0" },
                                                                 year = mYear.take(4).ifBlank { "2024" },

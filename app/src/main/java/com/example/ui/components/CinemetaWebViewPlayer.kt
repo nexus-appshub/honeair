@@ -3880,7 +3880,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
 
                 // Category Header / Search Results Header
                 item {
-                    val isAnimePlaying = type.equals("anime", ignoreCase = true) || currentMediaItemForRelated?.category?.contains("anime", ignoreCase = true) == true
+                    val isAnimePlaying = type.equals("anime", ignoreCase = true) || (currentMediaItemForRelated?.category?.contains("anime", ignoreCase = true) == true && currentMediaItemForRelated?.category?.equals("Anime & Series", ignoreCase = true) != true)
                     val isBanglaPlaying = currentMediaItemForRelated?.category?.equals("Bangla Cinema & Natok", ignoreCase = true) == true
                     val isMoviePlaying = (!isSeries && !isAnimePlaying) || currentMediaItemForRelated?.type?.equals("movie", ignoreCase = true) == true
                     
@@ -4232,7 +4232,7 @@ fun RelatedMediaCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isAnime = item.category.contains("anime", ignoreCase = true) || item.type.equals("anime", ignoreCase = true)
+    val isAnime = (item.category.contains("anime", ignoreCase = true) || item.type.equals("anime", ignoreCase = true)) && !item.category.equals("Anime & Series", ignoreCase = true)
     var posterToLoad by remember(item.imageUrl) { mutableStateOf(item.imageUrl) }
     var isLoadFailed by remember(posterToLoad) { mutableStateOf(false) }
 
