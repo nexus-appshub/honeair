@@ -12,6 +12,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,11 +34,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.MediaItem as Media3Item
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.example.data.model.MediaItem
+import com.example.network.SmartNetworkBoosterEngine
 import com.example.ui.viewmodel.StreamViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -63,6 +68,28 @@ fun VerticalMediaFeedCard(
     val cardBackground = if (isDark) Color(0xFF121214) else Color(0xFFFFFFFF)
     val orangeAccent = Color(0xFFFF6B00)
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    val detectedSeason = remember(item.title) {
+        viewModel.extractSeasonFromTitle(item.title) ?: 1
+    }
+    val tmdbId = remember(item.id, item.imdbId) {
+        item.imdbId ?: item.id
+    }
+    val isTv = remember(item.type) {
+        item.type.equals("series", ignoreCase = true) || item.type.equals("tv", ignoreCase = true)
+    }
+    val isAnime = remember(item.title, item.category, item.type, item.id) {
+        com.example.scraper.AnimePosterEngine.isAnime(item.title, item.category, item.type, item.id)
+    }
+
+    // Proactive background pre-scrape: As soon as card is composed in feed, warm cache for 0ms instant play
+    LaunchedEffect(item.id, detectedSeason) {
+        val cached = com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, 1)
+        if (cached == null || cached.streamUrl.isBlank()) {
+            viewModel.preScrapeMediaItem(item, season = detectedSeason, episode = 1)
+        }
+    }
 
     Column(
         modifier = modifier
@@ -214,10 +241,11 @@ fun VerticalMediaFeedCard(
                 var isMuted by remember { mutableStateOf(false) }
                 var previewPlayerReady by remember { mutableStateOf(false) }
                 var resolvedPreviewUrl by remember { mutableStateOf("") }
+                var resolvedPreviewHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
                 var areSubtitlesEnabled by remember { mutableStateOf(true) }
 
                 // New customization & auto-hide states
-                var currentSeason by remember { androidx.compose.runtime.mutableIntStateOf(1) }
+                var currentSeason by remember { androidx.compose.runtime.mutableIntStateOf(detectedSeason) }
                 var currentEpisode by remember { androidx.compose.runtime.mutableIntStateOf(1) }
                 var showServerSelectorDialog by remember { mutableStateOf(false) }
                 var showSeasonEpisodeDialog by remember { mutableStateOf(false) }
@@ -232,33 +260,50 @@ fun VerticalMediaFeedCard(
                     }
                 }
 
-                // Retrieve real stream link in background if not already cached
-                LaunchedEffect(item.id, isPlayingPreview, currentSeason, currentEpisode, resolvedPreviewUrl) {
-                    if (isPlayingPreview && resolvedPreviewUrl.isBlank()) {
-                        val tmdbId = item.imdbId ?: item.id
-                        val cleanId = tmdbId.removePrefix("movie_").removePrefix("series_").removePrefix("anikoto_")
-                        val cached = com.example.scraper.UnifiedStreamManager.getCachedStream(cleanId, currentSeason, currentEpisode)
-                            ?: com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, currentSeason, currentEpisode)
+                // Instant parallel scraping & cache retrieval (0ms cache hit, no spinner overlay)
+                LaunchedEffect(item.id, isPlayingPreview, currentSeason, currentEpisode) {
+                    if (isPlayingPreview) {
+                        val effectiveSeason = currentSeason
+                        // 1. Instant check from cache (0ms instant!)
+                        val cached = com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, effectiveSeason, currentEpisode)
+                            ?: com.example.scraper.UnifiedStreamManager.getCachedStream(item.id, effectiveSeason, currentEpisode)
                         
                         if (cached != null && cached.streamUrl.isNotBlank()) {
                             resolvedPreviewUrl = cached.streamUrl
-                        } else {
-                            // Run lightweight scraping task in background
-                            val isAnime = com.example.scraper.AnimePosterEngine.isAnime(item.title, item.category, item.type, item.id)
+                            resolvedPreviewHeaders = cached.headers
+                        } else if (item.streamUrl.isNotBlank()) {
+                            resolvedPreviewUrl = item.streamUrl
+                        }
+
+                        // 2. If not pre-cached, race fastest servers in parallel immediately
+                        if (resolvedPreviewUrl.isBlank()) {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
-                                    val result = com.example.scraper.UnifiedStreamManager.getStream(
-                                        context = context,
-                                        title = item.title,
-                                        tmdbId = tmdbId,
-                                        isTv = item.type.equals("series", ignoreCase = true) || item.type.equals("tv", ignoreCase = true),
-                                        season = currentSeason,
-                                        episode = currentEpisode,
-                                        isAnime = isAnime
-                                    )
-                                    if (result != null && result.streamUrl.isNotBlank()) {
+                                    val streamRes = if (!isAnime) {
+                                        com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                            context = context,
+                                            tmdbId = tmdbId,
+                                            title = item.title,
+                                            isTv = isTv,
+                                            season = effectiveSeason,
+                                            episode = currentEpisode,
+                                            preferredServerKey = "fastest_auto"
+                                        )?.result
+                                    } else {
+                                        com.example.scraper.UnifiedStreamManager.getStream(
+                                            context = context,
+                                            title = item.title,
+                                            tmdbId = tmdbId,
+                                            isTv = isTv,
+                                            season = effectiveSeason,
+                                            episode = currentEpisode,
+                                            isAnime = true
+                                        )
+                                    }
+                                    if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                            resolvedPreviewUrl = result.streamUrl
+                                            resolvedPreviewUrl = streamRes.streamUrl
+                                            resolvedPreviewHeaders = streamRes.headers
                                         }
                                     }
                                 } catch (e: Exception) {
@@ -269,39 +314,73 @@ fun VerticalMediaFeedCard(
                     }
                 }
 
-                val exoPlayer = remember(item.id, resolvedPreviewUrl) {
-                    ExoPlayer.Builder(context).build().apply {
-                        val videoUrl = if (resolvedPreviewUrl.isNotBlank()) resolvedPreviewUrl else "https://assets.mixkit.co/videos/preview/mixkit-forest-stream-in-the-sunlight-529-large.mp4"
-                        val media = Media3Item.fromUri(Uri.parse(videoUrl))
-                        setMediaItem(media)
-                        repeatMode = Player.REPEAT_MODE_ALL
-                        volume = if (isMuted) 0f else 1f
-                        playWhenReady = true
-                        prepare()
-                        addListener(object : Player.Listener {
-                            override fun onPlaybackStateChanged(playbackState: Int) {
-                                if (playbackState == Player.STATE_READY) {
-                                    previewPlayerReady = true
+                val exoPlayer = remember(item.id, resolvedPreviewUrl, resolvedPreviewHeaders) {
+                    if (resolvedPreviewUrl.isBlank()) {
+                        null
+                    } else {
+                        val httpDataSourceFactory = SmartNetworkBoosterEngine.createBoostedHttpDataSourceFactory(
+                            customHeaders = resolvedPreviewHeaders,
+                            url = resolvedPreviewUrl
+                        )
+                        val mediaSourceFactory = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpDataSourceFactory)
+
+                        ExoPlayer.Builder(context)
+                            .setMediaSourceFactory(mediaSourceFactory)
+                            .build().apply {
+                                val mediaItemBuilder = Media3Item.Builder().setUri(resolvedPreviewUrl)
+                                val urlLower = resolvedPreviewUrl.lowercase()
+                                if (urlLower.contains(".m3u8") || urlLower.contains("m3u8") || urlLower.contains("hls")) {
+                                    mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
+                                } else if (urlLower.contains(".mpd") || urlLower.contains("dash")) {
+                                    mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_MPD)
+                                } else {
+                                    mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_MP4)
                                 }
+                                setMediaItem(mediaItemBuilder.build())
+                                repeatMode = Player.REPEAT_MODE_ALL
+                                volume = if (isMuted) 0f else 1f
+                                playWhenReady = true
+                                prepare()
+                                addListener(object : Player.Listener {
+                                    override fun onPlaybackStateChanged(playbackState: Int) {
+                                        if (playbackState == Player.STATE_READY) {
+                                            previewPlayerReady = true
+                                        }
+                                    }
+                                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                        // On error, race alternate server to quickly switch stream without crashing
+                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            try {
+                                                val alt = com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                                    context = context,
+                                                    tmdbId = tmdbId,
+                                                    title = item.title,
+                                                    isTv = isTv,
+                                                    season = currentSeason,
+                                                    episode = currentEpisode,
+                                                    preferredServerKey = "vidrock_direct"
+                                                )?.result
+                                                if (alt != null && alt.streamUrl.isNotBlank() && alt.streamUrl != resolvedPreviewUrl) {
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                        previewPlayerReady = false
+                                                        resolvedPreviewUrl = alt.streamUrl
+                                                        resolvedPreviewHeaders = alt.headers
+                                                    }
+                                                }
+                                            } catch (_: Exception) {}
+                                        }
+                                    }
+                                })
                             }
-                            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                                if (videoUrl != "https://assets.mixkit.co/videos/preview/mixkit-forest-stream-in-the-sunlight-529-large.mp4") {
-                                    try {
-                                        setMediaItem(Media3Item.fromUri(Uri.parse("https://assets.mixkit.co/videos/preview/mixkit-forest-stream-in-the-sunlight-529-large.mp4")))
-                                        prepare()
-                                    } catch (_: Exception) {}
-                                }
-                            }
-                        })
                     }
                 }
 
                 LaunchedEffect(areSubtitlesEnabled, exoPlayer) {
                     try {
-                        exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                            .buildUpon()
-                            .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, !areSubtitlesEnabled)
-                            .build()
+                        exoPlayer?.trackSelectionParameters = exoPlayer?.trackSelectionParameters
+                            ?.buildUpon()
+                            ?.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !areSubtitlesEnabled)
+                            ?.build() ?: return@LaunchedEffect
                     } catch (_: Exception) {}
                 }
 
@@ -311,7 +390,7 @@ fun VerticalMediaFeedCard(
                 var sliderValue by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
                 LaunchedEffect(isPlayingPreview, exoPlayer) {
-                    if (isPlayingPreview) {
+                    if (isPlayingPreview && exoPlayer != null) {
                         while (true) {
                             try {
                                 currentPosition = exoPlayer.currentPosition
@@ -331,8 +410,8 @@ fun VerticalMediaFeedCard(
                     return String.format("%02d:%02d", mins, secs)
                 }
 
-                LaunchedEffect(isMuted) {
-                    exoPlayer.volume = if (isMuted) 0f else 1f
+                LaunchedEffect(isMuted, exoPlayer) {
+                    exoPlayer?.volume = if (isMuted) 0f else 1f
                 }
 
                 val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -340,11 +419,11 @@ fun VerticalMediaFeedCard(
                     val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                         if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
                             try {
-                                exoPlayer.playWhenReady = false
+                                exoPlayer?.playWhenReady = false
                             } catch (_: Exception) {}
                         } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                             try {
-                                exoPlayer.playWhenReady = true
+                                exoPlayer?.playWhenReady = true
                             } catch (_: Exception) {}
                         }
                     }
@@ -357,44 +436,49 @@ fun VerticalMediaFeedCard(
                 DisposableEffect(exoPlayer) {
                     onDispose {
                         try {
-                            exoPlayer.stop()
-                            exoPlayer.release()
+                            exoPlayer?.stop()
+                            exoPlayer?.release()
                         } catch (_: Exception) {}
                     }
                 }
 
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            useController = false
-                            layoutParams = FrameLayout.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                        }
-                    },
-                    update = { view ->
-                        if (view.player != exoPlayer) {
-                            view.player = exoPlayer
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable {
-                            lastInteractionTime = System.currentTimeMillis()
-                            if (!showControls) {
-                                showControls = true
-                            } else {
-                                onPlayClick()
+                if (exoPlayer != null) {
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                useController = false
+                                layoutParams = FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
                             }
-                        }
-                )
+                        },
+                        update = { view ->
+                            if (view.player != exoPlayer) {
+                                view.player = exoPlayer
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable {
+                                lastInteractionTime = System.currentTimeMillis()
+                                if (!showControls) {
+                                    showControls = true
+                                } else {
+                                    onPlayClick()
+                                }
+                            }
+                    )
+                }
 
+                // Smooth high-res backdrop poster until player's first frame is ready (no spinner)
                 if (!previewPlayerReady) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(28.dp),
-                        color = orangeAccent,
-                        strokeWidth = 2.5.dp
+                    ShimmerAsyncImage(
+                        model = item.imageUrl,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        isDark = isDark
                     )
                 }
 
@@ -560,7 +644,7 @@ fun VerticalMediaFeedCard(
                             },
                             onValueChangeFinished = {
                                 lastInteractionTime = System.currentTimeMillis()
-                                exoPlayer.seekTo(sliderValue.toLong())
+                                exoPlayer?.seekTo(sliderValue.toLong())
                                 isSeeking = false
                             },
                             valueRange = 0f..(if (totalDuration > 0) totalDuration.toFloat() else 1f),
@@ -714,47 +798,51 @@ fun VerticalMediaFeedCard(
                                     }
                                 }
                             } else {
-                                // Non-anime providers list
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                // Non-anime stream servers list (Fastest Auto, Hindi, VidRock, Flixer, Prime, Hexa, etc.)
+                                val providers = listOf(
+                                    "⚡ Fastest (Auto Parallel)" to "fastest_auto",
+                                    "HINDI Server" to "delta",
+                                    "VidRock Server (Direct)" to "vidrock_direct",
+                                    "Flixer Server" to "filxer",
+                                    "Prime Server" to "prime",
+                                    "Hexa Server" to "hexa",
+                                    "Alfa Server" to "alfa",
+                                    "Gama Server" to "gama",
+                                    "Lamda Server" to "lamda",
+                                    "Zeta Server" to "zeta",
+                                    "Catflix Server" to "catflix",
+                                    "VidLink Server" to "vidlink_direct",
+                                    "AutoEmbed Server" to "autoembed_direct"
+                                )
+
+                                androidx.compose.foundation.lazy.LazyColumn(
+                                    modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    val providers = listOf(
-                                        "VidLink Server" to "VidLink",
-                                        "VidSrc Server" to "VidSrc",
-                                        "AutoEmbed Server" to "AutoEmbed",
-                                        "VidNest Server" to "VidNest",
-                                        "VidRock Server" to "VidRock",
-                                        "MovieBox Server" to "MovieBox"
-                                    )
-                                    
-                                    providers.forEach { (label, key) ->
+                                    items(providers.size) { idx ->
+                                        val (label, key) = providers[idx]
                                         var extracting by remember { mutableStateOf(false) }
                                         Button(
                                             onClick = {
                                                 extracting = true
-                                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                                viewModel.selectStreamServerKey(key)
+                                                coroutineScope.launch(kotlinx.coroutines.Dispatchers.Main) {
                                                     try {
-                                                        val tmdbId = item.imdbId ?: item.id
-                                                        val cleanId = tmdbId.removePrefix("movie_").removePrefix("series_")
                                                         val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                            when (key) {
-                                                                "VidLink" -> com.example.scraper.VidLinkNativeScraper.extractStream(cleanId, item.type.equals("series", true), currentSeason, currentEpisode, item.imdbId)
-                                                                "VidSrc" -> com.example.scraper.VidSrcNativeScraper.extractStream(cleanId, item.type.equals("series", true), currentSeason, currentEpisode, item.imdbId)
-                                                                "AutoEmbed" -> com.example.scraper.AutoEmbedNativeScraper.extractStream(cleanId, item.type.equals("series", true), currentSeason, currentEpisode, item.imdbId)
-                                                                "VidNest" -> com.example.scraper.VidnestNativeScraper.extractStream(cleanId, item.type.equals("series", true), currentSeason, currentEpisode)
-                                                                "VidRock" -> com.example.scraper.VidrockNativeScraper.extractStream(cleanId, item.type.equals("series", true), currentSeason, currentEpisode)
-                                                                "MovieBox" -> {
-                                                                    val subjectId = com.example.scraper.MovieBoxNativeScraper.searchSubjectId(item.title) ?: com.example.scraper.MovieBoxNativeScraper.searchSubjectId(cleanId)
-                                                                    if (!subjectId.isNullOrEmpty()) {
-                                                                        com.example.scraper.MovieBoxNativeScraper.getStreamInfo(subjectId, if (item.type.equals("series", true)) currentSeason else 0, if (item.type.equals("series", true)) currentEpisode else 0)
-                                                                    } else null
-                                                                }
-                                                                else -> null
-                                                            }
+                                                            com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                                                context = context,
+                                                                tmdbId = tmdbId,
+                                                                title = item.title,
+                                                                isTv = isTv,
+                                                                season = currentSeason,
+                                                                episode = currentEpisode,
+                                                                preferredServerKey = key
+                                                            )?.result
                                                         }
                                                         if (res != null && res.streamUrl.isNotBlank()) {
+                                                            previewPlayerReady = false
                                                             resolvedPreviewUrl = res.streamUrl
+                                                            resolvedPreviewHeaders = res.headers
                                                         }
                                                     } catch (_: Exception) {}
                                                     showServerSelectorDialog = false
@@ -889,6 +977,7 @@ fun VerticalMediaFeedCard(
                             Button(
                                 onClick = {
                                     showSeasonEpisodeDialog = false
+                                    previewPlayerReady = false
                                     resolvedPreviewUrl = "" // Reset to trigger reload
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = orangeAccent),
@@ -994,6 +1083,122 @@ fun VerticalMediaFeedCard(
                     tint = subTextColor,
                     modifier = Modifier.size(19.dp)
                 )
+            }
+        }
+
+        // === SYNOPSIS (OVERVIEW) ===
+        val synopsis = item.description
+        if (!synopsis.isNullOrBlank()) {
+            Text(
+                text = synopsis,
+                fontSize = 12.sp,
+                color = subTextColor,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 16.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 2.dp)
+                    .clickable { onInfoClick() }
+            )
+        }
+
+        // === STREAM SERVERS MULTI-LIST (UNDER SYNOPSIS) ===
+        val isAnime = remember(item) {
+            com.example.scraper.AnimePosterEngine.isAnime(item.title, item.category, item.type, item.id)
+        }
+        if (!isAnime) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Dns,
+                        contentDescription = "Servers",
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "Stream Servers",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor
+                    )
+                }
+
+                Surface(
+                    color = Color(0xFF00E5FF).copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = "⚡ Parallel Auto Race",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00E5FF),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.5.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val streamServers = listOf(
+                Triple("fastest_auto", "⚡ Fastest Direct", Color(0xFF00E5FF)),
+                Triple("delta", "HINDI", Color(0xFFFF9800)),
+                Triple("vidrock_direct", "VidRock (Direct)", Color(0xFFB388FF)),
+                Triple("filxer", "Flixer", Color(0xFF00E5FF)),
+                Triple("prime", "Prime", Color(0xFF00E676)),
+                Triple("hexa", "Hexa", Color(0xFFE040FB)),
+                Triple("alfa", "Alfa", Color(0xFF00E5FF)),
+                Triple("gama", "Gama", Color(0xFFB388FF)),
+                Triple("lamda", "Lamda", subTextColor),
+                Triple("zeta", "Zeta", subTextColor),
+                Triple("catflix", "Catflix", Color(0xFFFF5722)),
+                Triple("vidlink_direct", "VidLink", Color(0xFF00E5FF)),
+                Triple("autoembed_direct", "AutoEmbed", Color(0xFFB388FF))
+            )
+
+            val selectedStreamServerKey by viewModel.selectedStreamServerKey.collectAsState()
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(streamServers) { (key, label, accentColor) ->
+                    val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "fastest_auto")
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) accentColor.copy(alpha = 0.22f) else if (isDark) Color(0xFF1C1C20) else Color(0xFFF2F2F5),
+                        border = BorderStroke(1.dp, if (isSelected) accentColor else if (isDark) Color(0xFF2C2C32) else Color(0xFFE2E2E6)),
+                        modifier = Modifier.clickable {
+                            viewModel.selectStreamServerKey(key)
+                            viewModel.preScrapeMediaItem(item, preferredServerKey = key)
+                            viewModel.playMediaItem(item)
+                            onPlayClick()
+                        }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) accentColor else textColor
+                            )
+                        }
+                    }
+                }
             }
         }
     }
