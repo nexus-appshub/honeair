@@ -827,6 +827,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         if (initialAd != null && initialAd.enabled && initialAd.mediaUrl.isNotBlank()) {
             checkAndTriggerLaunchAd(initialAd)
         }
+        // Immediately pre-fetch and scrape Airing Reels so it is instantly ready on tab entry
+        loadMergedAiringFeed()
     }
 
     fun triggerPremiumPaywall(show: Boolean = true) {

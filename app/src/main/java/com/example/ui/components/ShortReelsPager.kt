@@ -249,6 +249,34 @@ private fun SingleReelPlayerItem(
         }
     }
 
+    // Lifecycle observation to turn off sound and video on screen off or background
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, exoPlayer, isActive) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    exoPlayer.playWhenReady = false
+                    exoPlayer.pause()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    if (isActive && isPlaying) {
+                        exoPlayer.playWhenReady = true
+                    }
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_DESTROY -> {
+                    exoPlayer.stop()
+                    exoPlayer.release()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     // Play/Pause based on screen active state
     LaunchedEffect(isActive, isPlaying) {
         if (isActive) {
