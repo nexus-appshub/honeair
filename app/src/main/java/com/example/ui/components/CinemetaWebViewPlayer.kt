@@ -378,15 +378,27 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             }
                         }
 
-                        val result = com.example.scraper.UnifiedStreamManager.getStream(
-                            context = context,
-                            title = title,
-                            tmdbId = imdbId,
-                            isTv = isSeries,
-                            season = currentSeason,
-                            episode = currentEpisode,
-                            isAnime = isAnime
-                        )
+                        val result = if (!isAnime) {
+                            com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                context = context,
+                                tmdbId = imdbId,
+                                title = title,
+                                isTv = isSeries,
+                                season = currentSeason,
+                                episode = currentEpisode,
+                                preferredServerKey = selectedVidnestServerKey ?: "fastest_auto"
+                            )?.result
+                        } else {
+                            com.example.scraper.UnifiedStreamManager.getStream(
+                                context = context,
+                                title = title,
+                                tmdbId = imdbId,
+                                isTv = isSeries,
+                                season = currentSeason,
+                                episode = currentEpisode,
+                                isAnime = isAnime
+                            )
+                        }
                         if (result != null && result.streamUrl.isNotBlank()) {
                             withContext(Dispatchers.Main) {
                                 capturedVideoUrl = result.streamUrl
@@ -1452,51 +1464,12 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         contentAlignment = Alignment.Center
                     ) {
                         if (isScrapingDirectStream || directScrapeSecondsRemaining > 0) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                                modifier = Modifier.padding(24.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(
-                                        color = NeonCyan,
-                                        modifier = Modifier.size(56.dp),
-                                        strokeWidth = 3.5.dp
-                                    )
-                                    Text(
-                                        text = if (directScrapeSecondsRemaining > 0) "${directScrapeSecondsRemaining}s" else "...",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = NeonCyan
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(16.dp))
-                                var tickerText by remember { mutableStateOf("Finding the absolute best stream for you...") }
-                                LaunchedEffect(Unit) {
-                                    val messages = listOf(
-                                        "Finding the absolute best stream for you...",
-                                        "Hey, almost done...",
-                                        "Getting closer...",
-                                        "Hang tight, optimizing video buffers...",
-                                        "Almost ready to play...",
-                                        "Securing high-speed direct pipeline...",
-                                        "Polishing pixels and preparing playback..."
-                                    )
-                                    var idx = 0
-                                    while (true) {
-                                        kotlinx.coroutines.delay(3000)
-                                        idx = (idx + 1) % messages.size
-                                        tickerText = messages[idx]
-                                    }
-                                }
-                                Text(
-                                    text = tickerText,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.Medium,
-                                        color = TextPrimary
-                                    ),
-                                    textAlign = TextAlign.Center
-                                )
-                            }
+                            // Clean canvas without any loading overlay spinner so stream plays instantly
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(SpaceBlack)
+                            )
                         } else {
                             // Only displayed after the FULL 60 seconds have elapsed without finding a stream
                             Column(

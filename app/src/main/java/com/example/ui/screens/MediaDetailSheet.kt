@@ -83,6 +83,7 @@ fun MediaDetailSheet(
     val subServers by viewModel.availableSubServers.collectAsState()
     val dubServers by viewModel.availableDubServers.collectAsState()
     val selectedServer by viewModel.selectedServer.collectAsState()
+    val selectedStreamServerKey by viewModel.selectedStreamServerKey.collectAsState()
     val isFetchingServers by viewModel.isFetchingServers.collectAsState()
 
     val isAnime = remember(item) {
@@ -496,6 +497,126 @@ fun MediaDetailSheet(
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // Normal Movies and Series Stream Servers Multi-List (Hindi, VidRock Direct, Flixer, Prime, Hexa, etc.)
+            if (!isAnime) {
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = sheetDividerColor)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Dns,
+                            contentDescription = "Servers",
+                            tint = NeonCyan,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Stream Servers",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = sheetTextColor
+                        )
+                    }
+
+                    // Active server badge
+                    val activeLabel = when (selectedStreamServerKey) {
+                        "delta" -> "HINDI"
+                        "vidrock_direct" -> "VIDROCK (Direct)"
+                        "filxer" -> "FLIXER"
+                        "prime" -> "PRIME"
+                        "hexa" -> "HEXA"
+                        "alfa" -> "ALFA"
+                        "gama" -> "GAMA"
+                        "lamda" -> "LAMDA"
+                        "zeta" -> "ZETA"
+                        "catflix" -> "CATFLIX"
+                        "vidlink_direct" -> "VIDLINK"
+                        "autoembed_direct" -> "AUTOEMBED"
+                        else -> "⚡ AUTO PARALLEL FASTEST"
+                    }
+                    val badgeColor = when (selectedStreamServerKey) {
+                        "delta" -> Color(0xFFFF9800)
+                        "vidrock_direct" -> NeonPurple
+                        "prime" -> Color(0xFF00E676)
+                        "hexa" -> Color(0xFFE040FB)
+                        else -> NeonCyan
+                    }
+                    Surface(
+                        color = badgeColor.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = activeLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeColor,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                val normalServers = listOf(
+                    Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan),
+                    Triple("delta", "HINDI", Color(0xFFFF9800)),
+                    Triple("vidrock_direct", "VidRock (Direct)", NeonPurple),
+                    Triple("filxer", "Flixer", NeonCyan),
+                    Triple("prime", "Prime", Color(0xFF00E676)),
+                    Triple("hexa", "Hexa", Color(0xFFE040FB)),
+                    Triple("alfa", "Alfa", NeonCyan),
+                    Triple("gama", "Gama", NeonPurple),
+                    Triple("lamda", "Lamda", sheetChipText),
+                    Triple("zeta", "Zeta", sheetChipText),
+                    Triple("catflix", "Catflix", Color(0xFFFF5722)),
+                    Triple("vidlink_direct", "VidLink", NeonCyan),
+                    Triple("autoembed_direct", "AutoEmbed", NeonPurple)
+                )
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(normalServers) { (key, label, accentColor) ->
+                        val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "fastest_auto")
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                viewModel.selectStreamServerKey(key)
+                                viewModel.preScrapeMediaItem(item, selectedSeason, selectedEpisode, key)
+                            },
+                            label = {
+                                Text(
+                                    text = label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = accentColor,
+                                selectedLabelColor = if (accentColor == Color.White || accentColor == NeonCyan) Color.Black else Color.White,
+                                containerColor = sheetChipBg,
+                                labelColor = sheetChipText
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = isSelected,
+                                borderColor = sheetDividerColor,
+                                selectedBorderColor = accentColor
+                            )
+                        )
+                    }
+                }
             }
 
             // Anikoto Scraped Server Selection (Line 1: SUB, Line 2: DUB)

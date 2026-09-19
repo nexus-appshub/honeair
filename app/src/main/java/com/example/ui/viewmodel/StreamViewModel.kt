@@ -2070,6 +2070,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _activeMediaEpisode = MutableStateFlow(1)
     val activeMediaEpisode: StateFlow<Int> = _activeMediaEpisode.asStateFlow()
 
+    private val _selectedStreamServerKey = MutableStateFlow<String?>("fastest_auto")
+    val selectedStreamServerKey: StateFlow<String?> = _selectedStreamServerKey.asStateFlow()
+
+    fun selectStreamServerKey(key: String?) {
+        _selectedStreamServerKey.value = key
+    }
+
     private val _playerAspectRatio = MutableStateFlow(16f / 9f)
     val playerAspectRatio: StateFlow<Float> = _playerAspectRatio.asStateFlow()
 
@@ -3440,7 +3447,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun preScrapeMediaItem(item: MediaItem?, season: Int = 1, episode: Int = 1) {
+    fun preScrapeMediaItem(item: MediaItem?, season: Int = 1, episode: Int = 1, preferredServerKey: String? = _selectedStreamServerKey.value) {
         if (item == null) return
         val detectedSeason = extractSeasonFromTitle(item.title) ?: season
         val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
@@ -3457,29 +3464,56 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         if (isAnime) {
             fetchAnikotoMediaData(effectiveItem, detectedSeason)
             fetchAnikotoServers(effectiveItem, detectedSeason, episode)
+            if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode) != null) return
+
+            val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
+                               effectiveItem.type.equals("tv", ignoreCase = true) ||
+                               (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
+
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val streamResult = com.example.scraper.UnifiedStreamManager.getStream(
+                        context = getApplication(),
+                        title = effectiveItem.title,
+                        tmdbId = tmdbId,
+                        isTv = isSeriesItem,
+                        season = detectedSeason,
+                        episode = episode,
+                        isAnime = true
+                    )
+                    if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
+                        if (_activeMediaItem.value?.id == item.id && _activeMediaStreamUrl.value.isNullOrBlank()) {
+                            _activeMediaStreamUrl.value = streamResult.streamUrl
+                            _activeMediaStreamHeaders.value = streamResult.headers
+                            _isPlayerPlaying.value = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            return
         }
 
-        if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode) != null) return
-
+        // Normal Movies & Series (e.g. Facing El Chapo, Silo): High-speed parallel server race
         val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
-                           effectiveItem.type.equals("tv", ignoreCase = true) ||
-                           (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
+                           effectiveItem.type.equals("tv", ignoreCase = true)
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val streamResult = com.example.scraper.UnifiedStreamManager.getStream(
+                val winner = com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
                     context = getApplication(),
-                    title = effectiveItem.title,
                     tmdbId = tmdbId,
+                    title = effectiveItem.title,
                     isTv = isSeriesItem,
                     season = detectedSeason,
                     episode = episode,
-                    isAnime = isAnime
+                    preferredServerKey = preferredServerKey ?: _selectedStreamServerKey.value
                 )
-                if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
+                if (winner != null && winner.result.streamUrl.isNotBlank()) {
                     if (_activeMediaItem.value?.id == item.id && _activeMediaStreamUrl.value.isNullOrBlank()) {
-                        _activeMediaStreamUrl.value = streamResult.streamUrl
-                        _activeMediaStreamHeaders.value = streamResult.headers
+                        _activeMediaStreamUrl.value = winner.result.streamUrl
+                        _activeMediaStreamHeaders.value = winner.result.headers
                         _isPlayerPlaying.value = true
                     }
                 }
@@ -3576,26 +3610,39 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                effectiveItem.type.equals("tv", ignoreCase = true) ||
                                (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
 
-            // Launch background parallel scraper
+            // Launch background parallel scraper (racing fastest servers Hindi, VidRock, Flixer, Prime, Hexa...)
             launch(Dispatchers.IO) {
                 try {
-                    val streamResult = com.example.scraper.UnifiedStreamManager.getStream(
-                        context = getApplication(),
-                        title = effectiveItem.title,
-                        tmdbId = tmdbId,
-                        isTv = isSeriesItem,
-                        season = detectedSeason,
-                        episode = episode,
-                        isAnime = isAnime
-                    )
-                    if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
-                        _activeMediaStreamUrl.value = streamResult.streamUrl
-                        _activeMediaStreamHeaders.value = streamResult.headers
+                    val winnerResult = if (!isAnime) {
+                        com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                            context = getApplication(),
+                            tmdbId = tmdbId,
+                            title = effectiveItem.title,
+                            isTv = isSeriesItem,
+                            season = detectedSeason,
+                            episode = episode,
+                            preferredServerKey = _selectedStreamServerKey.value
+                        )?.result
+                    } else {
+                        com.example.scraper.UnifiedStreamManager.getStream(
+                            context = getApplication(),
+                            title = effectiveItem.title,
+                            tmdbId = tmdbId,
+                            isTv = isSeriesItem,
+                            season = detectedSeason,
+                            episode = episode,
+                            isAnime = true
+                        )
+                    }
+
+                    if (winnerResult != null && winnerResult.streamUrl.isNotBlank()) {
+                        _activeMediaStreamUrl.value = winnerResult.streamUrl
+                        _activeMediaStreamHeaders.value = winnerResult.headers
                         _isPlayerPlaying.value = true
                         repository.addLog(
                             type = "INFO",
                             title = "Direct Stream Scraped",
-                            message = "Zero-Server Scraper extracted direct video link for '" + effectiveItem.title + "'"
+                            message = "Fastest Server extracted direct video link for '" + effectiveItem.title + "'"
                         )
                     }
                 } catch (e: Exception) {
