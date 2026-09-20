@@ -173,11 +173,10 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Auto-hide controls after 4 seconds
-    LaunchedEffect(showControls, isPlaying) {
-        if (showControls && isPlaying) {
-            delay(4000)
-            showControls = false
+    // Force controls to always remain open and never auto-hide
+    LaunchedEffect(showControls) {
+        if (!showControls) {
+            showControls = true
         }
     }
 
@@ -235,11 +234,12 @@ fun VideoPlayerScreen(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
-                ) { showControls = !showControls }
+                ) { showControls = true }
         ) {
             AndroidView(
                 factory = { ctx ->
-                    PlayerView(ctx).apply {
+                    val view = android.view.LayoutInflater.from(ctx).inflate(com.example.R.layout.exo_player_texture_view, null) as PlayerView
+                    view.apply {
                         player = exoPlayer
                         useController = false
                         layoutParams = FrameLayout.LayoutParams(
@@ -288,11 +288,12 @@ fun VideoPlayerScreen(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { showControls = !showControls }
+                        ) { showControls = true }
                 ) {
                     AndroidView(
                         factory = { ctx ->
-                            PlayerView(ctx).apply {
+                            val view = android.view.LayoutInflater.from(ctx).inflate(com.example.R.layout.exo_player_texture_view, null) as PlayerView
+                            view.apply {
                                 player = exoPlayer
                                 useController = false
                                 layoutParams = FrameLayout.LayoutParams(
@@ -386,7 +387,7 @@ fun CompactPlayerControls(
     onBack: () -> Unit
 ) {
     AnimatedVisibility(
-        visible = showControls || isBuffering,
+        visible = true, // Always visible, controllers must never hide
         enter = fadeIn(),
         exit = fadeOut()
     ) {
@@ -440,7 +441,7 @@ fun CompactPlayerControls(
                 }
             }
 
-            // Center Play/Pause button or Buffering Spinner
+            // Center Play/Pause button (Buffering spinner removed, play/pause is always visible)
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -449,24 +450,16 @@ fun CompactPlayerControls(
                     .background(Color.White.copy(alpha = 0.25f)),
                 contentAlignment = Alignment.Center
             ) {
-                if (isBuffering) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = Color(0xFFFF9800),
-                        strokeWidth = 2.5.dp
+                IconButton(
+                    onClick = onPlayPause,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = "Play/Pause",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
                     )
-                } else {
-                    IconButton(
-                        onClick = onPlayPause,
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = Color.White,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
                 }
             }
 

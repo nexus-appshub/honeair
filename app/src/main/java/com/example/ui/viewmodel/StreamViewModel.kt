@@ -130,7 +130,13 @@ data class AppControlConfig(
     val fancodeValidityHours: Int = 168,
     val premiumLiveTvIds: List<String> = emptyList(),
     val premiumLiveTvCategories: List<String> = emptyList(),
-    val isLiveTvLockEnabled: Boolean = false
+    val isLiveTvLockEnabled: Boolean = false,
+    val isPreSplashAdEnabled: Boolean = false,
+    val preSplashMediaType: String = "image",
+    val preSplashMediaUrl: String = "",
+    val preSplashSkipSeconds: Int = 5,
+    val preSplashCtaText: String = "Learn More",
+    val preSplashCtaUrl: String = ""
 )
 
 class StreamViewModel(application: Application) : AndroidViewModel(application) {
@@ -363,7 +369,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 fancodeValidityHours = p.getInt("fancodeValidityHours", 168),
                 isLiveTvLockEnabled = p.getBoolean("isLiveTvLockEnabled", false),
                 premiumLiveTvIds = cachedLiveTvIds,
-                premiumLiveTvCategories = cachedLiveTvCats
+                premiumLiveTvCategories = cachedLiveTvCats,
+                isPreSplashAdEnabled = p.getBoolean("isPreSplashAdEnabled", false),
+                preSplashMediaType = p.getString("preSplashMediaType", "image") ?: "image",
+                preSplashMediaUrl = p.getString("preSplashMediaUrl", "") ?: "",
+                preSplashSkipSeconds = p.getInt("preSplashSkipSeconds", 5),
+                preSplashCtaText = p.getString("preSplashCtaText", "Learn More") ?: "Learn More",
+                preSplashCtaUrl = p.getString("preSplashCtaUrl", "") ?: ""
             )
         } else null
     )
@@ -828,6 +840,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _showLaunchAdOverlay = MutableStateFlow(false)
     val showLaunchAdOverlay: StateFlow<Boolean> = _showLaunchAdOverlay.asStateFlow()
     private var isLaunchAdDismissedInThisSession = false
+
+    private val _showPreSplashOverlay = MutableStateFlow(true)
+    val showPreSplashOverlay: StateFlow<Boolean> = _showPreSplashOverlay.asStateFlow()
+
+    fun dismissPreSplashOverlay() {
+        _showPreSplashOverlay.value = false
+    }
 
     init {
         // Initial check for redeem status
@@ -1484,6 +1503,26 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val adClickUrl = json.optString("adClickUrl", "")
                             val adTitle = json.optString("adTitle", "Sponsored: Upgrade to VIP to Remove Ads")
 
+                            val isPreSplashAdEnabled = json.optBoolean("isPreSplashAdEnabled", false) ||
+                                json.optBoolean("preSplashAdEnabled", false) ||
+                                json.optBoolean("is_pre_splash_ad_enabled", false)
+                            val preSplashMediaType = json.optString("preSplashMediaType", "image")
+                                .ifBlank { json.optString("pre_splash_media_type", "image") }
+                            val preSplashMediaUrl = json.optString("preSplashMediaUrl", "")
+                                .ifBlank { json.optString("pre_splash_media_url", "") }
+                            var preSplashSkipSeconds = if (json.has("preSplashSkipSeconds")) {
+                                json.optInt("preSplashSkipSeconds", 5)
+                            } else if (json.has("pre_splash_skip_seconds")) {
+                                json.optInt("pre_splash_skip_seconds", 5)
+                            } else 5
+                            if (preSplashSkipSeconds <= 0) {
+                                preSplashSkipSeconds = 5
+                            }
+                            val preSplashCtaText = json.optString("preSplashCtaText", "Learn More")
+                                .ifBlank { json.optString("pre_splash_cta_text", "Learn More") }
+                            val preSplashCtaUrl = json.optString("preSplashCtaUrl", "")
+                                .ifBlank { json.optString("pre_splash_cta_url", "") }
+
                             val redeemCode = json.optString("redeemCode", "").ifBlank { json.optString("redeem_code", "") }
                             val redeemValidityHours = json.optInt("redeemValidityHours", 24)
                             val redeemExpiryTimestamp = json.optLong("redeemExpiryTimestamp", 0L)
@@ -1680,13 +1719,37 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                             launchAdRaw.optString("actionText", "Learn More")
                                         }
                                     }
-                                    val skipDuration = if (launchAdRaw.has("skipDurationSeconds")) {
+                                    var skipDuration = if (launchAdRaw.has("skipDurationSeconds")) {
                                         launchAdRaw.optInt("skipDurationSeconds", 5)
+                                    } else if (launchAdRaw.has("skip_duration_seconds")) {
+                                        launchAdRaw.optInt("skip_duration_seconds", 5)
                                     } else if (launchAdRaw.has("skipSeconds")) {
                                         launchAdRaw.optInt("skipSeconds", 5)
+                                    } else if (launchAdRaw.has("skip_seconds")) {
+                                        launchAdRaw.optInt("skip_seconds", 5)
                                     } else if (launchAdRaw.has("skipDelay")) {
                                         launchAdRaw.optInt("skipDelay", 5)
-                                    } else 5
+                                    } else if (launchAdRaw.has("skip_delay")) {
+                                        launchAdRaw.optInt("skip_delay", 5)
+                                    } else if (launchAdRaw.has("countdown")) {
+                                        launchAdRaw.optInt("countdown", 5)
+                                    } else if (launchAdRaw.has("countdown_seconds")) {
+                                        launchAdRaw.optInt("countdown_seconds", 5)
+                                    } else if (launchAdRaw.has("countdownSeconds")) {
+                                        launchAdRaw.optInt("countdownSeconds", 5)
+                                    } else {
+                                        val optStr = launchAdRaw.optString("skipDurationSeconds", "").ifBlank {
+                                            launchAdRaw.optString("skip_duration_seconds", "").ifBlank {
+                                                launchAdRaw.optString("skipSeconds", "").ifBlank {
+                                                    launchAdRaw.optString("skip_seconds", "")
+                                                }
+                                            }
+                                        }
+                                        optStr.toIntOrNull() ?: 5
+                                    }
+                                    if (skipDuration <= 0) {
+                                        skipDuration = 5
+                                    }
 
                                     val displayFrequency = launchAdRaw.optString("displayFrequency", "").ifBlank {
                                         launchAdRaw.optString("showMode", "").ifBlank {
@@ -1757,7 +1820,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                             title = json.optString("launchAdTitle", ""),
                                             description = json.optString("launchAdDescription", ""),
                                             buttonText = json.optString("launchAdButtonText", "Learn More"),
-                                            skipDurationSeconds = json.optInt("launchAdSkipSeconds", json.optInt("splashAdSkipSeconds", 5)),
+                                            skipDurationSeconds = let {
+                                                val s = json.optInt("launchAdSkipSeconds", json.optInt("splashAdSkipSeconds", 5))
+                                                if (s <= 0) 5 else s
+                                            },
                                             displayFrequency = json.optString("launchAdDisplayFrequency", "").ifBlank {
                                                 json.optString("splashAdDisplayFrequency", "").ifBlank {
                                                     json.optString("displayFrequency", "EVERY_LAUNCH")
@@ -1808,6 +1874,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putBoolean("isLiveTvLockEnabled", isLiveTvLockEnabled)
                                     .putString("premiumLiveTvIds", premiumLiveTvIds.joinToString(","))
                                     .putString("premiumLiveTvCategories", premiumLiveTvCategories.joinToString(","))
+                                    .putBoolean("isPreSplashAdEnabled", isPreSplashAdEnabled)
+                                    .putString("preSplashMediaType", preSplashMediaType)
+                                    .putString("preSplashMediaUrl", preSplashMediaUrl)
+                                    .putInt("preSplashSkipSeconds", preSplashSkipSeconds)
+                                    .putString("preSplashCtaText", preSplashCtaText)
+                                    .putString("preSplashCtaUrl", preSplashCtaUrl)
 
                                 if (parsedLaunchAd != null) {
                                     val adJsonObj = org.json.JSONObject().apply {
@@ -1878,7 +1950,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 fancodeValidityHours = fancodeValidityHours,
                                 premiumLiveTvIds = premiumLiveTvIds,
                                 premiumLiveTvCategories = premiumLiveTvCategories,
-                                isLiveTvLockEnabled = isLiveTvLockEnabled
+                                isLiveTvLockEnabled = isLiveTvLockEnabled,
+                                isPreSplashAdEnabled = isPreSplashAdEnabled,
+                                preSplashMediaType = preSplashMediaType,
+                                preSplashMediaUrl = preSplashMediaUrl,
+                                preSplashSkipSeconds = preSplashSkipSeconds,
+                                preSplashCtaText = preSplashCtaText,
+                                preSplashCtaUrl = preSplashCtaUrl
                             )
 
                             if (parsedLaunchAd != null && parsedLaunchAd.enabled && parsedLaunchAd.mediaUrl.isNotBlank()) {

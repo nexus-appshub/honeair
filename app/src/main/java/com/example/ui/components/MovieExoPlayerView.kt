@@ -428,11 +428,10 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         }
     }
 
-    // Auto-hide controls timer
-    LaunchedEffect(showControls, isPlaying) {
-        if (showControls && isPlaying) {
-            delay(4000)
-            showControls = false
+    // Force controls to always remain open and never auto-hide
+    LaunchedEffect(showControls) {
+        if (!showControls) {
+            showControls = true
         }
     }
 
@@ -643,7 +642,8 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         // Render ExoPlayer view
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                val view = android.view.LayoutInflater.from(ctx).inflate(com.example.R.layout.exo_player_texture_view, null) as PlayerView
+                view.apply {
                     keepScreenOn = true
                     useController = false
                     this.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -678,21 +678,7 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
             modifier = Modifier.fillMaxSize()
         )
 
-        // Loading and Buffering Indicator
-        if (playbackState == Player.STATE_BUFFERING && errorMessage == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f)),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    color = NeonCyan,
-                    strokeWidth = 3.dp,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-        }
+        // Loading and Buffering Indicator (Removed to prevent spinners on screen, as requested)
 
         // Overlay 1: Blinking 2X Fast Forward HUD (Transparent with no background card)
         AnimatedVisibility(

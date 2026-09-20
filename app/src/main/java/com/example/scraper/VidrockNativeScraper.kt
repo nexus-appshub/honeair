@@ -41,7 +41,8 @@ object VidrockNativeScraper {
     )
 
     private fun sanitizeTmdbId(rawId: String): String {
-        return rawId.trim()
+        val baseId = if (rawId.contains(":")) rawId.substringBefore(":") else rawId
+        return baseId.trim()
             .removePrefix("movie_")
             .removePrefix("series_")
             .removePrefix("anikoto_")

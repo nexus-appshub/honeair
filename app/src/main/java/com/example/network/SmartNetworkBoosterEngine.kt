@@ -335,7 +335,7 @@ object SmartNetworkBoosterEngine {
         isHardwareAccelerated: Boolean = true
     ): RenderersFactory {
         val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true) // Crucial: Automatically falls back if hardware decoder drops frame
 
         if (decoderMode == 2 || !isHardwareAccelerated) {

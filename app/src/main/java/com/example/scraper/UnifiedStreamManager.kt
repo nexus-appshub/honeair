@@ -697,9 +697,9 @@ object UnifiedStreamManager {
         }
 
         // 4. PARALLEL SPEED RACE ACROSS MULTI LIST OF SERVERS:
-        // Hindi, VidRock (direct), Flixer, Prime, Hexa, Alfa, Gama, VidLink, AutoEmbed
+        // Hindi, VidRock (direct), Flixer, Prime, Hexa, Alfa, Gama, VidLink, AutoEmbed, Lamda, Zeta, Ophim, Catflix, Beta, Sigma
         coroutineScope {
-            val winnerChannel = kotlinx.coroutines.channels.Channel<StreamRaceWinner>(15)
+            val winnerChannel = kotlinx.coroutines.channels.Channel<StreamRaceWinner>(20)
 
             // Server 1: VidRock Direct
             val jVidrock = launch(Dispatchers.IO) {
@@ -791,7 +791,70 @@ object UnifiedStreamManager {
                 } catch (_: Exception) {}
             }
 
-            val allJobs = listOf(jVidrock, jFlixer, jPrime, jHexa, jHindi, jAlfa, jGama, jVidlink, jAutoEmbed)
+            // Server 10: Lamda
+            val jLamda = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("lamda", finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("lamda", "Lamda", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Server 11: Zeta
+            val jZeta = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("zeta", finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("zeta", "Zeta", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Server 12: Ophim
+            val jOphim = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("ophim", finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("ophim", "Ophim", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Server 13: Catflix
+            val jCatflix = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("catflix", finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("catflix", "Catflix", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Server 14: Beta
+            val jBeta = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("beta", finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("beta", "Beta", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Server 15: Sigma
+            val jSigma = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("sigma", finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("sigma", "Sigma", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val allJobs = listOf(
+                jVidrock, jFlixer, jPrime, jHexa, jHindi, jAlfa, jGama, 
+                jVidlink, jAutoEmbed, jLamda, jZeta, jOphim, jCatflix, jBeta, jSigma
+            )
 
             var winner: StreamRaceWinner? = null
             val completedWinners = java.util.concurrent.ConcurrentHashMap<String, StreamRaceWinner>()
@@ -800,7 +863,7 @@ object UnifiedStreamManager {
             try {
                 // Collect results in parallel and evaluate priorities
                 while (System.currentTimeMillis() - startTime < 8000L) {
-                    val nextWinner = kotlinx.coroutines.withTimeoutOrNull(200L) {
+                    val nextWinner = kotlinx.coroutines.withTimeoutOrNull(100L) {
                         winnerChannel.receive()
                     }
                     if (nextWinner != null) {
@@ -818,19 +881,15 @@ object UnifiedStreamManager {
                         break
                     }
 
-                    // Priority 2: If 1200ms have passed, and we have "delta" (HINDI), choose "delta"
-                    if (System.currentTimeMillis() - startTime > 1200L) {
-                        if (completedWinners.containsKey("delta")) {
-                            winner = completedWinners["delta"]
-                            break
-                        }
-                    }
+                    val elapsed = System.currentTimeMillis() - startTime
 
-                    // Priority 3: If 1800ms have passed and we have any other working stream, use the best available
-                    if (System.currentTimeMillis() - startTime > 1800L) {
+                    // Priority 2: If 2500ms have passed, and we have any working stream, return the best we have immediately!
+                    if (elapsed > 2500L) {
                         if (completedWinners.isNotEmpty()) {
                             winner = completedWinners["filxer"]
                                 ?: completedWinners["delta"]
+                                ?: completedWinners["vidrock_direct"]
+                                ?: completedWinners["vidlink_direct"]
                                 ?: completedWinners.values.firstOrNull()
                             break
                         }
@@ -847,6 +906,8 @@ object UnifiedStreamManager {
             if (winner == null && completedWinners.isNotEmpty()) {
                 winner = completedWinners["filxer"]
                     ?: completedWinners["delta"]
+                    ?: completedWinners["vidrock_direct"]
+                    ?: completedWinners["vidlink_direct"]
                     ?: completedWinners.values.firstOrNull()
             }
 

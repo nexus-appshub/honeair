@@ -60,6 +60,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import com.example.ui.components.LaunchAdOverlayScreen
+import com.example.ui.components.PreSplashOverlayScreen
 import com.example.ui.components.FloatingDownloadButton
 import com.example.ui.components.FloatingHomaiButton
 import com.example.ui.components.GlowCapsuleNavigationBar
@@ -305,6 +306,28 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                 } else null
             }
         } else null
+    }
+
+    val showPreSplashOverlay by viewModel.showPreSplashOverlay.collectAsState()
+    appControlConfig?.let { config ->
+        if (config.isPreSplashAdEnabled && showPreSplashOverlay) {
+            PreSplashOverlayScreen(
+                config = config,
+                onDismiss = { viewModel.dismissPreSplashOverlay() },
+                onOpenLink = { url ->
+                    try {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed to open pre-splash url: $url", e)
+                    }
+                    viewModel.dismissPreSplashOverlay()
+                }
+            )
+            return
+        }
     }
 
     // Full screen Pre-Splash / Pre-Lock Ad or Poster Overlay
@@ -2029,7 +2052,7 @@ fun GlobalFanCodeLockScreen(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = appControlConfig?.fancodeOverlayBuyText?.ifBlank { null } ?: "Subscribe Now",
+                                    text = appControlConfig?.fancodeOverlayBuyText?.ifBlank { null } ?: "Subscribe / Buy Pass",
                                     color = Color.White,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.ExtraBold
@@ -2373,7 +2396,7 @@ fun FanCodeGetCodeOptionsModal(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Get via Official Website",
+                        text = "Get FanCode via Official Website",
                         color = Color.White,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold

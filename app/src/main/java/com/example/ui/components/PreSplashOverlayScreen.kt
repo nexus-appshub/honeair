@@ -1,30 +1,27 @@
 package com.example.ui.components
 
-import android.content.Context
 import android.net.Uri
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -36,7 +33,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -45,44 +41,33 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.ui.viewmodel.LaunchAdOverlayConfig
+import com.example.ui.viewmodel.AppControlConfig
 import kotlinx.coroutines.delay
-
-private fun isVideoMedia(url: String, mediaType: String): Boolean {
-    if (mediaType.equals("video", ignoreCase = true)) return true
-    if (mediaType.equals("image", ignoreCase = true) || mediaType.equals("poster", ignoreCase = true)) return false
-    val clean = url.lowercase().substringBefore("?")
-    return clean.endsWith(".mp4") ||
-            clean.endsWith(".m3u8") ||
-            clean.endsWith(".webm") ||
-            clean.endsWith(".mkv") ||
-            clean.endsWith(".mov") ||
-            clean.contains("video") ||
-            clean.contains("stream")
-}
 
 @OptIn(UnstableApi::class)
 @Composable
-fun LaunchAdOverlayScreen(
-    config: LaunchAdOverlayConfig,
+fun PreSplashOverlayScreen(
+    config: AppControlConfig,
     onDismiss: () -> Unit,
     onOpenLink: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val isVideo = remember(config.mediaUrl, config.mediaType) {
-        isVideoMedia(config.mediaUrl, config.mediaType)
+    val isVideo = remember(config.preSplashMediaUrl, config.preSplashMediaType) {
+        config.preSplashMediaType.equals("video", ignoreCase = true) ||
+        config.preSplashMediaUrl.lowercase().contains(".mp4") ||
+        config.preSplashMediaUrl.lowercase().contains(".m3u8")
     }
 
     var isMuted by remember { mutableStateOf(false) }
-    var remainingSeconds by remember(config.skipDurationSeconds) {
-        val seconds = config.skipDurationSeconds
+    var remainingSeconds by remember(config.preSplashSkipSeconds) {
+        val seconds = config.preSplashSkipSeconds
         mutableIntStateOf(if (seconds <= 0) 5 else seconds)
     }
 
     val canSkip = remainingSeconds <= 0
 
     // Countdown timer for Skip button
-    LaunchedEffect(config.skipDurationSeconds) {
+    LaunchedEffect(config.preSplashSkipSeconds) {
         while (remainingSeconds > 0) {
             delay(1000L)
             remainingSeconds--
@@ -94,48 +79,50 @@ fun LaunchAdOverlayScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .testTag("launch_ad_overlay_screen")
+            .testTag("pre_splash_overlay_screen")
     ) {
         // Background layer: blurred image if image ad, or elegant charcoal dark pattern for videos
-        if (isVideo) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF161618),
-                                Color(0xFF09090B)
-                            )
-                        )
-                    )
-            )
-        } else {
-            Box(modifier = Modifier.fillMaxSize()) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(config.mediaUrl)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    alpha = 0.35f,
-                    modifier = Modifier.fillMaxSize()
-                )
+        if (config.preSplashMediaUrl.isNotBlank()) {
+            if (isVideo) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.75f))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF161618),
+                                    Color(0xFF09090B)
+                                )
+                            )
+                        )
                 )
+            } else {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(config.preSplashMediaUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        alpha = 0.35f,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.75f))
+                    )
+                }
             }
         }
 
-        if (isVideo) {
+        if (isVideo && config.preSplashMediaUrl.isNotBlank()) {
             // Media3 Fullscreen Video Player
             var isPlayerReady by remember { mutableStateOf(false) }
-            val exoPlayer = remember(config.mediaUrl) {
+            val exoPlayer = remember(config.preSplashMediaUrl) {
                 ExoPlayer.Builder(context).build().apply {
-                    val mediaItem = MediaItem.fromUri(Uri.parse(config.mediaUrl))
+                    val mediaItem = MediaItem.fromUri(Uri.parse(config.preSplashMediaUrl))
                     setMediaItem(mediaItem)
                     repeatMode = Player.REPEAT_MODE_ALL
                     volume = if (isMuted) 0f else 1f
@@ -169,8 +156,8 @@ fun LaunchAdOverlayScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        if (config.targetUrl.isNotBlank()) {
-                            onOpenLink(config.targetUrl)
+                        if (config.preSplashCtaUrl.isNotBlank()) {
+                            onOpenLink(config.preSplashCtaUrl)
                         }
                     }
             ) {
@@ -202,7 +189,7 @@ fun LaunchAdOverlayScreen(
                     }
                 }
             }
-        } else {
+        } else if (config.preSplashMediaUrl.isNotBlank()) {
             // Fullscreen Image Poster - Fit Content Scale to prevent cropping
             Box(
                 modifier = Modifier
@@ -211,20 +198,49 @@ fun LaunchAdOverlayScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        if (config.targetUrl.isNotBlank()) {
-                            onOpenLink(config.targetUrl)
+                        if (config.preSplashCtaUrl.isNotBlank()) {
+                            onOpenLink(config.preSplashCtaUrl)
                         }
                     }
             ) {
                 AsyncImage(
                     model = ImageRequest.Builder(context)
-                        .data(config.mediaUrl)
+                        .data(config.preSplashMediaUrl)
                         .crossfade(true)
                         .build(),
-                    contentDescription = config.title.ifBlank { "Promotional Ad Poster" },
+                    contentDescription = "Pre-Splash Promo Image",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+        } else {
+            // Default elegant background placeholder
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Color(0xFF2C1B4D), Color(0xFF0F0B1E)),
+                            radius = 2000f
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(
+                        color = Color(0xFFFF6B00),
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Text(
+                        text = "Loading Premium Content...",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
+                }
             }
         }
 
@@ -278,7 +294,7 @@ fun LaunchAdOverlayScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Audio mute/unmute button (only for video)
-                if (isVideo) {
+                if (isVideo && config.preSplashMediaUrl.isNotBlank()) {
                     Surface(
                         onClick = { isMuted = !isMuted },
                         shape = CircleShape,
@@ -306,7 +322,7 @@ fun LaunchAdOverlayScreen(
                         shadowElevation = 4.dp,
                         modifier = Modifier
                             .height(36.dp)
-                            .testTag("launch_ad_skip_button")
+                            .testTag("pre_splash_skip_button")
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -314,7 +330,7 @@ fun LaunchAdOverlayScreen(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "Skip Ad",
+                                text = "Skip",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -354,9 +370,9 @@ fun LaunchAdOverlayScreen(
                 .padding(horizontal = 20.dp, vertical = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (config.targetUrl.isNotBlank()) {
+            if (config.preSplashCtaUrl.isNotBlank()) {
                 OutlinedButton(
-                    onClick = { onOpenLink(config.targetUrl) },
+                    onClick = { onOpenLink(config.preSplashCtaUrl) },
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = Color.Transparent,
                         contentColor = Color.White
@@ -366,14 +382,14 @@ fun LaunchAdOverlayScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
-                        .testTag("launch_ad_cta_button")
+                        .testTag("pre_splash_cta_button")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = config.buttonText.ifBlank { "Learn More" },
+                            text = config.preSplashCtaText.ifBlank { "Learn More" },
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White

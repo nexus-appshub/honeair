@@ -1464,12 +1464,28 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         contentAlignment = Alignment.Center
                     ) {
                         if (isScrapingDirectStream || directScrapeSecondsRemaining > 0) {
-                            // Clean canvas without any loading overlay spinner so stream plays instantly
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(SpaceBlack)
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = NeonCyan,
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(44.dp)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Connecting HM VIP / Fast Server...",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Please wait, launching instant playback...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                            }
                         } else {
                             // Only displayed after the FULL 60 seconds have elapsed without finding a stream
                             Column(

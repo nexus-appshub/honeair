@@ -27,7 +27,7 @@ object VidnestNativeScraper {
 
     val PROVIDERS = listOf(
         VidnestProviderInfo("delta", "HINDI", "allmovies", "https://vidnest.fun/"),
-        VidnestProviderInfo("filxer", "Filxer", "rogflix", "https://rogflix.fun/"),
+        VidnestProviderInfo("filxer", "HM VIP", "rogflix", "https://rogflix.fun/"),
         VidnestProviderInfo("lamda", "Lamda", "allmovies", "https://vidnest.fun/"),
         VidnestProviderInfo("prime", "Prime", "vidrock", "https://vidrock.net/"),
         VidnestProviderInfo("hexa", "Hexa", "vidlink", "https://vidlink.pro/"),
@@ -117,7 +117,8 @@ object VidnestNativeScraper {
     }
 
     private fun sanitizeTmdbId(rawId: String): String {
-        return rawId.trim()
+        val baseId = if (rawId.contains(":")) rawId.substringBefore(":") else rawId
+        return baseId.trim()
             .removePrefix("movie_")
             .removePrefix("series_")
             .removePrefix("anikoto_")
