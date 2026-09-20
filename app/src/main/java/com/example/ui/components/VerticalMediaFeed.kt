@@ -800,10 +800,10 @@ fun VerticalMediaFeedCard(
                             } else {
                                 // Non-anime stream servers list (Fastest Auto, Hindi, VidRock, Flixer, Prime, Hexa, etc.)
                                 val providers = listOf(
-                                    "⚡ Fastest (Auto Parallel)" to "fastest_auto",
+                                    "HM VIP Server" to "filxer",
                                     "HINDI Server" to "delta",
+                                    "⚡ Fastest (Auto Parallel)" to "fastest_auto",
                                     "ZOZO Server (Direct)" to "vidrock_direct",
-                                    "Flixer Server" to "filxer",
                                     "Prime Server" to "prime",
                                     "Hexa Server" to "hexa",
                                     "Alfa Server" to "alfa",
@@ -1151,10 +1151,10 @@ fun VerticalMediaFeedCard(
             Spacer(modifier = Modifier.height(6.dp))
 
             val streamServers = listOf(
-                Triple("fastest_auto", "⚡ Fastest Direct", Color(0xFF00E5FF)),
+                Triple("filxer", "HM VIP", Color(0xFF00E5FF)),
                 Triple("delta", "HINDI", Color(0xFFFF9800)),
+                Triple("fastest_auto", "⚡ Fastest Direct", Color(0xFF00E5FF)),
                 Triple("vidrock_direct", "ZOZO (Direct)", Color(0xFFB388FF)),
-                Triple("filxer", "Flixer", Color(0xFF00E5FF)),
                 Triple("prime", "Prime", Color(0xFF00E676)),
                 Triple("hexa", "Hexa", Color(0xFFE040FB)),
                 Triple("alfa", "Alfa", Color(0xFF00E5FF)),

@@ -532,7 +532,7 @@ fun MediaDetailSheet(
                     val activeLabel = when (selectedStreamServerKey) {
                         "delta" -> "HINDI"
                         "vidrock_direct" -> "ZOZO (Direct)"
-                        "filxer" -> "FLIXER"
+                        "filxer" -> "HM VIP"
                         "prime" -> "PRIME"
                         "hexa" -> "HEXA"
                         "alfa" -> "ALFA"
@@ -547,6 +547,7 @@ fun MediaDetailSheet(
                     val badgeColor = when (selectedStreamServerKey) {
                         "delta" -> Color(0xFFFF9800)
                         "vidrock_direct" -> NeonPurple
+                        "filxer" -> NeonCyan
                         "prime" -> Color(0xFF00E676)
                         "hexa" -> Color(0xFFE040FB)
                         else -> NeonCyan
@@ -568,10 +569,10 @@ fun MediaDetailSheet(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 val normalServers = listOf(
-                    Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan),
+                    Triple("filxer", "HM VIP", NeonCyan),
                     Triple("delta", "HINDI", Color(0xFFFF9800)),
+                    Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan),
                     Triple("vidrock_direct", "ZOZO (Direct)", NeonPurple),
-                    Triple("filxer", "Flixer", NeonCyan),
                     Triple("prime", "Prime", Color(0xFF00E676)),
                     Triple("hexa", "Hexa", Color(0xFFE040FB)),
                     Triple("alfa", "Alfa", NeonCyan),

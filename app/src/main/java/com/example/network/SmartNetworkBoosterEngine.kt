@@ -254,38 +254,38 @@ object SmartNetworkBoosterEngine {
 
         when (bufferIndex) {
             0 -> { // Ultra Low Latency (2s) - Fast start
-                minBuffer = if (isLiveStream) 12000 else 15000
-                maxBuffer = if (isLiveStream) 35000 else 45000
-                bufferForPlayback = 1000
-                bufferAfterRebuffer = 2000
+                minBuffer = if (isLiveStream) 8000 else 10000
+                maxBuffer = if (isLiveStream) 25000 else 30000
+                bufferForPlayback = 500  // Ultra Fast Start: 500ms
+                bufferAfterRebuffer = 1500
                 backBufferDuration = 8000
             }
             1 -> { // Medium (5 sec) - Recommended for Live Channels / Toffee / Sports / Movies
-                minBuffer = if (isLiveStream) 25000 else 35000
-                maxBuffer = if (isLiveStream) 70000 else 90000
-                bufferForPlayback = 1500
-                bufferAfterRebuffer = 3500
+                minBuffer = if (isLiveStream) 20000 else 25000
+                maxBuffer = if (isLiveStream) 60000 else 75000
+                bufferForPlayback = 500  // Ultra Fast Start: 500ms
+                bufferAfterRebuffer = 2000
                 backBufferDuration = 20000
             }
             2 -> { // Large (10 sec) - Anti-Freeze & Heavy Traffic Stability
-                minBuffer = if (isLiveStream) 45000 else 60000
-                maxBuffer = if (isLiveStream) 120000 else 150000
-                bufferForPlayback = 2500
-                bufferAfterRebuffer = 5000
+                minBuffer = if (isLiveStream) 35000 else 45000
+                maxBuffer = if (isLiveStream) 90000 else 110000
+                bufferForPlayback = 1000
+                bufferAfterRebuffer = 3000
                 backBufferDuration = 30000
             }
             3 -> { // Maximum Anti-Buffer (25 sec) - Deep Buffer for Weak Networks
-                minBuffer = if (isLiveStream) 80000 else 100000
-                maxBuffer = if (isLiveStream) 240000 else 300000
-                bufferForPlayback = 3500
-                bufferAfterRebuffer = 8000
+                minBuffer = if (isLiveStream) 60000 else 80000
+                maxBuffer = if (isLiveStream) 180000 else 220000
+                bufferForPlayback = 1500
+                bufferAfterRebuffer = 4000
                 backBufferDuration = 50000
             }
             else -> {
-                minBuffer = if (isLiveStream) 25000 else 35000
-                maxBuffer = if (isLiveStream) 70000 else 90000
-                bufferForPlayback = 1500
-                bufferAfterRebuffer = 3500
+                minBuffer = if (isLiveStream) 20000 else 25000
+                maxBuffer = if (isLiveStream) 60000 else 75000
+                bufferForPlayback = 500
+                bufferAfterRebuffer = 2000
                 backBufferDuration = 20000
             }
         }

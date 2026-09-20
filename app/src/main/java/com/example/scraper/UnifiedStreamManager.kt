@@ -677,7 +677,7 @@ object UnifiedStreamManager {
                     val serverName = when (preferredServerKey) {
                         "delta" -> "HINDI"
                         "vidrock_direct" -> "ZOZO (Direct)"
-                        "filxer" -> "Flixer"
+                        "filxer" -> "HM VIP"
                         "prime" -> "Prime"
                         "hexa" -> "Hexa"
                         "alfa" -> "Alfa"
@@ -711,12 +711,12 @@ object UnifiedStreamManager {
                 } catch (_: Exception) {}
             }
 
-            // Server 2: Flixer (Rogflix direct)
+            // Server 2: HM VIP (Rogflix direct)
             val jFlixer = launch(Dispatchers.IO) {
                 try {
                     val res = VidnestNativeScraper.extractStreamFromProvider("filxer", finalTmdbId, isTv, season, effectiveEpisode)
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("filxer", "Flixer", res))
+                        winnerChannel.trySend(StreamRaceWinner("filxer", "HM VIP", res))
                     }
                 } catch (_: Exception) {}
             }
@@ -794,13 +794,61 @@ object UnifiedStreamManager {
             val allJobs = listOf(jVidrock, jFlixer, jPrime, jHexa, jHindi, jAlfa, jGama, jVidlink, jAutoEmbed)
 
             var winner: StreamRaceWinner? = null
+            val completedWinners = java.util.concurrent.ConcurrentHashMap<String, StreamRaceWinner>()
+            val startTime = System.currentTimeMillis()
+
             try {
-                winner = kotlinx.coroutines.withTimeoutOrNull(8500L) {
-                    winnerChannel.receive()
+                // Collect results in parallel and evaluate priorities
+                while (System.currentTimeMillis() - startTime < 8000L) {
+                    val nextWinner = kotlinx.coroutines.withTimeoutOrNull(200L) {
+                        winnerChannel.receive()
+                    }
+                    if (nextWinner != null) {
+                        completedWinners[nextWinner.serverKey] = nextWinner
+                        
+                        // Priority 1: If "filxer" (HM VIP) finishes successfully, return it immediately!
+                        if (completedWinners.containsKey("filxer")) {
+                            winner = completedWinners["filxer"]
+                            break
+                        }
+                    }
+
+                    if (completedWinners.containsKey("filxer")) {
+                        winner = completedWinners["filxer"]
+                        break
+                    }
+
+                    // Priority 2: If 1200ms have passed, and we have "delta" (HINDI), choose "delta"
+                    if (System.currentTimeMillis() - startTime > 1200L) {
+                        if (completedWinners.containsKey("delta")) {
+                            winner = completedWinners["delta"]
+                            break
+                        }
+                    }
+
+                    // Priority 3: If 1800ms have passed and we have any other working stream, use the best available
+                    if (System.currentTimeMillis() - startTime > 1800L) {
+                        if (completedWinners.isNotEmpty()) {
+                            winner = completedWinners["filxer"]
+                                ?: completedWinners["delta"]
+                                ?: completedWinners.values.firstOrNull()
+                            break
+                        }
+                    }
+
+                    if (allJobs.all { it.isCompleted }) {
+                        break
+                    }
                 }
             } catch (_: Exception) {}
 
             allJobs.forEach { it.cancel() }
+
+            if (winner == null && completedWinners.isNotEmpty()) {
+                winner = completedWinners["filxer"]
+                    ?: completedWinners["delta"]
+                    ?: completedWinners.values.firstOrNull()
+            }
 
             if (winner != null && winner.result.streamUrl.isNotBlank()) {
                 Log.d(TAG, "Fastest Parallel Race Winner: [${winner.serverName}] -> ${winner.result.streamUrl}")
