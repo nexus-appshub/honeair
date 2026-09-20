@@ -99,11 +99,15 @@ fun MediaDetailSheet(
     val anikotoSeasons by viewModel.anikotoSeasons.collectAsState()
     val anikotoEpisodes by viewModel.anikotoEpisodes.collectAsState()
     val isAnimeLoading by viewModel.isAnimeLoading.collectAsState()
+    val verifiedServers by viewModel.verifiedStreamServers.collectAsState()
+    val isDeepScraping by viewModel.isDeepScrapingServers.collectAsState()
 
     LaunchedEffect(item.id, selectedSeason, selectedEpisode) {
         viewModel.fetchMediaDetails(item.imdbId ?: item.id, item.type)
         viewModel.fetchYouTubeTrailerId(item.title, item.year)
-        viewModel.fetchAnikotoServers(item, selectedSeason, selectedEpisode)
+        if (isAnime) {
+            viewModel.fetchAnikotoServers(item, selectedSeason, selectedEpisode)
+        }
         // Background stream scraping link generation starts immediately on bottom plate display
         viewModel.preScrapeMediaItem(item, selectedSeason, selectedEpisode)
     }
@@ -499,8 +503,8 @@ fun MediaDetailSheet(
                 )
             }
 
-            // Normal Movies and Series Stream Servers Multi-List (Hindi, VidRock Direct, Flixer, Prime, Hexa, etc.)
-            if (!isAnime) {
+            // Live Verified Stream Servers Multi-List (Beta, Sigma, VidLink, ZOZO, Prime, Hexa, etc.)
+            if (!isAnime || verifiedServers.isNotEmpty() || !isFetchingServers) {
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider(color = sheetDividerColor)
                 Spacer(modifier = Modifier.height(12.dp))
@@ -526,23 +530,20 @@ fun MediaDetailSheet(
                             fontWeight = FontWeight.Bold,
                             color = sheetTextColor
                         )
+                        if (isDeepScraping && verifiedServers.isEmpty()) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 1.5.dp,
+                                color = NeonCyan
+                            )
+                        }
                     }
 
                     // Active server badge
-                    val activeLabel = when (selectedStreamServerKey) {
-                        "delta" -> "HINDI"
-                        "vidrock_direct" -> "ZOZO (Direct)"
-                        "filxer" -> "HM VIP"
-                        "prime" -> "PRIME"
-                        "hexa" -> "HEXA"
-                        "alfa" -> "ALFA"
-                        "gama" -> "GAMA"
-                        "lamda" -> "LAMDA"
-                        "zeta" -> "ZETA"
-                        "catflix" -> "CATFLIX"
-                        "vidlink_direct" -> "VIDLINK"
-                        "autoembed_direct" -> "AUTOEMBED"
-                        else -> "⚡ AUTO PARALLEL FASTEST"
+                    val activeLabel = if (selectedStreamServerKey == "fastest_auto" || selectedStreamServerKey == null) {
+                        "⚡ AUTO: FASTEST DIRECT"
+                    } else {
+                        verifiedServers.find { it.key == selectedStreamServerKey }?.name?.uppercase() ?: selectedStreamServerKey?.uppercase() ?: "⚡ AUTO"
                     }
                     val badgeColor = when (selectedStreamServerKey) {
                         "delta" -> Color(0xFFFF9800)
@@ -550,6 +551,8 @@ fun MediaDetailSheet(
                         "filxer" -> NeonCyan
                         "prime" -> Color(0xFF00E676)
                         "hexa" -> Color(0xFFE040FB)
+                        "beta" -> NeonCyan
+                        "sigma" -> Color(0xFF3F51B5)
                         else -> NeonCyan
                     }
                     Surface(
@@ -568,27 +571,18 @@ fun MediaDetailSheet(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                val normalServers = listOf(
-                    Triple("filxer", "HM VIP", NeonCyan),
-                    Triple("delta", "HINDI", Color(0xFFFF9800)),
-                    Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan),
-                    Triple("vidrock_direct", "ZOZO (Direct)", NeonPurple),
-                    Triple("prime", "Prime", Color(0xFF00E676)),
-                    Triple("hexa", "Hexa", Color(0xFFE040FB)),
-                    Triple("alfa", "Alfa", NeonCyan),
-                    Triple("gama", "Gama", NeonPurple),
-                    Triple("lamda", "Lamda", sheetChipText),
-                    Triple("zeta", "Zeta", sheetChipText),
-                    Triple("catflix", "Catflix", Color(0xFFFF5722)),
-                    Triple("vidlink_direct", "VidLink", NeonCyan),
-                    Triple("autoembed_direct", "AutoEmbed", NeonPurple)
-                )
+                val displayServers = buildList {
+                    add(Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan))
+                    verifiedServers.forEach { srv ->
+                        add(Triple(srv.key, srv.name, Color(srv.accentColorHex)))
+                    }
+                }
 
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(normalServers) { (key, label, accentColor) ->
+                    items(displayServers) { (key, label, accentColor) ->
                         val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "fastest_auto")
                         FilterChip(
                             selected = isSelected,
@@ -620,8 +614,8 @@ fun MediaDetailSheet(
                 }
             }
 
-            // Anikoto Scraped Server Selection (Line 1: SUB, Line 2: DUB)
-            if (isFetchingServers || subServers.isNotEmpty() || dubServers.isNotEmpty()) {
+            // Anikoto Scraped Server Selection (Line 1: SUB, Line 2: DUB) - Exclusively for Anime
+            if (isAnime && (isFetchingServers || subServers.isNotEmpty() || dubServers.isNotEmpty())) {
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider(color = sheetDividerColor)
                 Spacer(modifier = Modifier.height(12.dp))

@@ -2224,11 +2224,29 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _activeMediaEpisode = MutableStateFlow(1)
     val activeMediaEpisode: StateFlow<Int> = _activeMediaEpisode.asStateFlow()
 
-    private val _selectedStreamServerKey = MutableStateFlow<String?>("filxer")
+    private val _selectedStreamServerKey = MutableStateFlow<String?>("fastest_auto")
     val selectedStreamServerKey: StateFlow<String?> = _selectedStreamServerKey.asStateFlow()
+
+    private val _verifiedStreamServers = MutableStateFlow<List<com.example.scraper.UnifiedStreamManager.VerifiedStreamServer>>(emptyList())
+    val verifiedStreamServers: StateFlow<List<com.example.scraper.UnifiedStreamManager.VerifiedStreamServer>> = _verifiedStreamServers.asStateFlow()
+
+    private val _isDeepScrapingServers = MutableStateFlow(false)
+    val isDeepScrapingServers: StateFlow<Boolean> = _isDeepScrapingServers.asStateFlow()
 
     fun selectStreamServerKey(key: String?) {
         _selectedStreamServerKey.value = key
+        val item = _activeMediaItem.value
+        val season = _activeMediaSeason.value
+        val episode = _activeMediaEpisode.value
+        if (item != null && !key.isNullOrBlank() && key != "fastest_auto") {
+            val tmdbId = item.imdbId ?: item.id
+            val directStream = com.example.scraper.UnifiedStreamManager.getVerifiedServerStream(tmdbId, season, episode, key)
+            if (directStream != null && directStream.streamUrl.isNotBlank()) {
+                _activeMediaStreamUrl.value = directStream.streamUrl
+                _activeMediaStreamHeaders.value = directStream.headers
+                _isPlayerPlaying.value = true
+            }
+        }
     }
 
     private val _playerAspectRatio = MutableStateFlow(16f / 9f)
@@ -2294,6 +2312,19 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun fetchAnikotoServers(item: MediaItem, season: Int = 1, episode: Int = 1) {
+        val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
+            title = item.title,
+            category = item.category,
+            type = item.type,
+            id = item.id
+        )
+        if (!isAnime) {
+            _availableSubServers.value = emptyList()
+            _availableDubServers.value = emptyList()
+            _isFetchingServers.value = false
+            return
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             _isFetchingServers.value = true
             try {
@@ -3614,65 +3645,51 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             id = effectiveItem.id
         )
 
-        // Instant pre-scrape for anime metadata & servers
+        val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
+                           effectiveItem.type.equals("tv", ignoreCase = true) ||
+                           (isAnime && !effectiveItem.category.lowercase().contains("movie"))
+
+        val existingVerified = com.example.scraper.UnifiedStreamManager.getVerifiedServers(tmdbId, detectedSeason, episode)
+        if (existingVerified.isNotEmpty()) {
+            _verifiedStreamServers.value = existingVerified
+        } else {
+            _verifiedStreamServers.value = emptyList()
+        }
+
+        _isDeepScrapingServers.value = true
+
         if (isAnime) {
             fetchAnikotoMediaData(effectiveItem, detectedSeason)
             fetchAnikotoServers(effectiveItem, detectedSeason, episode)
-            if (com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode) != null) return
-
-            val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
-                               effectiveItem.type.equals("tv", ignoreCase = true) ||
-                               (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
-
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    val streamResult = com.example.scraper.UnifiedStreamManager.getStream(
-                        context = getApplication(),
-                        title = effectiveItem.title,
-                        tmdbId = tmdbId,
-                        isTv = isSeriesItem,
-                        season = detectedSeason,
-                        episode = episode,
-                        isAnime = true
-                    )
-                    if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
-                        if (_activeMediaItem.value?.id == item.id && _activeMediaStreamUrl.value.isNullOrBlank()) {
-                            _activeMediaStreamUrl.value = streamResult.streamUrl
-                            _activeMediaStreamHeaders.value = streamResult.headers
-                            _isPlayerPlaying.value = true
-                        }
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            return
         }
-
-        // Normal Movies & Series (e.g. Facing El Chapo, Silo): High-speed parallel server race
-        val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
-                           effectiveItem.type.equals("tv", ignoreCase = true)
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val winner = com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                com.example.scraper.UnifiedStreamManager.deepScrapeAndVerifyAllServers(
                     context = getApplication(),
                     tmdbId = tmdbId,
                     title = effectiveItem.title,
                     isTv = isSeriesItem,
                     season = detectedSeason,
                     episode = episode,
-                    preferredServerKey = preferredServerKey ?: _selectedStreamServerKey.value
-                )
-                if (winner != null && winner.result.streamUrl.isNotBlank()) {
-                    if (_activeMediaItem.value?.id == item.id && _activeMediaStreamUrl.value.isNullOrBlank()) {
-                        _activeMediaStreamUrl.value = winner.result.streamUrl
-                        _activeMediaStreamHeaders.value = winner.result.headers
-                        _isPlayerPlaying.value = true
+                    isAnime = isAnime,
+                    onServerFound = { server ->
+                        val currentList = _verifiedStreamServers.value.toMutableList()
+                        if (currentList.none { it.key == server.key }) {
+                            currentList.add(server)
+                            _verifiedStreamServers.value = currentList
+                        }
+                        if (_activeMediaItem.value?.id == item.id && _activeMediaStreamUrl.value.isNullOrBlank()) {
+                            _activeMediaStreamUrl.value = server.result.streamUrl
+                            _activeMediaStreamHeaders.value = server.result.headers
+                            _isPlayerPlaying.value = true
+                        }
                     }
-                }
+                )
             } catch (e: Exception) {
                 e.printStackTrace()
+            } finally {
+                _isDeepScrapingServers.value = false
             }
         }
     }
@@ -3731,6 +3748,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
+            // Check if selected verified server is already ready
+            val prefKey = _selectedStreamServerKey.value
+            if (!prefKey.isNullOrBlank() && prefKey != "fastest_auto") {
+                val directVerified = com.example.scraper.UnifiedStreamManager.getVerifiedServerStream(tmdbId, detectedSeason, episode, prefKey)
+                if (directVerified != null && directVerified.streamUrl.isNotBlank()) {
+                    _activeMediaStreamUrl.value = directVerified.streamUrl
+                    _activeMediaStreamHeaders.value = directVerified.headers
+                    _isPlayerPlaying.value = true
+                    return@launch
+                }
+            }
+
             // Check if stream is already pre-scraped / cached in background for instant launch!
             val cachedStream = com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode)
             if (cachedStream != null && cachedStream.streamUrl.isNotBlank()) {

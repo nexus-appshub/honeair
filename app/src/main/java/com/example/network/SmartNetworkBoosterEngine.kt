@@ -254,39 +254,39 @@ object SmartNetworkBoosterEngine {
 
         when (bufferIndex) {
             0 -> { // Ultra Low Latency (2s) - Fast start
-                minBuffer = if (isLiveStream) 8000 else 10000
-                maxBuffer = if (isLiveStream) 25000 else 30000
-                bufferForPlayback = 500  // Ultra Fast Start: 500ms
-                bufferAfterRebuffer = 1500
-                backBufferDuration = 8000
+                minBuffer = if (isLiveStream) 8000 else 15000
+                maxBuffer = if (isLiveStream) 25000 else 40000
+                bufferForPlayback = if (isLiveStream) 800 else 1200
+                bufferAfterRebuffer = if (isLiveStream) 1500 else 2500
+                backBufferDuration = 10000
             }
-            1 -> { // Medium (5 sec) - Recommended for Live Channels / Toffee / Sports / Movies
-                minBuffer = if (isLiveStream) 20000 else 25000
-                maxBuffer = if (isLiveStream) 60000 else 75000
-                bufferForPlayback = 500  // Ultra Fast Start: 500ms
-                bufferAfterRebuffer = 2000
+            1 -> { // Medium (Recommended for VOD Movies & Live TV - Super Smooth)
+                minBuffer = if (isLiveStream) 15000 else 25000
+                maxBuffer = if (isLiveStream) 50000 else 60000
+                bufferForPlayback = if (isLiveStream) 800 else 1000  // 1s start cushion for instant playback
+                bufferAfterRebuffer = if (isLiveStream) 1500 else 2000 // 2s after rebuffer
                 backBufferDuration = 20000
             }
             2 -> { // Large (10 sec) - Anti-Freeze & Heavy Traffic Stability
-                minBuffer = if (isLiveStream) 35000 else 45000
-                maxBuffer = if (isLiveStream) 90000 else 110000
-                bufferForPlayback = 1000
-                bufferAfterRebuffer = 3000
-                backBufferDuration = 30000
+                minBuffer = if (isLiveStream) 35000 else 50000
+                maxBuffer = if (isLiveStream) 90000 else 120000
+                bufferForPlayback = if (isLiveStream) 1500 else 2500
+                bufferAfterRebuffer = if (isLiveStream) 3000 else 4500
+                backBufferDuration = 35000
             }
             3 -> { // Maximum Anti-Buffer (25 sec) - Deep Buffer for Weak Networks
-                minBuffer = if (isLiveStream) 60000 else 80000
-                maxBuffer = if (isLiveStream) 180000 else 220000
-                bufferForPlayback = 1500
-                bufferAfterRebuffer = 4000
-                backBufferDuration = 50000
+                minBuffer = if (isLiveStream) 60000 else 90000
+                maxBuffer = if (isLiveStream) 180000 else 240000
+                bufferForPlayback = if (isLiveStream) 2000 else 3500
+                bufferAfterRebuffer = if (isLiveStream) 4000 else 6000
+                backBufferDuration = 60000
             }
             else -> {
-                minBuffer = if (isLiveStream) 20000 else 25000
-                maxBuffer = if (isLiveStream) 60000 else 75000
-                bufferForPlayback = 500
-                bufferAfterRebuffer = 2000
-                backBufferDuration = 20000
+                minBuffer = if (isLiveStream) 20000 else 30000
+                maxBuffer = if (isLiveStream) 60000 else 90000
+                bufferForPlayback = if (isLiveStream) 1000 else 2000
+                bufferAfterRebuffer = if (isLiveStream) 2500 else 3500
+                backBufferDuration = 25000
             }
         }
 
@@ -302,7 +302,7 @@ object SmartNetworkBoosterEngine {
             )
             .setBackBuffer(backBufferDuration, true)
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setTargetBufferBytes(32 * 1024 * 1024) // 32MB dynamic memory buffer allocation
+            .setTargetBufferBytes(androidx.media3.common.C.LENGTH_UNSET) // Unbounded byte limit allows full duration buffer
             .build()
     }
 

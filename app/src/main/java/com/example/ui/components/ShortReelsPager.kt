@@ -24,13 +24,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -54,7 +57,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -87,7 +92,8 @@ fun ShortReelsPager(
     isLoadingMore: Boolean,
     hasMore: Boolean,
     onLoadMore: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBackPress: (() -> Unit)? = null
 ) {
     if (reels.isEmpty()) {
         Box(
@@ -134,7 +140,8 @@ fun ShortReelsPager(
                     reel = reel,
                     isActive = isCurrentPage,
                     isGlobalMuted = isGlobalMuted,
-                    onToggleGlobalMute = { isGlobalMuted = !isGlobalMuted }
+                    onToggleGlobalMute = { isGlobalMuted = !isGlobalMuted },
+                    onBackPress = onBackPress
                 )
             }
         }
@@ -144,8 +151,9 @@ fun ShortReelsPager(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 16.dp)
-                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                    .navigationBarsPadding()
+                    .padding(bottom = 24.dp)
+                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
                 Row(
@@ -175,7 +183,8 @@ private fun SingleReelPlayerItem(
     reel: ShortReel,
     isActive: Boolean,
     isGlobalMuted: Boolean,
-    onToggleGlobalMute: () -> Unit
+    onToggleGlobalMute: () -> Unit,
+    onBackPress: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(true) }
@@ -210,7 +219,7 @@ private fun SingleReelPlayerItem(
             .build().apply {
                 setMediaItem(mediaItemBuilder.build())
                 repeatMode = Player.REPEAT_MODE_ONE
-                videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
                 prepare()
             }
     }
@@ -334,250 +343,299 @@ private fun SingleReelPlayerItem(
         }
     }
 
+    // Responsive outer container for any device size (phone, foldable, tablet)
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                if (playbackError != null) {
-                    playbackError = null
-                    retryTrigger = System.currentTimeMillis()
-                } else {
-                    if (exoPlayer.isPlaying) {
-                        exoPlayer.pause()
-                        isPlaying = false
-                    } else {
-                        exoPlayer.play()
-                        isPlaying = true
-                    }
-                    showPlayPauseIcon = true
-                }
-            }
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
     ) {
-        // Thumbnail placeholder while buffering or preparing
-        if (reel.thumbnailUrl != null && isBuffering) {
-            AsyncImage(
-                model = reel.thumbnailUrl,
-                contentDescription = reel.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // AndroidView with PlayerView
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = exoPlayer
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    layoutParams = android.view.ViewGroup.LayoutParams(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                }
-            },
-            update = { playerView ->
-                playerView.player = exoPlayer
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Gradient shadow overlay for readable metadata at the bottom
+        // Centered responsive reels frame
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
-                    )
-                )
-        )
-
-        // Top Gradient shadow for top bar readability
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(90.dp)
-                .align(Alignment.TopCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
-                    )
-                )
-        )
-
-        // Top-Right Controls (Mute/Unmute)
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 16.dp, end = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.55f),
-                modifier = Modifier.size(36.dp)
-            ) {
-                IconButton(
-                    onClick = onToggleGlobalMute,
-                    modifier = Modifier.fillMaxSize()
+                .fillMaxSize()
+                .widthIn(max = 520.dp)
+                .clipToBounds()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
                 ) {
-                    Icon(
-                        imageVector = if (isGlobalMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                        contentDescription = if (isGlobalMuted) "Unmute" else "Mute",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-
-        // Center Play / Pause Animated Icon
-        LaunchedEffect(showPlayPauseIcon) {
-            if (showPlayPauseIcon) {
-                delay(800)
-                showPlayPauseIcon = false
-            }
-        }
-
-        AnimatedVisibility(
-            visible = showPlayPauseIcon,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.65f),
-                modifier = Modifier.size(64.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Default.PlayArrow else Icons.Default.Pause,
-                        contentDescription = if (isPlaying) "Playing" else "Paused",
-                        tint = Color.White,
-                        modifier = Modifier.size(36.dp)
-                    )
-                }
-            }
-        }
-
-        // Center Buffering Spinner
-        if (isBuffering && playbackError == null) {
-            CircularProgressIndicator(
-                color = Color(0xFFFF6B00),
-                strokeWidth = 3.dp,
-                modifier = Modifier
-                    .size(44.dp)
-                    .align(Alignment.Center)
-            )
-        }
-
-        // Error message & retry button
-        if (playbackError != null) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = playbackError ?: "Unable to play this video.",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Surface(
-                    onClick = {
+                    if (playbackError != null) {
                         playbackError = null
                         retryTrigger = System.currentTimeMillis()
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFFFF6B00),
-                    modifier = Modifier.padding(top = 4.dp)
+                    } else {
+                        if (exoPlayer.isPlaying) {
+                            exoPlayer.pause()
+                            isPlaying = false
+                        } else {
+                            exoPlayer.play()
+                            isPlaying = true
+                        }
+                        showPlayPauseIcon = true
+                    }
+                }
+        ) {
+            // Ambient background preview for letterboxing/aspect ratios
+            if (!reel.thumbnailUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = reel.thumbnailUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(0.25f)
+                )
+            }
+
+            // Thumbnail placeholder while buffering or preparing (fitted)
+            if (reel.thumbnailUrl != null && isBuffering) {
+                AsyncImage(
+                    model = reel.thumbnailUrl,
+                    contentDescription = reel.title,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Responsive Video Player with Aspect Ratio FIT so reels never get cropped awkwardly
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                },
+                update = { playerView ->
+                    playerView.player = exoPlayer
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Gradient shadow overlay for readable metadata at the bottom (compact height)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                        )
+                    )
+            )
+
+            // Top Gradient shadow for status bar & top controls readability (compact height)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(70.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent)
+                        )
+                    )
+            )
+
+            // Top Controls: Compact safe status bar padding for Back button & Mute button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 4.dp, start = 12.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                if (onBackPress != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.65f),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        IconButton(
+                            onClick = onBackPress,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.size(36.dp))
+                }
+
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.65f),
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    IconButton(
+                        onClick = onToggleGlobalMute,
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Retry",
+                            imageVector = if (isGlobalMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                            contentDescription = if (isGlobalMuted) "Unmute" else "Mute",
                             tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Retry Playback",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
+
+            // Center Play / Pause Animated Icon
+            LaunchedEffect(showPlayPauseIcon) {
+                if (showPlayPauseIcon) {
+                    delay(800)
+                    showPlayPauseIcon = false
+                }
+            }
+
+            AnimatedVisibility(
+                visible = showPlayPauseIcon,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.65f),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = if (isPlaying) "Playing" else "Paused",
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
+            }
+
+            // Center Buffering Spinner
+            if (isBuffering && playbackError == null) {
+                CircularProgressIndicator(
+                    color = Color(0xFFFF6B00),
+                    strokeWidth = 2.5.dp,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .align(Alignment.Center)
+                )
+            }
+
+            // Error message & retry button
+            if (playbackError != null) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+                        .padding(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = playbackError ?: "Unable to play this video.",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Surface(
+                        onClick = {
+                            playbackError = null
+                            retryTrigger = System.currentTimeMillis()
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFFF6B00),
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Retry",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Retry Playback",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Compact Bottom Section (Title, Author, Description & Seek Progress Bar) - safely above system navigation bar
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                if (!reel.author.isNullOrBlank()) {
+                    Text(
+                        text = "@${reel.author}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFFF6B00),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (reel.title.isNotBlank()) {
+                    Text(
+                        text = reel.title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (!reel.description.isNullOrBlank() && reel.description != reel.title) {
+                    Text(
+                        text = reel.description,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = Color.White.copy(alpha = 0.80f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                // Embedded Progress Seek Bar inside compact bottom frame
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = Color(0xFFFF6B00),
+                    trackColor = Color.White.copy(alpha = 0.25f)
+                )
+            }
         }
-
-        // Bottom Details (Title, Description, Author)
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            if (!reel.author.isNullOrBlank()) {
-                Text(
-                    text = "@${reel.author}",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFFF6B00)
-                )
-            }
-
-            if (reel.title.isNotBlank()) {
-                Text(
-                    text = reel.title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            if (!reel.description.isNullOrBlank() && reel.description != reel.title) {
-                Text(
-                    text = reel.description,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Normal,
-                    color = Color.White.copy(alpha = 0.85f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-
-        // Bottom Video Progress Bar
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .height(3.dp)
-                .align(Alignment.BottomCenter),
-            color = Color(0xFFFF6B00),
-            trackColor = Color.White.copy(alpha = 0.25f)
-        )
     }
 }

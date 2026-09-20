@@ -215,6 +215,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     val selectedServer by viewModel.selectedServer.collectAsState()
     val isFetchingServers by viewModel.isFetchingServers.collectAsState()
     val mediaDetailState by viewModel.mediaDetailState.collectAsState()
+    val verifiedServers by viewModel.verifiedStreamServers.collectAsState()
+    val isDeepScraping by viewModel.isDeepScrapingServers.collectAsState()
 
     // Keep Screen On while CinemetaWebViewPlayer is active
     DisposableEffect(activity) {
@@ -299,6 +301,23 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     val isNativeMatching = (currentSeason == season && currentEpisode == episode)
     val effectiveNativeUrl = if (isNativeMatching && !nativeStreamUrl.isNullOrBlank()) nativeStreamUrl else null
 
+    val vmActiveStreamUrl by viewModel.activeMediaStreamUrl.collectAsState()
+    val vmActiveStreamHeaders by viewModel.activeMediaStreamHeaders.collectAsState()
+    val vmActiveSeason by viewModel.activeMediaSeason.collectAsState()
+    val vmActiveEpisode by viewModel.activeMediaEpisode.collectAsState()
+
+    LaunchedEffect(vmActiveStreamUrl, vmActiveSeason, vmActiveEpisode, currentSeason, currentEpisode) {
+        if (!vmActiveStreamUrl.isNullOrBlank() && (vmActiveSeason == currentSeason && vmActiveEpisode == currentEpisode)) {
+            capturedVideoUrl = vmActiveStreamUrl
+            customScrapedHeaders = vmActiveStreamHeaders
+            mainScrapedVideoUrl = vmActiveStreamUrl
+            mainScrapedHeaders = vmActiveStreamHeaders
+            useExoPlayer = true
+            isScrapingDirectStream = false
+            directScrapeSecondsRemaining = 0
+        }
+    }
+
     LaunchedEffect(nativeStreamUrl, currentSeason, currentEpisode) {
         if (!nativeStreamUrl.isNullOrBlank() && currentSeason == season && currentEpisode == episode) {
             capturedVideoUrl = nativeStreamUrl
@@ -336,6 +355,19 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             viewModel.selectAnikotoServer(null)
         }
 
+        // Check if ViewModel active stream matches
+        val currentVmUrl = viewModel.activeMediaStreamUrl.value
+        val currentVmSeason = viewModel.activeMediaSeason.value
+        val currentVmEp = viewModel.activeMediaEpisode.value
+        if (!currentVmUrl.isNullOrBlank() && currentVmSeason == currentSeason && currentVmEp == currentEpisode) {
+            capturedVideoUrl = currentVmUrl
+            customScrapedHeaders = viewModel.activeMediaStreamHeaders.value
+            useExoPlayer = true
+            isScrapingDirectStream = false
+            directScrapeSecondsRemaining = 0
+            return@LaunchedEffect
+        }
+
         if (!effectiveNativeUrl.isNullOrBlank()) {
             capturedVideoUrl = effectiveNativeUrl
             customScrapedHeaders = nativeHeaders
@@ -355,15 +387,11 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             useExoPlayer = true
             isScrapingDirectStream = false
             directScrapeSecondsRemaining = 0
-        } else if (currentSeason == season && currentEpisode == episode) {
-            // Wait for the ViewModel's active parallel scraper to finish and update effectiveNativeUrl
-            isScrapingDirectStream = true
-            directScrapeStatusText = "Scanning 12+ cloud streams in parallel..."
         } else {
             isScrapingDirectStream = true
             directScrapeSecondsRemaining = 0
 
-            // Continuous parallel scraping loop across all cloud engines for up to 5 minutes (300 seconds)
+            // Continuous parallel scraping loop across all cloud engines
             withContext(Dispatchers.IO) {
                 val loopStartTime = System.currentTimeMillis()
                 var iteration = 1
@@ -371,10 +399,10 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                     try {
                         withContext(Dispatchers.Main) {
                             directScrapeStatusText = when (iteration % 4) {
-                                1 -> "Scanning 12+ cloud streams in parallel (VidLink, VidSrc, AutoEmbed)..."
-                                2 -> "Racing deep extractors (ZOZO, VidNest, MovieBox)..."
-                                3 -> "Querying high-speed direct relays & mirrors..."
-                                else -> "Aggressive parallel scraping active... Attempting direct HD stream"
+                                1 -> "Parallel scraping Hindi, HM VIP, Beta, Sigma, Ophim, Gama..."
+                                2 -> "Racing VidLink, VidSrc, AutoEmbed, ZOZO in parallel..."
+                                3 -> "Fastest cloud stream connecting..."
+                                else -> "Connecting to fastest server stream..."
                             }
                         }
 
@@ -442,7 +470,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                     iteration++
                     val elapsed = System.currentTimeMillis() - loopStartTime
                     if (elapsed < 298000L && capturedVideoUrl.isNullOrBlank()) {
-                        delay(2000)
+                        delay(1500)
                     } else {
                         break
                     }
@@ -1377,9 +1405,22 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         subtitles = activeSubtitles,
                         onFullScreenToggle = { onFullScreenChange(!isFullScreen) },
                         onPlaybackError = { _ ->
-                            // Server 0 strict direct scraper: on playback error, restart 60-second parallel scraping for alternate stream
-                            capturedVideoUrl = null
-                            directScrapeAttemptCount++
+                            val failedUrl = capturedVideoUrl
+                            com.example.scraper.UnifiedStreamManager.invalidateCache(imdbId, currentSeason, currentEpisode, failedUrl)
+                            if (directScrapeAttemptCount < 3) {
+                                // Try reliable fallback server sequence: Beta -> Sigma -> VidLink Direct -> ZOZO Direct
+                                selectedVidnestServerKey = when (directScrapeAttemptCount) {
+                                    0 -> "beta"
+                                    1 -> "sigma"
+                                    else -> "vidlink_direct"
+                                }
+                                capturedVideoUrl = null
+                                directScrapeAttemptCount++
+                            } else {
+                                // Gracefully fallback to Embed Web Player without refreshing loops
+                                useExoPlayer = false
+                                isScrapingDirectStream = false
+                            }
                         },
                         onBack = onClosePlayer,
                         isSeries = isSeries,
@@ -1475,13 +1516,13 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    text = "Connecting HM VIP / Fast Server...",
+                                    text = "Hey Almost Done...",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = TextPrimary
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Please wait, launching instant playback...",
+                                    text = "Launching high-speed direct stream...",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextSecondary
                                 )
@@ -1963,7 +2004,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(36.dp))
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                text = "Connecting ${embedServers[currentServerIndex % embedServers.size].first}...",
+                                text = "Hey Almost Done...",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Bold
@@ -2379,107 +2420,125 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                 }
             }
 
-            // Anikoto Scraped Stream Servers (Line 1: SUB, Line 2: DUB)
-            if (isFetchingServers || subServers.isNotEmpty() || dubServers.isNotEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .background(DeepSlate, RoundedCornerShape(16.dp))
-                            .clip(RoundedCornerShape(16.dp))
-                            .padding(12.dp)
+            // Stream Servers Multi-Selection Section (Anime SUB/DUB & High-Speed Direct/Multi Servers)
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .background(DeepSlate, RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.Dns,
+                                contentDescription = "Servers",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Stream Servers",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
+                            )
+                        }
+
+                        if (isFetchingServers || isDeepScraping) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Dns,
-                                    contentDescription = "Servers",
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(16.dp)
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 2.dp,
+                                    color = NeonCyan
                                 )
                                 Text(
-                                    text = "Stream Servers",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = TextPrimary
+                                    text = "Scanning servers...",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
                                 )
                             }
-
-                            if (isFetchingServers) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(12.dp),
-                                        strokeWidth = 2.dp,
-                                        color = NeonCyan
-                                    )
-                                    Text(
-                                        text = "Scanning servers...",
-                                        fontSize = 11.sp,
-                                        color = TextSecondary
-                                    )
-                                }
-                            } else if (!isAnime && isMainSelected) {
-                                Surface(
-                                    color = NeonMagenta.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text(
-                                        text = "MAIN: Fastest Direct",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = NeonMagenta,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
-                            } else if (selectedVidnestServerKey != null) {
-                                val currentVidnestServer = com.example.scraper.VidnestNativeScraper.PROVIDERS.find { it.key == selectedVidnestServerKey }
-                                val serverLabel = when (selectedVidnestServerKey) {
-                                    "vidlink_direct" -> "VidLink (Pro)"
-                                    "vidsrc_direct" -> "VidSrc (Multi)"
-                                    "autoembed_direct" -> "AutoEmbed"
-                                    "vidrock_direct" -> "ZOZO"
-                                    "delta" -> "HINDI"
-                                    else -> currentVidnestServer?.displayName ?: "Server A"
-                                }
-                                Surface(
-                                    color = Color(0xFFFF9800).copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text(
-                                        text = "MULTI: $serverLabel",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFFF9800),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
-                            } else if (selectedServer != null) {
-                                Surface(
-                                    color = (if (selectedServer?.type?.lowercase() == "dub") NeonPurple else NeonCyan).copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text(
-                                        text = "${selectedServer?.type?.uppercase() ?: "SUB"}: ${selectedServer?.name}",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (selectedServer?.type?.lowercase() == "dub") NeonPurple else NeonCyan,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
+                        } else if (isMainSelected && selectedVidnestServerKey == null && selectedServer == null) {
+                            Surface(
+                                color = NeonMagenta.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "MAIN: Fastest Direct",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonMagenta,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        } else if (selectedVidnestServerKey != null) {
+                            val verifiedMatch = verifiedServers.find { it.key == selectedVidnestServerKey }
+                            val currentVidnestServer = com.example.scraper.VidnestNativeScraper.PROVIDERS.find { it.key == selectedVidnestServerKey }
+                            val serverLabel = verifiedMatch?.name ?: when (selectedVidnestServerKey) {
+                                "beta" -> "Beta"
+                                "sigma" -> "Sigma"
+                                "vidlink_direct" -> "VidLink (Pro)"
+                                "vidsrc_direct" -> "VidSrc (Multi)"
+                                "autoembed_direct" -> "AutoEmbed"
+                                "vidrock_direct" -> "ZOZO"
+                                "delta" -> "HINDI"
+                                "prime" -> "Prime"
+                                "hexa" -> "Hexa Prime"
+                                "gama" -> "Gamma"
+                                "alfa" -> "Alfa"
+                                "catflix" -> "Catflix"
+                                "zeta" -> "Zeta"
+                                "ophim" -> "Ophim"
+                                "filxer" -> "HM VIP"
+                                else -> currentVidnestServer?.displayName ?: "Server A"
+                            }
+                            val badgeColor = if (verifiedMatch != null) Color(verifiedMatch.accentColorHex) else when (selectedVidnestServerKey) {
+                                "beta" -> NeonCyan
+                                "sigma" -> Color(0xFF3F51B5)
+                                "vidlink_direct" -> Color(0xFF6C5CE7)
+                                "vidrock_direct" -> Color(0xFF00E5FF)
+                                "delta" -> Color(0xFFFF9800)
+                                else -> Color(0xFFFF9800)
+                            }
+                            Surface(
+                                color = badgeColor.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "SERVER: ${serverLabel.uppercase()}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = badgeColor,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        } else if (selectedServer != null) {
+                            Surface(
+                                color = (if (selectedServer?.type?.lowercase() == "dub") NeonPurple else NeonCyan).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "${selectedServer?.type?.uppercase() ?: "SUB"}: ${selectedServer?.name}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selectedServer?.type?.lowercase() == "dub") NeonPurple else NeonCyan,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
                             }
                         }
+                    }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                         // Line 1: SUB Servers
                         if (isAnime && subServers.isNotEmpty()) {
@@ -2672,8 +2731,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             }
                         }
 
-                        // Line 3: Multi-Source Direct Stream Servers (Vidnest Providers: Server A, Server B, Server C, Server D, Server E, Server F)
-                        if (!isAnime) {
+                        // Line 3: Multi-Source Direct Stream Servers (Vidnest Providers: Beta, Sigma, VidLink, ZOZO, Prime, Hexa, etc.)
+                        if (!isAnime || subServers.isEmpty() && dubServers.isEmpty() || verifiedServers.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -2705,407 +2764,146 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     }
                                 }
 
+                                val serverChipList = buildList {
+                                    add(Triple("parallel", "Parallel", NeonMagenta))
+                                    if (verifiedServers.isNotEmpty()) {
+                                        verifiedServers.forEach { srv ->
+                                            add(Triple(srv.key, srv.name, Color(srv.accentColorHex)))
+                                        }
+                                    } else {
+                                        add(Triple("beta", "Beta", Color(0xFF00E5FF)))
+                                        add(Triple("sigma", "Sigma", Color(0xFF3F51B5)))
+                                        add(Triple("vidlink_direct", "VidLink", Color(0xFF6C5CE7)))
+                                        add(Triple("vidrock_direct", "ZOZO", Color(0xFF00E5FF)))
+                                        add(Triple("prime", "Prime", Color(0xFF00E676)))
+                                        add(Triple("hexa", "Hexa Prime", Color(0xFF009688)))
+                                        add(Triple("gama", "Gamma", Color(0xFFFF5722)))
+                                        add(Triple("alfa", "Alfa", Color(0xFF4CAF50)))
+                                        add(Triple("delta", "Hindi", Color(0xFFFF9800)))
+                                        add(Triple("filxer", "HM VIP", Color(0xFFE91E63)))
+                                    }
+                                }
+
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    item {
-                                        FilterChip(
-                                            selected = isMainSelected,
-                                            onClick = {
-                                                isMainSelected = true
-                                                selectedVidnestServerKey = null
-                                                viewModel.selectAnikotoServer(null)
-                                                if (mainScrapedVideoUrl != null) {
-                                                    capturedVideoUrl = mainScrapedVideoUrl
-                                                    customScrapedHeaders = mainScrapedHeaders ?: emptyMap()
-                                                    useExoPlayer = true
-                                                } else {
-                                                    scope.launch(Dispatchers.IO) {
-                                                        withContext(Dispatchers.Main) {
-                                                            isLoading = true
-                                                            hasError = false
-                                                        }
-                                                        val res = com.example.scraper.UnifiedStreamManager.getStream(
-                                                            context = context,
-                                                            title = title,
-                                                            tmdbId = imdbId,
-                                                            isTv = isSeries,
-                                                            season = currentSeason,
-                                                            episode = currentEpisode,
-                                                            isAnime = isAnime
-                                                        )
-                                                        withContext(Dispatchers.Main) {
-                                                            if (res != null && res.streamUrl.isNotBlank()) {
-                                                                capturedVideoUrl = res.streamUrl
-                                                                customScrapedHeaders = res.headers
-                                                                mainScrapedVideoUrl = res.streamUrl
-                                                                mainScrapedHeaders = res.headers
-                                                                activeSubtitles = res.subtitles
-                                                                useExoPlayer = true
-                                                                isLoading = false
-                                                                hasError = false
-                                                            } else {
-                                                                isLoading = false
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    text = "Main (Fast Direct)",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isMainSelected) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = NeonMagenta,
-                                                selectedLabelColor = Color.White,
-                                                containerColor = SpaceBlack,
-                                                labelColor = TextPrimary
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = isMainSelected,
-                                                borderColor = BorderColor,
-                                                selectedBorderColor = NeonMagenta
-                                            )
-                                        )
-                                    }
+                                    items(serverChipList) { item ->
+                                        val (key, label, accentColor) = item
+                                        val isSelected = if (key == "parallel") isMainSelected else (!isMainSelected && selectedVidnestServerKey == key)
 
-                                    item {
-                                        val isHindiSelected = !isMainSelected && selectedVidnestServerKey == "delta"
-                                        FilterChip(
-                                            selected = isHindiSelected,
-                                            onClick = {
-                                                isMainSelected = false
-                                                selectedVidnestServerKey = "delta"
-                                                viewModel.selectAnikotoServer(null)
-                                                scope.launch(Dispatchers.IO) {
-                                                    withContext(Dispatchers.Main) {
-                                                        isLoading = true
-                                                        hasError = false
-                                                    }
-                                                    val extracted = com.example.scraper.VidnestNativeScraper.extractStreamFromProvider(
-                                                        providerKey = "delta",
-                                                        tmdbId = imdbId,
-                                                        isTv = isSeries,
-                                                        season = currentSeason,
-                                                        episode = currentEpisode
-                                                    )
-                                                    withContext(Dispatchers.Main) {
-                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                                            capturedVideoUrl = extracted.streamUrl
-                                                            customScrapedHeaders = extracted.headers
-                                                            if (extracted.subtitles.isNotEmpty()) {
-                                                                activeSubtitles = extracted.subtitles
-                                                            }
-                                                            useExoPlayer = true
-                                                            isLoading = false
-                                                            hasError = false
-                                                        } else {
-                                                            isLoading = false
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    text = "HINDI",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isHindiSelected) FontWeight.Black else FontWeight.Bold
-                                                )
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFFFF9800),
-                                                selectedLabelColor = Color.Black,
-                                                containerColor = SpaceBlack,
-                                                labelColor = Color(0xFFFF9800)
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = isHindiSelected,
-                                                borderColor = Color(0xFFFF9800).copy(alpha = 0.5f),
-                                                selectedBorderColor = Color(0xFFFF9800)
-                                            )
-                                        )
-                                    }
-
-                                    item {
-                                        val isVidlinkSelected = !isMainSelected && selectedVidnestServerKey == "vidlink_direct"
-                                        FilterChip(
-                                            selected = isVidlinkSelected,
-                                            onClick = {
-                                                isMainSelected = false
-                                                selectedVidnestServerKey = "vidlink_direct"
-                                                viewModel.selectAnikotoServer(null)
-                                                scope.launch(Dispatchers.IO) {
-                                                    withContext(Dispatchers.Main) {
-                                                        isLoading = true
-                                                        hasError = false
-                                                    }
-                                                    val extracted = com.example.scraper.VidLinkNativeScraper.extractStream(
-                                                        tmdbId = imdbId,
-                                                        isTv = isSeries,
-                                                        season = currentSeason,
-                                                        episode = currentEpisode
-                                                    )
-                                                    withContext(Dispatchers.Main) {
-                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                                            capturedVideoUrl = extracted.streamUrl
-                                                            customScrapedHeaders = extracted.headers
-                                                            if (extracted.subtitles.isNotEmpty()) {
-                                                                activeSubtitles = extracted.subtitles
-                                                            }
-                                                            useExoPlayer = true
-                                                            isLoading = false
-                                                            hasError = false
-                                                        } else {
-                                                            isLoading = false
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    text = "VidLink (Pro)",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isVidlinkSelected) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF6C5CE7),
-                                                selectedLabelColor = Color.White,
-                                                containerColor = SpaceBlack,
-                                                labelColor = TextPrimary
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = isVidlinkSelected,
-                                                borderColor = BorderColor,
-                                                selectedBorderColor = Color(0xFF6C5CE7)
-                                            )
-                                        )
-                                    }
-
-                                    item {
-                                        val isVidsrcSelected = !isMainSelected && selectedVidnestServerKey == "vidsrc_direct"
-                                        FilterChip(
-                                            selected = isVidsrcSelected,
-                                            onClick = {
-                                                isMainSelected = false
-                                                selectedVidnestServerKey = "vidsrc_direct"
-                                                viewModel.selectAnikotoServer(null)
-                                                scope.launch(Dispatchers.IO) {
-                                                    withContext(Dispatchers.Main) {
-                                                        isLoading = true
-                                                        hasError = false
-                                                    }
-                                                    val extracted = com.example.scraper.VidSrcNativeScraper.extractStream(
-                                                        tmdbId = imdbId,
-                                                        isTv = isSeries,
-                                                        season = currentSeason,
-                                                        episode = currentEpisode
-                                                    )
-                                                    withContext(Dispatchers.Main) {
-                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                                            capturedVideoUrl = extracted.streamUrl
-                                                            customScrapedHeaders = extracted.headers
-                                                            if (extracted.subtitles.isNotEmpty()) {
-                                                                activeSubtitles = extracted.subtitles
-                                                            }
-                                                            useExoPlayer = true
-                                                            isLoading = false
-                                                            hasError = false
-                                                        } else {
-                                                            isLoading = false
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    text = "VidSrc (Multi)",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isVidsrcSelected) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFFFF5252),
-                                                selectedLabelColor = Color.White,
-                                                containerColor = SpaceBlack,
-                                                labelColor = TextPrimary
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = isVidsrcSelected,
-                                                borderColor = BorderColor,
-                                                selectedBorderColor = Color(0xFFFF5252)
-                                            )
-                                        )
-                                    }
-
-                                    item {
-                                        val isAutoEmbedSelected = !isMainSelected && selectedVidnestServerKey == "autoembed_direct"
-                                        FilterChip(
-                                            selected = isAutoEmbedSelected,
-                                            onClick = {
-                                                isMainSelected = false
-                                                selectedVidnestServerKey = "autoembed_direct"
-                                                viewModel.selectAnikotoServer(null)
-                                                scope.launch(Dispatchers.IO) {
-                                                    withContext(Dispatchers.Main) {
-                                                        isLoading = true
-                                                        hasError = false
-                                                    }
-                                                    val extracted = com.example.scraper.AutoEmbedNativeScraper.extractStream(
-                                                        tmdbId = imdbId,
-                                                        isTv = isSeries,
-                                                        season = currentSeason,
-                                                        episode = currentEpisode
-                                                    )
-                                                    withContext(Dispatchers.Main) {
-                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                                            capturedVideoUrl = extracted.streamUrl
-                                                            customScrapedHeaders = extracted.headers
-                                                            if (extracted.subtitles.isNotEmpty()) {
-                                                                activeSubtitles = extracted.subtitles
-                                                            }
-                                                            useExoPlayer = true
-                                                            isLoading = false
-                                                            hasError = false
-                                                        } else {
-                                                            isLoading = false
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    text = "AutoEmbed",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isAutoEmbedSelected) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF00B894),
-                                                selectedLabelColor = Color.White,
-                                                containerColor = SpaceBlack,
-                                                labelColor = TextPrimary
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = isAutoEmbedSelected,
-                                                borderColor = BorderColor,
-                                                selectedBorderColor = Color(0xFF00B894)
-                                            )
-                                        )
-                                    }
-
-                                    item {
-                                        val isVidrockSelected = !isMainSelected && selectedVidnestServerKey == "vidrock_direct"
-                                        FilterChip(
-                                            selected = isVidrockSelected,
-                                            onClick = {
-                                                isMainSelected = false
-                                                selectedVidnestServerKey = "vidrock_direct"
-                                                viewModel.selectAnikotoServer(null)
-                                                scope.launch(Dispatchers.IO) {
-                                                    withContext(Dispatchers.Main) {
-                                                        isLoading = true
-                                                        hasError = false
-                                                    }
-                                                    val extracted = com.example.scraper.VidrockNativeScraper.extractStream(
-                                                        tmdbId = imdbId,
-                                                        isTv = isSeries,
-                                                        season = currentSeason,
-                                                        episode = currentEpisode
-                                                    )
-                                                    withContext(Dispatchers.Main) {
-                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                                            capturedVideoUrl = extracted.streamUrl
-                                                            customScrapedHeaders = extracted.headers
-                                                            if (extracted.subtitles.isNotEmpty()) {
-                                                                activeSubtitles = extracted.subtitles
-                                                            }
-                                                            useExoPlayer = true
-                                                            isLoading = false
-                                                            hasError = false
-                                                        } else {
-                                                            isLoading = false
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    text = "ZOZO (Direct)",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isVidrockSelected) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF00E5FF),
-                                                selectedLabelColor = Color.Black,
-                                                containerColor = SpaceBlack,
-                                                labelColor = TextPrimary
-                                            ),
-                                            border = FilterChipDefaults.filterChipBorder(
-                                                enabled = true,
-                                                selected = isVidrockSelected,
-                                                borderColor = BorderColor,
-                                                selectedBorderColor = Color(0xFF00E5FF)
-                                            )
-                                        )
-                                    }
-
-                                    items(com.example.scraper.VidnestNativeScraper.PROVIDERS.filter { it.key != "delta" }) { provider ->
-                                        val isSelected = !isMainSelected && selectedVidnestServerKey == provider.key
                                         FilterChip(
                                             selected = isSelected,
                                             onClick = {
-                                                isMainSelected = false
-                                                selectedVidnestServerKey = provider.key
-                                                viewModel.selectAnikotoServer(null)
-                                                scope.launch(Dispatchers.IO) {
-                                                    withContext(Dispatchers.Main) {
-                                                        isLoading = true
-                                                        hasError = false
-                                                    }
-                                                    val extracted = com.example.scraper.VidnestNativeScraper.extractStreamFromProvider(
-                                                        providerKey = provider.key,
-                                                        tmdbId = imdbId,
-                                                        isTv = isSeries,
-                                                        season = currentSeason,
-                                                        episode = currentEpisode
-                                                    )
-                                                    withContext(Dispatchers.Main) {
-                                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                                            capturedVideoUrl = extracted.streamUrl
-                                                            customScrapedHeaders = extracted.headers
-                                                            if (extracted.subtitles.isNotEmpty()) {
-                                                                activeSubtitles = extracted.subtitles
+                                                if (key == "parallel") {
+                                                    isMainSelected = true
+                                                    selectedVidnestServerKey = null
+                                                    viewModel.selectAnikotoServer(null)
+                                                    if (mainScrapedVideoUrl != null) {
+                                                        capturedVideoUrl = mainScrapedVideoUrl
+                                                        customScrapedHeaders = mainScrapedHeaders ?: emptyMap()
+                                                        useExoPlayer = true
+                                                    } else {
+                                                        scope.launch(Dispatchers.IO) {
+                                                            withContext(Dispatchers.Main) {
+                                                                isLoading = true
+                                                                hasError = false
                                                             }
-                                                            useExoPlayer = true
-                                                            isLoading = false
-                                                            hasError = false
-                                                        } else {
-                                                            isLoading = false
+                                                            val res = com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                                                context = context,
+                                                                tmdbId = imdbId,
+                                                                title = title,
+                                                                isTv = isSeries,
+                                                                season = currentSeason,
+                                                                episode = currentEpisode
+                                                            )?.result
+                                                            withContext(Dispatchers.Main) {
+                                                                if (res != null && res.streamUrl.isNotBlank()) {
+                                                                    capturedVideoUrl = res.streamUrl
+                                                                    customScrapedHeaders = res.headers
+                                                                    mainScrapedVideoUrl = res.streamUrl
+                                                                    mainScrapedHeaders = res.headers
+                                                                    activeSubtitles = res.subtitles
+                                                                    useExoPlayer = true
+                                                                    isLoading = false
+                                                                    hasError = false
+                                                                } else {
+                                                                    isLoading = false
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    isMainSelected = false
+                                                    selectedVidnestServerKey = key
+                                                    viewModel.selectAnikotoServer(null)
+                                                    val directVerified = com.example.scraper.UnifiedStreamManager.getVerifiedServerStream(imdbId, currentSeason, currentEpisode, key)
+                                                    if (directVerified != null && directVerified.streamUrl.isNotBlank()) {
+                                                        capturedVideoUrl = directVerified.streamUrl
+                                                        customScrapedHeaders = directVerified.headers
+                                                        mainScrapedVideoUrl = directVerified.streamUrl
+                                                        mainScrapedHeaders = directVerified.headers
+                                                        if (directVerified.subtitles.isNotEmpty()) {
+                                                            activeSubtitles = directVerified.subtitles
+                                                        }
+                                                        useExoPlayer = true
+                                                        isLoading = false
+                                                        hasError = false
+                                                    } else {
+                                                        scope.launch(Dispatchers.IO) {
+                                                            withContext(Dispatchers.Main) {
+                                                                isLoading = true
+                                                                hasError = false
+                                                            }
+                                                            val extracted = when (key) {
+                                                                "vidlink_direct" -> com.example.scraper.VidLinkNativeScraper.extractStream(
+                                                                    tmdbId = imdbId, isTv = isSeries, season = currentSeason, episode = currentEpisode
+                                                                )
+                                                                "vidsrc_direct" -> com.example.scraper.VidSrcNativeScraper.extractStream(
+                                                                    tmdbId = imdbId, isTv = isSeries, season = currentSeason, episode = currentEpisode
+                                                                )
+                                                                "autoembed_direct" -> com.example.scraper.AutoEmbedNativeScraper.extractStream(
+                                                                    tmdbId = imdbId, isTv = isSeries, season = currentSeason, episode = currentEpisode
+                                                                )
+                                                                "vidrock_direct" -> com.example.scraper.VidrockNativeScraper.extractStream(
+                                                                    tmdbId = imdbId, isTv = isSeries, season = currentSeason, episode = currentEpisode
+                                                                )
+                                                                else -> com.example.scraper.VidnestNativeScraper.extractStreamFromProvider(
+                                                                    providerKey = key,
+                                                                    tmdbId = imdbId,
+                                                                    isTv = isSeries,
+                                                                    season = currentSeason,
+                                                                    episode = currentEpisode
+                                                                )
+                                                            }
+                                                            withContext(Dispatchers.Main) {
+                                                                if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                                                    capturedVideoUrl = extracted.streamUrl
+                                                                    customScrapedHeaders = extracted.headers
+                                                                    if (extracted.subtitles.isNotEmpty()) {
+                                                                        activeSubtitles = extracted.subtitles
+                                                                    }
+                                                                    useExoPlayer = true
+                                                                    isLoading = false
+                                                                    hasError = false
+                                                                } else {
+                                                                    isLoading = false
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
                                             },
                                             label = {
                                                 Text(
-                                                    text = provider.displayName,
+                                                    text = label,
                                                     fontSize = 12.sp,
                                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                                 )
                                             },
                                             colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFFFF9800),
-                                                selectedLabelColor = Color.Black,
+                                                selectedContainerColor = accentColor,
+                                                selectedLabelColor = if (accentColor == Color(0xFF00E5FF) || accentColor == Color(0xFFFF9800)) Color.Black else Color.White,
                                                 containerColor = SpaceBlack,
                                                 labelColor = TextPrimary
                                             ),
@@ -3113,7 +2911,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                 enabled = true,
                                                 selected = isSelected,
                                                 borderColor = BorderColor,
-                                                selectedBorderColor = Color(0xFFFF9800)
+                                                selectedBorderColor = accentColor
                                             )
                                         )
                                     }
@@ -3123,7 +2921,6 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                 }
-            }
 
             // Season & Episode Selector for TV Series & Anime
             if (isSeries) {

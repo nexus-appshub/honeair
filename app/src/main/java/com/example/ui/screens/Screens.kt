@@ -8526,7 +8526,6 @@ fun SettingsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .navigationBarsPadding()
                     .background(Color.Black)
             ) {
                 AiringFeedScreen(
@@ -8535,24 +8534,10 @@ fun SettingsScreen(
                         showAiringReelsScreen = false
                         onNavigateToPlayer()
                     },
-                    isHeaderVisible = true
+                    isHeaderVisible = false,
+                    modifier = Modifier.fillMaxSize(),
+                    onBackPress = { showAiringReelsScreen = false }
                 )
-                // Back button overlay
-                IconButton(
-                    onClick = { showAiringReelsScreen = false },
-                    modifier = Modifier
-                        .statusBarsPadding()
-                        .padding(12.dp)
-                        .size(40.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                        .align(Alignment.TopStart)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
-                    )
-                }
             }
         }
     }
@@ -13351,7 +13336,8 @@ fun AiringFeedScreen(
     viewModel: StreamViewModel,
     onNavigateToPlayer: () -> Unit,
     isHeaderVisible: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBackPress: (() -> Unit)? = null
 ) {
     val currentFeedState by viewModel.airingMergedState.collectAsState()
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -13364,14 +13350,16 @@ fun AiringFeedScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .navigationBarsPadding()
             .background(Color.Black)
     ) {
         when {
             // Initial Loading
             currentFeedState.isLoading && currentFeedState.reels.isEmpty() -> {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -13436,7 +13424,8 @@ fun AiringFeedScreen(
                     isLoadingMore = currentFeedState.isLoadingMore,
                     hasMore = currentFeedState.hasMore,
                     onLoadMore = { viewModel.loadMoreMergedAiringFeed() },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    onBackPress = onBackPress
                 )
             }
         }

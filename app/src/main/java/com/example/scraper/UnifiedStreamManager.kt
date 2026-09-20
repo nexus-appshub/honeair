@@ -57,37 +57,60 @@ object UnifiedStreamManager {
             val req = reqBuilder.build()
             val resp = httpClient.newCall(req).execute()
             val code = resp.code
-            if (code != 200 && code != 206) {
+            val contentType = resp.header("Content-Type") ?: ""
+            if (contentType.contains("text/html", ignoreCase = true)) {
                 resp.close()
                 return@withContext false
             }
 
-            val isM3u8 = url.contains(".m3u8", ignoreCase = true) ||
-                         url.contains(".txt", ignoreCase = true) ||
-                         (resp.header("Content-Type")?.contains("mpegurl", ignoreCase = true) == true)
+            if (code in 200..299 || code == 206) {
+                val isM3u8 = url.contains(".m3u8", ignoreCase = true) ||
+                             url.contains(".txt", ignoreCase = true) ||
+                             contentType.contains("mpegurl", ignoreCase = true)
 
-            if (isM3u8) {
-                val source = resp.body?.source() ?: run { resp.close(); return@withContext false }
-                source.request(8192)
-                val bodyStr = source.buffer.clone().readUtf8()
-                resp.close()
+                if (isM3u8) {
+                    val source = resp.body?.source() ?: run { resp.close(); return@withContext false }
+                    source.request(2048)
+                    val bodyStr = source.buffer.clone().readUtf8()
+                    resp.close()
 
-                if (!bodyStr.contains("#EXTM3U")) return@withContext false
-                if (bodyStr.contains("404") || bodyStr.contains("Video not found") || bodyStr.contains("Access Denied") || bodyStr.contains("error")) return@withContext false
-
-                return@withContext true
+                    if (bodyStr.contains("<html", ignoreCase = true) || bodyStr.contains("<!DOCTYPE", ignoreCase = true)) {
+                        return@withContext false
+                    }
+                    return@withContext bodyStr.contains("#EXTM3U") || bodyStr.contains("#EXT-X-") || bodyStr.contains("#EXTINF")
+                } else {
+                    resp.close()
+                    return@withContext true
+                }
             } else {
                 resp.close()
-                return@withContext true
+                return@withContext false
             }
         } catch (e: Exception) {
             return@withContext false
         }
     }
 
+    private val blacklistedUrls = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun invalidateCache(tmdbId: String, season: Int = 1, episode: Int = 1, failedUrl: String? = null) {
+        val effectiveEpisode = if (episode <= 0) 1 else episode
+        val key = "$tmdbId-$season-$effectiveEpisode"
+        streamCache.remove(key)
+        streamCache.remove("$tmdbId-$season-$episode")
+        if (!failedUrl.isNullOrBlank()) {
+            blacklistedUrls.add(failedUrl)
+        }
+    }
+
     fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1): ScrapedStreamResult? {
-        val key = "$tmdbId-$season-$episode"
-        return streamCache[key]
+        val effectiveEpisode = if (episode <= 0) 1 else episode
+        val key = "$tmdbId-$season-$effectiveEpisode"
+        val cached = streamCache[key] ?: streamCache["$tmdbId-$season-$episode"]
+        if (cached != null && !blacklistedUrls.contains(cached.streamUrl)) {
+            return cached
+        }
+        return null
     }
 
     suspend fun getStream(
@@ -306,31 +329,52 @@ object UnifiedStreamManager {
         }
 
         // PARALLEL HIGH POWER MULTI-SERVER RACING ENGINE:
-        // Execute 5 Concurrent Engines: [VidLink] + [VidSrc Multi-Host] + [AutoEmbed/Smashy/2Embed] + [VidNest 12-Sub] + [VidRock Deep]
-        return coroutineScope {
-            Log.d(TAG, "Launching High-Power Multi-Server Concurrent Scrapers for TMDB ID: $finalTmdbId (IMDb: $resolvedImdbId)...")
-            val resultChannel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(12)
+        // Priority 1 (Default): Vidnest.fun Deep Multi-Sub-Provider Parallel Scraper
+        // Sub-servers: [Beta, Filxer/HM VIP, Gama, Alfa, Hindi/Delta, Zeta, Ophim, Catflix, Sigma, Prime, Hexa, Lamda]
+        val vidnestResult = try {
+            VidnestNativeScraper.extractStream(
+                tmdbId = finalTmdbId,
+                isTv = effectiveIsTv,
+                season = effectiveSeason,
+                episode = episode
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "VidNest primary extraction error: ${e.message}")
+            null
+        }
 
-            // Task 1: VidLink Native Engine (vidlink.pro / api / sources)
-            val vidlinkJob = launch(Dispatchers.IO) {
+        if (vidnestResult != null && vidnestResult.streamUrl.isNotBlank() && verifyStreamAlive(vidnestResult.streamUrl, vidnestResult.headers)) {
+            Log.d(TAG, "Primary Vidnest.fun resolved direct stream successfully: ${vidnestResult.streamUrl}")
+            streamCache[cacheKey] = vidnestResult
+            saveToRoomCache(context, cacheKey, vidnestResult)
+            return vidnestResult
+        }
+
+        // Priority 2 (Fallback): Secondary Deep Scraping Tier
+        // If content is not on vidnest.fun -> Deep scrape [VidRock] + [VidSrc Multi-Host / sbs] + [VidLink.to / pro] + [AutoEmbed]
+        return coroutineScope {
+            Log.d(TAG, "Vidnest not found or timed out. Launching Secondary Deep Scrapers for TMDB ID: $finalTmdbId (IMDb: $resolvedImdbId)...")
+            val resultChannel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(8)
+
+            // Task 1: VidRock Architecture Deep Scraper (vidrock.ru / vidrock.net / vidsrc architecture)
+            val vidrockJob = launch(Dispatchers.IO) {
                 try {
-                    val res = VidLinkNativeScraper.extractStream(
+                    val res = VidrockNativeScraper.extractStream(
                         tmdbId = finalTmdbId,
                         isTv = effectiveIsTv,
                         season = effectiveSeason,
-                        episode = episode,
-                        imdbId = resolvedImdbId
+                        episode = episode
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        Log.d(TAG, "VidLink scraper WINNER: ${res.streamUrl}")
-                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
+                        Log.d(TAG, "VidRock secondary winner: ${res.streamUrl}")
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res)
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "VidLink task error: ${e.message}")
+                    Log.w(TAG, "VidRock task error: ${e.message}")
                 }
             }
 
-            // Task 2: VidSrc Multi-Host Engine (vidsrc.me, vidsrc.to, vidsrc.xyz, vidsrc.vip, vidsrc.cc, vidsrc.pm, etc.)
+            // Task 2: VidSrc Multi-Host Deep Engine (vidsrc.sbs, vidsrc.me, vidsrc.cc, vidsrc.to, vidsrc.pm, etc.)
             val vidsrcJob = launch(Dispatchers.IO) {
                 try {
                     val res = VidSrcNativeScraper.extractStream(
@@ -341,15 +385,34 @@ object UnifiedStreamManager {
                         imdbId = resolvedImdbId
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        Log.d(TAG, "VidSrc scraper WINNER: ${res.streamUrl}")
-                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
+                        Log.d(TAG, "VidSrc secondary winner: ${res.streamUrl}")
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "VidSrc task error: ${e.message}")
                 }
             }
 
-            // Task 3: AutoEmbed & Multi-Source Engine (AutoEmbed, 2Embed, SmashyStream, MultiEmbed, Videasy)
+            // Task 3: VidLink Native Engine (vidlink.to / vidlink.pro)
+            val vidlinkJob = launch(Dispatchers.IO) {
+                try {
+                    val res = VidLinkNativeScraper.extractStream(
+                        tmdbId = finalTmdbId,
+                        isTv = effectiveIsTv,
+                        season = effectiveSeason,
+                        episode = episode,
+                        imdbId = resolvedImdbId
+                    )
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        Log.d(TAG, "VidLink secondary winner: ${res.streamUrl}")
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "VidLink task error: ${e.message}")
+                }
+            }
+
+            // Task 4: AutoEmbed & Multi-Source Engine (AutoEmbed, SmashyStream, 2Embed, Videasy)
             val autoEmbedJob = launch(Dispatchers.IO) {
                 try {
                     val res = AutoEmbedNativeScraper.extractStream(
@@ -360,86 +423,28 @@ object UnifiedStreamManager {
                         imdbId = resolvedImdbId
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        Log.d(TAG, "AutoEmbed scraper WINNER: ${res.streamUrl}")
-                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
+                        Log.d(TAG, "AutoEmbed secondary winner: ${res.streamUrl}")
+                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "AutoEmbed task error: ${e.message}")
                 }
             }
 
-            // Task 4: VidNest Concurrent Multi-Provider Scraper (Fastest among 12 sub-providers)
-            val vidnestJob = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStream(
-                        tmdbId = finalTmdbId,
-                        isTv = effectiveIsTv,
-                        season = effectiveSeason,
-                        episode = episode
-                    )
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        Log.d(TAG, "VidNest scraper WINNER: ${res.streamUrl}")
-                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "VidNest task error: ${e.message}")
-                }
-            }
-
-            // Task 5: VidRock Architecture Deep Scraper (vidrock.ru / vidrock.net / dynamic proxies)
-            val vidrockJob = launch(Dispatchers.IO) {
-                try {
-                    val res = VidrockNativeScraper.extractStream(
-                        tmdbId = finalTmdbId,
-                        isTv = effectiveIsTv,
-                        season = effectiveSeason,
-                        episode = episode
-                    )
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        Log.d(TAG, "VidRock scraper WINNER: ${res.streamUrl}")
-                        if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "VidRock task error: ${e.message}")
-                }
-            }
-
-            // Task 6: MovieBox Concurrent Deep Extractor (Apuseen / Hakunamatata / Aoneroom)
-            val movieBoxJob = launch(Dispatchers.IO) {
-                try {
-                    val subjectId = MovieBoxNativeScraper.searchSubjectId(cleanTitle) ?: MovieBoxNativeScraper.searchSubjectId(finalTmdbId)
-                    if (!subjectId.isNullOrEmpty()) {
-                        val res = MovieBoxNativeScraper.getStreamInfo(
-                            subjectId = subjectId,
-                            season = if (effectiveIsTv) effectiveSeason else 0,
-                            episode = if (effectiveIsTv) episode else 0
-                        )
-                        if (res != null && res.streamUrl.isNotBlank()) {
-                            Log.d(TAG, "MovieBox scraper WINNER: ${res.streamUrl}")
-                            if (verifyStreamAlive(res.streamUrl, res.headers)) resultChannel.trySend(res) else Log.w(TAG, "Stream verification failed for: ${res.streamUrl}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "MovieBox task error: ${e.message}")
-                }
-            }
-
             var winningStream: ScrapedStreamResult? = null
             try {
-                winningStream = kotlinx.coroutines.withTimeoutOrNull(55000L) {
+                winningStream = kotlinx.coroutines.withTimeoutOrNull(20000L) {
                     resultChannel.receive()
                 }
             } catch (_: Exception) {}
 
-            vidlinkJob.cancel()
-            vidsrcJob.cancel()
-            autoEmbedJob.cancel()
-            vidnestJob.cancel()
             vidrockJob.cancel()
-            movieBoxJob.cancel()
+            vidsrcJob.cancel()
+            vidlinkJob.cancel()
+            autoEmbedJob.cancel()
 
             if (winningStream != null && winningStream.streamUrl.isNotBlank()) {
-                Log.d(TAG, "Multi-Server Winning Stream selected: ${winningStream.streamUrl}")
+                Log.d(TAG, "Secondary Deep Scraping Winning Stream selected: ${winningStream.streamUrl}")
                 streamCache[cacheKey] = winningStream
                 saveToRoomCache(context, cacheKey, winningStream)
                 return@coroutineScope winningStream
@@ -627,6 +632,249 @@ object UnifiedStreamManager {
         val result: ScrapedStreamResult
     )
 
+    data class VerifiedStreamServer(
+        val key: String,
+        val name: String,
+        val type: String = "DIRECT", // "DIRECT", "SUB", "DUB", "MULTI"
+        val accentColorHex: Long = 0xFF00E5FF,
+        val result: ScrapedStreamResult
+    )
+
+    private val verifiedServersMap = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CopyOnWriteArrayList<VerifiedStreamServer>>()
+    private val verifiedServerDirectCache = java.util.concurrent.ConcurrentHashMap<String, ScrapedStreamResult>()
+
+    fun getVerifiedServers(tmdbId: String, season: Int = 1, episode: Int = 1): List<VerifiedStreamServer> {
+        val effectiveEpisode = if (episode <= 0) 1 else episode
+        val key = "$tmdbId-$season-$effectiveEpisode"
+        return verifiedServersMap[key]?.toList() ?: emptyList()
+    }
+
+    fun getVerifiedServerStream(tmdbId: String, season: Int = 1, episode: Int = 1, serverKey: String): ScrapedStreamResult? {
+        val effectiveEpisode = if (episode <= 0) 1 else episode
+        val directKey = "$tmdbId-$season-$effectiveEpisode-$serverKey"
+        return verifiedServerDirectCache[directKey]
+    }
+
+    suspend fun deepScrapeAndVerifyAllServers(
+        context: Context,
+        tmdbId: String,
+        title: String,
+        isTv: Boolean,
+        season: Int,
+        episode: Int,
+        isAnime: Boolean = false,
+        onServerFound: ((VerifiedStreamServer) -> Unit)? = null
+    ): List<VerifiedStreamServer> = withContext(Dispatchers.IO) {
+        val effectiveEpisode = if (episode <= 0) 1 else episode
+        val cacheKey = "$tmdbId-$season-$effectiveEpisode"
+
+        val existing = verifiedServersMap[cacheKey]
+        if (existing != null && existing.isNotEmpty()) {
+            existing.forEach { onServerFound?.invoke(it) }
+            return@withContext existing.toList()
+        }
+
+        val serverList = java.util.concurrent.CopyOnWriteArrayList<VerifiedStreamServer>()
+        verifiedServersMap[cacheKey] = serverList
+
+        // 1. Resolve TMDB ID and TV flag
+        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1))
+        var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, effectiveIsTv)
+        if (finalTmdbId.startsWith("movie_")) {
+            finalTmdbId = finalTmdbId.removePrefix("movie_")
+            effectiveIsTv = false
+        } else if (finalTmdbId.startsWith("series_")) {
+            finalTmdbId = finalTmdbId.removePrefix("series_")
+            effectiveIsTv = true
+        }
+
+        if (!finalTmdbId.all { it.isDigit() }) {
+            if (finalTmdbId.startsWith("tt")) {
+                try {
+                    val findRes = com.example.data.network.RetrofitClient.tmdbApi.getByExternalId(finalTmdbId, "imdb_id")
+                    val tv = findRes.tv_results?.firstOrNull()
+                    val movie = findRes.movie_results?.firstOrNull()
+                    if (tv != null && effectiveIsTv) {
+                        finalTmdbId = tv.id.toString()
+                    } else if (movie != null && !effectiveIsTv) {
+                        finalTmdbId = movie.id.toString()
+                    } else if (tv != null) {
+                        finalTmdbId = tv.id.toString()
+                        effectiveIsTv = true
+                    } else if (movie != null) {
+                        finalTmdbId = movie.id.toString()
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        if (!finalTmdbId.all { it.isDigit() }) {
+            try {
+                val cleanQ = sanitizeTitle(title)
+                val q = if (cleanQ.isNotBlank()) cleanQ else title.replace(Regex("""(?i)(?:season|part|cour|arc|s)\s*\d+.*"""), "").trim()
+                val sr = if (effectiveIsTv) {
+                    com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = q).results?.firstOrNull()
+                } else {
+                    com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = q).results?.firstOrNull()
+                }
+                if (sr != null) {
+                    finalTmdbId = sr.id.toString()
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Helper to register verified working server
+        suspend fun registerVerified(key: String, name: String, type: String, colorHex: Long, res: ScrapedStreamResult) {
+            if (res.streamUrl.isBlank() || blacklistedUrls.contains(res.streamUrl)) return
+            val item = VerifiedStreamServer(key, name, type, colorHex, res)
+            if (serverList.none { it.key == key }) {
+                serverList.add(item)
+                verifiedServerDirectCache["$cacheKey-$key"] = res
+                if (streamCache[cacheKey] == null || streamCache[cacheKey]?.streamUrl.isNullOrBlank()) {
+                    streamCache[cacheKey] = res
+                    saveToRoomCache(context, cacheKey, res)
+                }
+                onServerFound?.invoke(item)
+            }
+        }
+
+        // Deep parallel fleet running across all servers simultaneously
+        coroutineScope {
+            val jobs = mutableListOf<kotlinx.coroutines.Job>()
+
+            fun addScraper(key: String, name: String, type: String, colorHex: Long, scrapeBlock: suspend () -> ScrapedStreamResult?) {
+                jobs.add(launch(Dispatchers.IO) {
+                    try {
+                        val res = scrapeBlock()
+                        if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                            registerVerified(key, name, type, colorHex, res)
+                        }
+                    } catch (_: Exception) {}
+                })
+            }
+
+            // Priority 1: Beta (Vidxyz)
+            addScraper("beta", "Beta", "DIRECT", 0xFF00E5FF) {
+                VidnestNativeScraper.extractStreamFromProvider("beta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 2: Sigma (HollyMovieHD)
+            addScraper("sigma", "Sigma", "DIRECT", 0xFF3F51B5) {
+                VidnestNativeScraper.extractStreamFromProvider("sigma", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 3: VidLink Direct
+            addScraper("vidlink_direct", "VidLink", "DIRECT", 0xFF6C5CE7) {
+                VidLinkNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 4: ZOZO Direct (Vidrock)
+            addScraper("vidrock_direct", "ZOZO", "DIRECT", 0xFF00E5FF) {
+                VidrockNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 5: Prime
+            addScraper("prime", "Prime", "DIRECT", 0xFF00E676) {
+                VidnestNativeScraper.extractStreamFromProvider("prime", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 6: Hexa Prime
+            addScraper("hexa", "Hexa Prime", "DIRECT", 0xFF009688) {
+                VidnestNativeScraper.extractStreamFromProvider("hexa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 7: Gama (Vidzee)
+            addScraper("gama", "Gamma", "DIRECT", 0xFFFF5722) {
+                VidnestNativeScraper.extractStreamFromProvider("gama", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 8: Alfa (Videasy)
+            addScraper("alfa", "Alfa", "DIRECT", 0xFF4CAF50) {
+                VidnestNativeScraper.extractStreamFromProvider("alfa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 9: VidSrc Multi-Host
+            addScraper("vidsrc_direct", "VidSrc", "MULTI", 0xFFFF5252) {
+                VidSrcNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 10: AutoEmbed Direct
+            addScraper("autoembed_direct", "AutoEmbed", "DIRECT", 0xFF00B894) {
+                AutoEmbedNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 11: Ophim
+            addScraper("ophim", "Ophim", "DIRECT", 0xFF00B0FF) {
+                VidnestNativeScraper.extractStreamFromProvider("ophim", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 12: Catflix
+            addScraper("catflix", "Catflix", "DIRECT", 0xFFFF4081) {
+                VidnestNativeScraper.extractStreamFromProvider("catflix", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority 13: Zeta
+            addScraper("zeta", "Zeta", "DIRECT", 0xFF9C27B0) {
+                VidnestNativeScraper.extractStreamFromProvider("zeta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Movie-only routes
+            if (!effectiveIsTv) {
+                addScraper("filxer", "HM VIP", "DIRECT", 0xFFE91E63) {
+                    VidnestNativeScraper.extractStreamFromProvider("filxer", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                }
+                addScraper("delta", "Hindi", "DIRECT", 0xFFFF9800) {
+                    VidnestNativeScraper.extractStreamFromProvider("delta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                }
+                addScraper("lamda", "Lamda", "DIRECT", 0xFF7C4DFF) {
+                    VidnestNativeScraper.extractStreamFromProvider("lamda", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                }
+            }
+
+            // Anime routes (Anikoto Sub/Dub)
+            if (isAnime) {
+                jobs.add(launch(Dispatchers.IO) {
+                    try {
+                        val group = AnikotoScraper.fetchAvailableServers(
+                            title = title,
+                            season = season,
+                            episode = effectiveEpisode
+                        )
+                        val watchUrl = group.watchUrl.ifEmpty { "https://anikoto.cz" }
+                        group.subServers.forEach { srv ->
+                            launch(Dispatchers.IO) {
+                                try {
+                                    val res = AnikotoScraper.extractStreamFromServer(srv, watchUrl, effectiveEpisode)
+                                    if (res != null && res.streamUrl.isNotBlank()) {
+                                        registerVerified("anikoto_sub_${srv.linkId}", "SUB: ${srv.name}", "SUB", 0xFF00E5FF, res)
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        group.dubServers.forEach { srv ->
+                            launch(Dispatchers.IO) {
+                                try {
+                                    val res = AnikotoScraper.extractStreamFromServer(srv, watchUrl, effectiveEpisode)
+                                    if (res != null && res.streamUrl.isNotBlank()) {
+                                        registerVerified("anikoto_dub_${srv.linkId}", "DUB: ${srv.name}", "DUB", 0xFFB388FF, res)
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (_: Exception) {}
+                })
+            }
+
+            val startTime = System.currentTimeMillis()
+            while (System.currentTimeMillis() - startTime < 6000L) {
+                if (jobs.all { it.isCompleted }) break
+                kotlinx.coroutines.delay(80L)
+            }
+        }
+
+        serverList.toList()
+    }
+
     suspend fun raceFastestServerStream(
         context: Context,
         tmdbId: String,
@@ -642,24 +890,63 @@ object UnifiedStreamManager {
         // 1. Check in-memory cache if no specific server is forced
         if (preferredServerKey == null || preferredServerKey == "fastest_auto") {
             streamCache[cacheKey]?.let {
-                if (it.streamUrl.isNotBlank()) {
+                if (it.streamUrl.isNotBlank() && !blacklistedUrls.contains(it.streamUrl)) {
                     return@withContext StreamRaceWinner("fastest_auto", "Fastest Direct", it)
                 }
             }
         }
 
         // 2. Resolve numeric TMDB ID & clean title once upfront
-        var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, isTv)
+        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1))
+        var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, effectiveIsTv)
+        if (finalTmdbId.startsWith("movie_")) {
+            finalTmdbId = finalTmdbId.removePrefix("movie_")
+            effectiveIsTv = false
+        } else if (finalTmdbId.startsWith("series_")) {
+            finalTmdbId = finalTmdbId.removePrefix("series_")
+            effectiveIsTv = true
+        }
+
+        if (!finalTmdbId.all { it.isDigit() }) {
+            if (finalTmdbId.startsWith("tt")) {
+                try {
+                    val findRes = com.example.data.network.RetrofitClient.tmdbApi.getByExternalId(finalTmdbId, "imdb_id")
+                    val tv = findRes.tv_results?.firstOrNull()
+                    val movie = findRes.movie_results?.firstOrNull()
+                    if (tv != null && effectiveIsTv) {
+                        finalTmdbId = tv.id.toString()
+                    } else if (movie != null && !effectiveIsTv) {
+                        finalTmdbId = movie.id.toString()
+                    } else if (tv != null) {
+                        finalTmdbId = tv.id.toString()
+                        effectiveIsTv = true
+                    } else if (movie != null) {
+                        finalTmdbId = movie.id.toString()
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
         if (!finalTmdbId.all { it.isDigit() }) {
             try {
-                val q = title.replace(Regex("""(?i)(?:season|part|cour|arc|s)\s*\d+.*"""), "").trim()
-                val sr = if (isTv) {
+                val cleanQ = sanitizeTitle(title)
+                val q = if (cleanQ.isNotBlank()) cleanQ else title.replace(Regex("""(?i)(?:season|part|cour|arc|s)\s*\d+.*"""), "").trim()
+                val sr = if (effectiveIsTv) {
                     com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = q).results?.firstOrNull()
                 } else {
                     com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = q).results?.firstOrNull()
                 }
                 if (sr != null) {
                     finalTmdbId = sr.id.toString()
+                } else {
+                    val altSr = if (effectiveIsTv) {
+                        com.example.data.network.RetrofitClient.tmdbApi.searchMovies(query = q).results?.firstOrNull()?.also { effectiveIsTv = false }
+                    } else {
+                        com.example.data.network.RetrofitClient.tmdbApi.searchTvShows(query = q).results?.firstOrNull()?.also { effectiveIsTv = true }
+                    }
+                    if (altSr != null) {
+                        finalTmdbId = altSr.id.toString()
+                    }
                 }
             } catch (_: Exception) {}
         }
@@ -668,10 +955,11 @@ object UnifiedStreamManager {
         if (!preferredServerKey.isNullOrBlank() && preferredServerKey != "fastest_auto") {
             try {
                 val specificResult: ScrapedStreamResult? = when (preferredServerKey) {
-                    "vidrock_direct" -> VidrockNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
-                    "vidlink_direct" -> VidLinkNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
-                    "autoembed_direct" -> AutoEmbedNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
-                    else -> VidnestNativeScraper.extractStreamFromProvider(preferredServerKey, finalTmdbId, isTv, season, effectiveEpisode)
+                    "vidrock_direct" -> VidrockNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    "vidlink_direct" -> VidLinkNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    "autoembed_direct" -> AutoEmbedNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    "vidsrc_direct" -> VidSrcNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    else -> VidnestNativeScraper.extractStreamFromProvider(preferredServerKey, finalTmdbId, effectiveIsTv, season, effectiveEpisode)
                 }
                 if (specificResult != null && specificResult.streamUrl.isNotBlank()) {
                     val serverName = when (preferredServerKey) {
@@ -685,6 +973,10 @@ object UnifiedStreamManager {
                         "zeta" -> "Zeta"
                         "lamda" -> "Lamda"
                         "catflix" -> "Catflix"
+                        "beta" -> "Beta"
+                        "sigma" -> "Sigma"
+                        "ophim" -> "Ophim"
+                        "vidsrc_direct" -> "VidSrc (Multi)"
                         else -> preferredServerKey.uppercase()
                     }
                     streamCache[cacheKey] = specificResult
@@ -697,240 +989,230 @@ object UnifiedStreamManager {
         }
 
         // 4. PARALLEL SPEED RACE ACROSS MULTI LIST OF SERVERS:
-        // Hindi, VidRock (direct), Flixer, Prime, Hexa, Alfa, Gama, VidLink, AutoEmbed, Lamda, Zeta, Ophim, Catflix, Beta, Sigma
-        coroutineScope {
-            val winnerChannel = kotlinx.coroutines.channels.Channel<StreamRaceWinner>(20)
+        // Priority 1 (Default): Vidnest.fun Sub-Server Parallel Fleet
+        // [Beta, Sigma, Gama, Alfa, Hexa, Prime, Zeta, Catflix, Ophim, + Delta/Lamda/Flixer for Movies]
+        val vidnestWinner = coroutineScope {
+            val vidnestChannel = kotlinx.coroutines.channels.Channel<StreamRaceWinner>(15)
 
-            // Server 1: VidRock Direct
-            val jVidrock = launch(Dispatchers.IO) {
-                try {
-                    val res = VidrockNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("vidrock_direct", "ZOZO (Direct)", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 2: HM VIP (Rogflix direct)
-            val jFlixer = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("filxer", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("filxer", "HM VIP", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 3: Prime (Vidrock endpoint)
-            val jPrime = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("prime", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("prime", "Prime", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 4: Hexa (Vidlink endpoint)
-            val jHexa = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("hexa", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("hexa", "Hexa", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 5: HINDI (Delta endpoint)
-            val jHindi = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("delta", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("delta", "HINDI", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 6: Alfa
-            val jAlfa = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("alfa", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("alfa", "Alfa", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 7: Gama
-            val jGama = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("gama", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("gama", "Gama", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 8: VidLink direct
-            val jVidlink = launch(Dispatchers.IO) {
-                try {
-                    val res = VidLinkNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("vidlink_direct", "VidLink", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 9: AutoEmbed direct
-            val jAutoEmbed = launch(Dispatchers.IO) {
-                try {
-                    val res = AutoEmbedNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("autoembed_direct", "AutoEmbed", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 10: Lamda
-            val jLamda = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("lamda", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("lamda", "Lamda", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 11: Zeta
-            val jZeta = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("zeta", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("zeta", "Zeta", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 12: Ophim
-            val jOphim = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("ophim", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("ophim", "Ophim", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 13: Catflix
-            val jCatflix = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("catflix", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("catflix", "Catflix", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 14: Beta
+            // Priority Server 1: Beta (Vidxyz) - Most reliable for both Movies and TV series
             val jBeta = launch(Dispatchers.IO) {
                 try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("beta", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("beta", "Beta", res))
+                    val res = VidnestNativeScraper.extractStreamFromProvider("beta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("beta", "Beta", res))
                     }
                 } catch (_: Exception) {}
             }
 
-            // Server 15: Sigma
+            // Priority Server 2: Sigma (HollyMovieHD)
             val jSigma = launch(Dispatchers.IO) {
                 try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("sigma", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("sigma", "Sigma", res))
+                    val res = VidnestNativeScraper.extractStreamFromProvider("sigma", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("sigma", "Sigma", res))
                     }
                 } catch (_: Exception) {}
             }
 
-            val allJobs = listOf(
-                jVidrock, jFlixer, jPrime, jHexa, jHindi, jAlfa, jGama, 
-                jVidlink, jAutoEmbed, jLamda, jZeta, jOphim, jCatflix, jBeta, jSigma
-            )
+            // Priority Server 3: Gama (Vidzee)
+            val jGama = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("gama", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("gama", "Gama", res))
+                    }
+                } catch (_: Exception) {}
+            }
 
+            // Priority Server 4: Alfa (Videasy)
+            val jAlfa = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("alfa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("alfa", "Alfa", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Priority Server 5: Hexa (Vidlink)
+            val jHexa = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("hexa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("hexa", "Hexa", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Priority Server 6: Prime (Vidrock)
+            val jPrime = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("prime", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("prime", "Prime", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val jFlixer = if (!effectiveIsTv) {
+                launch(Dispatchers.IO) {
+                    try {
+                        val res = VidnestNativeScraper.extractStreamFromProvider("filxer", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                        if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                            vidnestChannel.trySend(StreamRaceWinner("filxer", "HM VIP", res))
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else null
+
+            val jHindi = if (!effectiveIsTv) {
+                launch(Dispatchers.IO) {
+                    try {
+                        val res = VidnestNativeScraper.extractStreamFromProvider("delta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                        if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                            vidnestChannel.trySend(StreamRaceWinner("delta", "HINDI", res))
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else null
+
+            val jLamda = if (!effectiveIsTv) {
+                launch(Dispatchers.IO) {
+                    try {
+                        val res = VidnestNativeScraper.extractStreamFromProvider("lamda", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                        if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                            vidnestChannel.trySend(StreamRaceWinner("lamda", "Lamda", res))
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else null
+
+            val jOphim = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("ophim", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("ophim", "Ophim", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val jZeta = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("zeta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("zeta", "Zeta", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val jCatflix = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("catflix", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        vidnestChannel.trySend(StreamRaceWinner("catflix", "Catflix", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val vidnestJobs = listOfNotNull(jBeta, jSigma, jGama, jAlfa, jHexa, jPrime, jFlixer, jHindi, jLamda, jOphim, jZeta, jCatflix)
             var winner: StreamRaceWinner? = null
-            val completedWinners = java.util.concurrent.ConcurrentHashMap<String, StreamRaceWinner>()
             val startTime = System.currentTimeMillis()
 
             try {
-                // Collect results in parallel and evaluate priorities
-                while (System.currentTimeMillis() - startTime < 8000L) {
-                    val nextWinner = kotlinx.coroutines.withTimeoutOrNull(100L) {
-                        winnerChannel.receive()
+                while (System.currentTimeMillis() - startTime < 4500L) {
+                    val candidate = kotlinx.coroutines.withTimeoutOrNull(50L) {
+                        vidnestChannel.receive()
                     }
-                    if (nextWinner != null) {
-                        completedWinners[nextWinner.serverKey] = nextWinner
-                        
-                        // Priority 1: If "filxer" (HM VIP) finishes successfully, return it immediately!
-                        if (completedWinners.containsKey("filxer")) {
-                            winner = completedWinners["filxer"]
-                            break
-                        }
-                    }
-
-                    if (completedWinners.containsKey("filxer")) {
-                        winner = completedWinners["filxer"]
+                    if (candidate != null && candidate.result.streamUrl.isNotBlank()) {
+                        winner = candidate
                         break
                     }
-
-                    val elapsed = System.currentTimeMillis() - startTime
-
-                    // Priority 2: If 2500ms have passed, and we have any working stream, return the best we have immediately!
-                    if (elapsed > 2500L) {
-                        if (completedWinners.isNotEmpty()) {
-                            winner = completedWinners["filxer"]
-                                ?: completedWinners["delta"]
-                                ?: completedWinners["vidrock_direct"]
-                                ?: completedWinners["vidlink_direct"]
-                                ?: completedWinners.values.firstOrNull()
-                            break
-                        }
-                    }
-
-                    if (allJobs.all { it.isCompleted }) {
-                        break
-                    }
+                    if (vidnestJobs.all { it.isCompleted }) break
                 }
             } catch (_: Exception) {}
 
-            allJobs.forEach { it.cancel() }
+            vidnestJobs.forEach { it.cancel() }
+            winner
+        }
 
-            if (winner == null && completedWinners.isNotEmpty()) {
-                winner = completedWinners["filxer"]
-                    ?: completedWinners["delta"]
-                    ?: completedWinners["vidrock_direct"]
-                    ?: completedWinners["vidlink_direct"]
-                    ?: completedWinners.values.firstOrNull()
+        if (vidnestWinner != null && vidnestWinner.result.streamUrl.isNotBlank()) {
+            Log.d(TAG, "Fastest Vidnest.fun Sub-Server Winner: [${vidnestWinner.serverName}] -> ${vidnestWinner.result.streamUrl}")
+            streamCache[cacheKey] = vidnestWinner.result
+            saveToRoomCache(context, cacheKey, vidnestWinner.result)
+            return@withContext vidnestWinner
+        }
+
+        // Priority 2 (Fallback): Secondary Deep Scraping Tier (VidRock, VidSrc, VidLink, AutoEmbed)
+        Log.d(TAG, "Vidnest sub-servers not found. Cascading to Secondary Deep Scrapers (VidRock, VidSrc, VidLink, AutoEmbed)...")
+        coroutineScope {
+            val fallbackChannel = kotlinx.coroutines.channels.Channel<StreamRaceWinner>(8)
+
+            // Server A: VidRock Direct
+            val jVidrock = launch(Dispatchers.IO) {
+                try {
+                    val res = VidrockNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        fallbackChannel.trySend(StreamRaceWinner("vidrock_direct", "ZOZO (Direct)", res))
+                    }
+                } catch (_: Exception) {}
             }
 
-            if (winner != null && winner.result.streamUrl.isNotBlank()) {
-                Log.d(TAG, "Fastest Parallel Race Winner: [${winner.serverName}] -> ${winner.result.streamUrl}")
-                streamCache[cacheKey] = winner.result
-                saveToRoomCache(context, cacheKey, winner.result)
-                return@coroutineScope winner
+            // Server B: VidSrc Multi-Host
+            val jVidsrc = launch(Dispatchers.IO) {
+                try {
+                    val res = VidSrcNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        fallbackChannel.trySend(StreamRaceWinner("vidsrc_direct", "VidSrc", res))
+                    }
+                } catch (_: Exception) {}
             }
 
-            // Fallback to standard getStream if race timed out
-            val fallback = getStream(
-                context = context,
-                title = title,
-                tmdbId = finalTmdbId,
-                isTv = isTv,
-                season = season,
-                episode = effectiveEpisode,
-                isAnime = false
-            )
-            if (fallback != null && fallback.streamUrl.isNotBlank()) {
-                return@coroutineScope StreamRaceWinner("fallback", "Fastest Direct", fallback)
+            // Server C: VidLink Direct
+            val jVidlink = launch(Dispatchers.IO) {
+                try {
+                    val res = VidLinkNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        fallbackChannel.trySend(StreamRaceWinner("vidlink_direct", "VidLink", res))
+                    }
+                } catch (_: Exception) {}
             }
+
+            // Server D: AutoEmbed Direct
+            val jAutoEmbed = launch(Dispatchers.IO) {
+                try {
+                    val res = AutoEmbedNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank() && verifyStreamAlive(res.streamUrl, res.headers)) {
+                        fallbackChannel.trySend(StreamRaceWinner("autoembed_direct", "AutoEmbed", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val fallbackJobs = listOf(jVidrock, jVidsrc, jVidlink, jAutoEmbed)
+            var fallbackWinner: StreamRaceWinner? = null
+            val startTime = System.currentTimeMillis()
+
+            try {
+                while (System.currentTimeMillis() - startTime < 8000L) {
+                    val candidate = kotlinx.coroutines.withTimeoutOrNull(50L) {
+                        fallbackChannel.receive()
+                    }
+                    if (candidate != null && candidate.result.streamUrl.isNotBlank()) {
+                        fallbackWinner = candidate
+                        break
+                    }
+                    if (fallbackJobs.all { it.isCompleted }) break
+                }
+            } catch (_: Exception) {}
+
+            fallbackJobs.forEach { it.cancel() }
+
+            if (fallbackWinner != null && fallbackWinner.result.streamUrl.isNotBlank()) {
+                Log.d(TAG, "Secondary Deep Scraping Winner: [${fallbackWinner.serverName}] -> ${fallbackWinner.result.streamUrl}")
+                streamCache[cacheKey] = fallbackWinner.result
+                saveToRoomCache(context, cacheKey, fallbackWinner.result)
+                return@coroutineScope fallbackWinner
+            }
+
             null
         }
     }

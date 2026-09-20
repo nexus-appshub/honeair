@@ -210,106 +210,6 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
     // Initialize and maintain ExoPlayer
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var isRetryingWithoutSidecarSubtitles by remember(currentUrl) { mutableStateOf(false) }
-    var downloadedSubtitles by remember(currentUrl) { mutableStateOf<List<com.example.scraper.SubtitleTrack>>(emptyList()) }
-
-    // Asynchronously download subtitles in background with 3s timeout per track to bypass network blocking
-    LaunchedEffect(subtitles, currentUrl) {
-        if (subtitles.isEmpty()) {
-            downloadedSubtitles = emptyList()
-            return@LaunchedEffect
-        }
-        
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            kotlinx.coroutines.coroutineScope {
-                val jobs = subtitles.map { sub: com.example.scraper.SubtitleTrack ->
-                    async {
-                        try {
-                            val client = okhttp3.OkHttpClient.Builder()
-                                .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-                                .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-                                .build()
-                            val request = okhttp3.Request.Builder()
-                                .url(sub.url)
-                                .header("User-Agent", "Mozilla/5.0")
-                                .build()
-                            val response = client.newCall(request).execute()
-                            if (response.isSuccessful) {
-                                val bytes = response.body?.bytes()
-                                if (bytes != null && bytes.isNotEmpty()) {
-                                    val extension = when {
-                                        sub.url.lowercase().contains(".vtt") -> "vtt"
-                                        sub.url.lowercase().contains(".srt") -> "srt"
-                                        sub.url.lowercase().contains(".ass") -> "ass"
-                                        sub.url.lowercase().contains(".ssa") -> "ssa"
-                                        else -> "vtt"
-                                    }
-                                    val subFile = java.io.File(context.cacheDir, "sub_${sub.lang}_${System.currentTimeMillis()}.${extension}")
-                                    subFile.writeBytes(bytes)
-                                    val localUri = Uri.fromFile(subFile).toString()
-                                    com.example.scraper.SubtitleTrack(
-                                        url = localUri,
-                                        lang = sub.lang,
-                                        label = sub.label,
-                                        default = sub.default
-                                    )
-                                } else null
-                            } else null
-                        } catch (e: Exception) {
-                            android.util.Log.e("MovieExoPlayerView", "Subtitle download failed for ${sub.url}: ${e.message}")
-                            null
-                        }
-                    }
-                }
-                val results = jobs.awaitAll().filterNotNull()
-                if (results.isNotEmpty()) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        downloadedSubtitles = results
-                    }
-                }
-            }
-        }
-    }
-
-    // Dynamically apply local subtitles once they are ready without interruption
-    LaunchedEffect(downloadedSubtitles) {
-        val player = exoPlayer
-        if (player != null && downloadedSubtitles.isNotEmpty() && !isRetryingWithoutSidecarSubtitles) {
-            val currentMediaItem = player.currentMediaItem
-            if (currentMediaItem != null) {
-                val hasLocalSubtitles = downloadedSubtitles.any { it.url.startsWith("file://") }
-                val isAlreadyApplied = currentMediaItem.localConfiguration?.subtitleConfigurations?.any { 
-                    it.uri.toString().startsWith("file://") 
-                } == true
-                
-                if (hasLocalSubtitles && !isAlreadyApplied) {
-                    val currentPos = player.currentPosition
-                    val isPlayingState = player.isPlaying || player.playWhenReady
-                    val mediaItemBuilder = currentMediaItem.buildUpon()
-                    val subtitleConfigs = downloadedSubtitles.map { sub ->
-                        val mimeType = if (sub.url.lowercase().contains(".vtt") || sub.url.lowercase().contains("vtt")) {
-                            androidx.media3.common.MimeTypes.TEXT_VTT
-                        } else if (sub.url.lowercase().contains(".srt") || sub.url.lowercase().contains("srt")) {
-                            androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
-                        } else if (sub.url.lowercase().contains(".ass") || sub.url.lowercase().contains(".ssa")) {
-                            androidx.media3.common.MimeTypes.TEXT_SSA
-                        } else {
-                            androidx.media3.common.MimeTypes.TEXT_VTT
-                        }
-                        MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
-                            .setMimeType(mimeType)
-                            .setLanguage(sub.lang.ifBlank { "en" })
-                            .setLabel(sub.label.ifBlank { "English" })
-                            .setSelectionFlags(if (sub.default) C.SELECTION_FLAG_DEFAULT else 0)
-                            .build()
-                    }
-                    mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
-                    player.setMediaItem(mediaItemBuilder.build(), false)
-                    player.prepare()
-                    player.playWhenReady = isPlayingState
-                }
-            }
-        }
-    }
 
     LaunchedEffect(currentUrl, customHeaders, isRetryingWithoutSidecarSubtitles) {
         errorMessage = null
@@ -332,10 +232,16 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
             isHardwareAccelerated = isHwAccel
         )
 
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
+
         val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setTrackSelector(trackSelector)
+            .setAudioAttributes(audioAttributes, true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
             .build()
@@ -350,8 +256,9 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                     mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MP4)
                 }
 
-                if (downloadedSubtitles.isNotEmpty() && !isRetryingWithoutSidecarSubtitles) {
-                    val subtitleConfigs = downloadedSubtitles.map { sub ->
+                if (subtitles.isNotEmpty() && !isRetryingWithoutSidecarSubtitles) {
+                    val subtitleConfigs = subtitles.mapNotNull { sub ->
+                        if (sub.url.isBlank()) return@mapNotNull null
                         val mimeType = if (sub.url.lowercase().contains(".vtt") || sub.url.lowercase().contains("vtt")) {
                             androidx.media3.common.MimeTypes.TEXT_VTT
                         } else if (sub.url.lowercase().contains(".srt") || sub.url.lowercase().contains("srt")) {
@@ -368,7 +275,9 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                             .setSelectionFlags(if (sub.default) C.SELECTION_FLAG_DEFAULT else 0)
                             .build()
                     }
-                    mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
+                    if (subtitleConfigs.isNotEmpty()) {
+                        mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
+                    }
                 }
 
                 setMediaItem(mediaItemBuilder.build())
@@ -378,6 +287,7 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                 }
                 setPlaybackSpeed(playbackSpeed)
                 playWhenReady = true
+                play()
             }
 
         player.addListener(object : Player.Listener {
@@ -387,16 +297,30 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 isPlaying = player.isPlaying || playWhenReady
+                if (playWhenReady && !player.isPlaying) {
+                    player.play()
+                }
             }
 
             override fun onPlaybackStateChanged(state: Int) {
                 playbackState = state
                 if (state == Player.STATE_READY) {
                     errorMessage = null
-                    if (player.playWhenReady && !player.isPlaying) {
-                        player.play()
+                    // If video was saved near or at the end, reset to start to ensure instant playback
+                    if (player.duration > 0 && player.currentPosition >= player.duration - 4000L) {
+                        player.seekTo(0L)
                     }
+                    player.playWhenReady = true
+                    player.play()
+                } else if (state == Player.STATE_BUFFERING) {
+                    errorMessage = null
                 }
+            }
+
+            override fun onRenderedFirstFrame() {
+                isPlaying = true
+                player.playWhenReady = true
+                player.play()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -411,6 +335,18 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         })
 
         exoPlayer = player
+    }
+
+    // Aggressive Auto-play kicker loop for instant playback upon ready
+    LaunchedEffect(exoPlayer, currentUrl) {
+        val p = exoPlayer ?: return@LaunchedEffect
+        for (i in 0..12) {
+            if (p.playbackState == Player.STATE_READY && !p.isPlaying) {
+                p.playWhenReady = true
+                p.play()
+            }
+            delay(200)
+        }
     }
 
     // Timeline tracker loop

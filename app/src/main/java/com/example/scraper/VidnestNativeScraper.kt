@@ -159,6 +159,35 @@ object VidnestNativeScraper {
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         val provider = PROVIDERS.find { it.key == providerKey } ?: PROVIDERS.first()
         val numericId = resolveToNumericTmdbId(tmdbId, isTv)
+        
+        // Primary attempt with requested isTv, fallback to alternate if not found (e.g. Silo or cross-typed media)
+        val primaryResult = executeProviderRequest(provider, numericId, isTv, season, episode)
+        if (primaryResult != null && primaryResult.streamUrl.isNotBlank()) {
+            return@withContext primaryResult
+        }
+
+        if (season <= 1 && episode <= 1) {
+            val fallbackResult = executeProviderRequest(provider, numericId, !isTv, season, episode)
+            if (fallbackResult != null && fallbackResult.streamUrl.isNotBlank()) {
+                return@withContext fallbackResult
+            }
+        }
+
+        null
+    }
+
+    private suspend fun executeProviderRequest(
+        provider: VidnestProviderInfo,
+        numericId: String,
+        isTv: Boolean,
+        season: Int,
+        episode: Int
+    ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        // "allmovies" path segment is only for movies. Skip for TV series.
+        if (isTv && provider.pathSegment == "allmovies") {
+            return@withContext null
+        }
+
         val typeSegment = if (isTv) "tv" else "movie"
         val querySuffix = if (isTv) "$numericId/$season/$episode" else numericId
 
@@ -190,53 +219,65 @@ object VidnestNativeScraper {
             }
         }
 
-        for (baseUrl in BASE_URLS) {
-            val endpointUrl = "$baseUrl/${provider.pathSegment}/$typeSegment/$querySuffix"
-            try {
-                val request = Request.Builder()
-                    .url(endpointUrl)
-                    .header("User-Agent", DEFAULT_UA)
-                    .header("Referer", "https://vidnest.fun/")
-                    .header("Origin", "https://vidnest.fun")
-                    .header("Accept", "application/json, text/plain, */*")
-                    .build()
+        // Parallel query across top base URLs for sub-second responses
+        val topBaseUrls = BASE_URLS.take(4)
+        coroutineScope {
+            val channel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(topBaseUrls.size)
+            topBaseUrls.forEach { baseUrl ->
+                launch(Dispatchers.IO) {
+                    val endpointUrl = "$baseUrl/${provider.pathSegment}/$typeSegment/$querySuffix"
+                    try {
+                        val request = Request.Builder()
+                            .url(endpointUrl)
+                            .header("User-Agent", DEFAULT_UA)
+                            .header("Referer", "https://vidnest.fun/")
+                            .header("Origin", "https://vidnest.fun")
+                            .header("Accept", "application/json, text/plain, */*")
+                            .build()
 
-                val response = httpClient.newCall(request).execute()
-                val bodyStr = response.body?.string() ?: ""
+                        val response = httpClient.newCall(request).execute()
+                        val bodyStr = response.body?.string() ?: ""
 
-                if (response.isSuccessful && bodyStr.isNotBlank()) {
-                    var decryptedPayload = bodyStr
-                    if (bodyStr.contains("\"data\"")) {
-                        try {
-                            val rootJson = JSONObject(bodyStr)
-                            val encData = rootJson.optString("data", "")
-                            if (encData.isNotBlank()) {
-                                val decrypted = decryptCipher(encData)
+                        if (response.isSuccessful && bodyStr.isNotBlank()) {
+                            var decryptedPayload = bodyStr
+                            if (bodyStr.contains("\"data\"")) {
+                                try {
+                                    val rootJson = JSONObject(bodyStr)
+                                    val encData = rootJson.optString("data", "")
+                                    if (encData.isNotBlank()) {
+                                        val decrypted = decryptCipher(encData)
+                                        if (decrypted.isNotBlank()) {
+                                            decryptedPayload = decrypted
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            } else if (!bodyStr.trim().startsWith("{") && !bodyStr.trim().startsWith("[")) {
+                                val decrypted = decryptCipher(bodyStr)
                                 if (decrypted.isNotBlank()) {
                                     decryptedPayload = decrypted
                                 }
                             }
-                        } catch (_: Exception) {}
-                    } else if (!bodyStr.trim().startsWith("{") && !bodyStr.trim().startsWith("[")) {
-                        val decrypted = decryptCipher(bodyStr)
-                        if (decrypted.isNotBlank()) {
-                            decryptedPayload = decrypted
-                        }
-                    }
 
-                    if (decryptedPayload.isNotBlank()) {
-                        val streamResult = parseStreamPayload(decryptedPayload, provider)
-                        if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
-                            Log.d(TAG, "Successfully extracted Vidnest stream from [${provider.displayName}]: ${streamResult.streamUrl}")
-                            return@withContext streamResult
+                            if (decryptedPayload.isNotBlank()) {
+                                val streamResult = parseStreamPayload(decryptedPayload, provider)
+                                if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
+                                    Log.d(TAG, "Successfully extracted Vidnest stream from [${provider.displayName}]: ${streamResult.streamUrl}")
+                                    channel.trySend(streamResult)
+                                }
+                            }
                         }
-                    }
+                    } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Vidnest provider [${provider.displayName}] error on $endpointUrl: ${e.message}")
+            }
+
+            try {
+                kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                    channel.receive()
+                }
+            } catch (_: Exception) {
+                null
             }
         }
-        null
     }
 
     /**
@@ -251,21 +292,12 @@ object VidnestNativeScraper {
         episode: Int = 1
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         val numericId = resolveToNumericTmdbId(tmdbId, isTv)
-        
-        // Fast-path: Check Filxer (Fast) first as it is the most reliable
-        try {
-            val filxerStream = extractStreamFromProvider("filxer", numericId, isTv, season, episode)
-            if (filxerStream != null && filxerStream.streamUrl.isNotBlank()) {
-                Log.d(TAG, "Filxer (Fast) priority hit: ${filxerStream.streamUrl}")
-                return@withContext filxerStream
-            }
-        } catch (_: Exception) {}
 
         coroutineScope {
             Log.d(TAG, "Starting Concurrent High-Power Fast Scraping across ${PROVIDERS.size} VidNest sub-providers for TMDB: $numericId")
             val channel = kotlinx.coroutines.channels.Channel<ScrapedStreamResult>(PROVIDERS.size)
             
-            // Launch all sub-server providers concurrently
+            // Launch all sub-server providers concurrently in parallel (Beta, Sigma, Filxer, Prime, Hexa, Gama, etc.)
             val jobs = PROVIDERS.map { provider ->
                 launch(Dispatchers.IO) {
                     try {
@@ -279,7 +311,7 @@ object VidnestNativeScraper {
 
             var best: ScrapedStreamResult? = null
             try {
-                best = kotlinx.coroutines.withTimeoutOrNull(9000L) {
+                best = kotlinx.coroutines.withTimeoutOrNull(8000L) {
                     channel.receive()
                 }
             } catch (_: Exception) {}
