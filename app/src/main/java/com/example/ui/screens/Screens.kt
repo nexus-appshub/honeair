@@ -918,6 +918,7 @@ fun HomeScreen(
     var showNotificationPopup by remember { mutableStateOf(false) }
     var hasNewNotification by remember { mutableStateOf(false) }
     val mediaWatchHistory by viewModel.mediaWatchHistory.collectAsState()
+    val appControlConfig by viewModel.appControlConfig.collectAsState()
 
 
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1889,6 +1890,14 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
+                // Admin Panel Sponsored Ad Banner
+                item {
+                    com.example.ui.components.AdminAdBannerCard(
+                        config = appControlConfig,
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
+
                 // 1. Featured Watch Anything Hero Banner Carousel
                 item {
                     Column(
@@ -8517,6 +8526,7 @@ fun SettingsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .navigationBarsPadding()
                     .background(Color.Black)
             ) {
                 AiringFeedScreen(
@@ -13354,6 +13364,7 @@ fun AiringFeedScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .background(Color.Black)
     ) {
         when {

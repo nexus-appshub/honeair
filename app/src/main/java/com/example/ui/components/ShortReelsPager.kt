@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -531,6 +532,7 @@ private fun SingleReelPlayerItem(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -571,6 +573,7 @@ private fun SingleReelPlayerItem(
             progress = { progress },
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .height(3.dp)
                 .align(Alignment.BottomCenter),
             color = Color(0xFFFF6B00),

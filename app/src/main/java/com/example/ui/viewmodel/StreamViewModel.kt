@@ -105,6 +105,11 @@ data class AppControlConfig(
     val fancodeWebUrl: String = "",
     val fancodeOverlayBuyUrl: String = "",
     val fancodeOverlayBuyText: String = "",
+    val fancodeHeroTitle: String = "PREMIUM",
+    val fancodeHeroSubtitle: String = "More Sports. More Action.",
+    val fancodeHeroDescription: String = "Get access to live sports, exclusive content, and premium features with FanCode.",
+    val fancodeHeroSlides: List<String> = emptyList(),
+    val fancodeHideBannerText: Boolean = false,
     val lockedTabs: List<String> = emptyList(),
     val premiumCategories: List<String> = emptyList(),
     val premiumMediaIds: List<String> = emptyList(),
@@ -347,6 +352,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 fancodeWebUrl = p.getString("fancodeWebUrl", "") ?: "",
                 fancodeOverlayBuyUrl = p.getString("fancodeOverlayBuyUrl", "") ?: "",
                 fancodeOverlayBuyText = p.getString("fancodeOverlayBuyText", "") ?: "",
+                fancodeHeroTitle = p.getString("fancodeHeroTitle", "PREMIUM") ?: "PREMIUM",
+                fancodeHeroSubtitle = p.getString("fancodeHeroSubtitle", "More Sports. More Action.") ?: "More Sports. More Action.",
+                fancodeHeroDescription = p.getString("fancodeHeroDescription", "Get access to live sports, exclusive content, and premium features with FanCode.") ?: "Get access to live sports, exclusive content, and premium features with FanCode.",
+                fancodeHeroSlides = p.getString("fancodeHeroSlides", "")?.split("|")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList(),
+                fancodeHideBannerText = p.getBoolean("fancodeHideBannerText", false),
                 redeemCode = p.getString("redeemCode", "") ?: "",
                 redeemValidityHours = p.getInt("redeemValidityHours", 24),
                 redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L),
@@ -1385,6 +1395,49 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 .ifBlank { json.optString("fancode_overlay_buy_text", "") }
                                 .ifBlank { json.optString("fancodeBuyText", "") }
 
+                            val fancodeHeroTitle = json.optString("fancodeHeroTitle", "")
+                                .ifBlank { json.optString("fancode_hero_title", "") }
+                                .ifBlank { json.optString("fancodeBannerTitle", "") }
+                                .ifBlank { json.optString("fancode_banner_title", "") }
+                                .ifBlank { "PREMIUM" }
+
+                            val fancodeHeroSubtitle = json.optString("fancodeHeroSubtitle", "")
+                                .ifBlank { json.optString("fancode_hero_subtitle", "") }
+                                .ifBlank { json.optString("fancodeBannerSubtitle", "") }
+                                .ifBlank { "More Sports. More Action." }
+
+                            val fancodeHeroDescription = json.optString("fancodeHeroDescription", "")
+                                .ifBlank { json.optString("fancode_hero_description", "") }
+                                .ifBlank { json.optString("fancodeBannerDesc", "") }
+                                .ifBlank { "Get access to live sports, exclusive content, and premium features with FanCode." }
+
+                            val fancodeHideBannerText = json.optBoolean("fancodeHideBannerText", false) ||
+                                json.optBoolean("fancode_hide_banner_text", false) ||
+                                json.optBoolean("fancodeHideHeroText", false) ||
+                                json.optBoolean("fancode_hide_hero_text", false)
+
+                            val fancodeHeroSlides = mutableListOf<String>()
+                            val rawHeroSlides = json.opt("fancodeHeroSlides")
+                                ?: json.opt("fancode_hero_slides")
+                                ?: json.opt("fancodeTickerSlides")
+                                ?: json.opt("fancode_ticker_slides")
+                            when (rawHeroSlides) {
+                                is org.json.JSONArray -> {
+                                    for (i in 0 until rawHeroSlides.length()) {
+                                        val item = rawHeroSlides.optString(i, "").trim()
+                                        if (item.isNotBlank() && item != "null") fancodeHeroSlides.add(item)
+                                    }
+                                }
+                                is String -> {
+                                    if (rawHeroSlides.isNotBlank() && rawHeroSlides != "null") {
+                                        rawHeroSlides.split(",", "|", ";", "\n").forEach {
+                                            val s = it.trim()
+                                            if (s.isNotBlank()) fancodeHeroSlides.add(s)
+                                        }
+                                    }
+                                }
+                            }
+
                             val isLiveTvLockEnabled = json.optBoolean("isLiveTvLockEnabled", false)
 
                             val lockedTabs = mutableListOf<String>()
@@ -1800,6 +1853,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 fancodeWebUrl = fancodeWebUrl,
                                 fancodeOverlayBuyUrl = fancodeOverlayBuyUrl,
                                 fancodeOverlayBuyText = fancodeOverlayBuyText,
+                                fancodeHeroTitle = fancodeHeroTitle,
+                                fancodeHeroSubtitle = fancodeHeroSubtitle,
+                                fancodeHeroDescription = fancodeHeroDescription,
+                                fancodeHeroSlides = fancodeHeroSlides,
+                                fancodeHideBannerText = fancodeHideBannerText,
                                 lockedTabs = lockedTabs,
                                 premiumCategories = premiumCategories,
                                 premiumMediaIds = premiumMediaIds,

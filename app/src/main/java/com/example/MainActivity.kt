@@ -52,6 +52,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -1491,6 +1492,22 @@ fun GlobalFanCodeLockScreen(
     val bannerUrl = appControlConfig?.fancodeBannerUrl?.ifBlank { null }
         ?: "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=1000&auto=format&fit=crop"
 
+    val heroSlides = appControlConfig?.fancodeHeroSlides.orEmpty()
+    var slideIndex by remember(heroSlides) { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(heroSlides) {
+        if (heroSlides.size > 1) {
+            while (true) {
+                kotlinx.coroutines.delay(3500)
+                slideIndex = (slideIndex + 1) % heroSlides.size
+            }
+        }
+    }
+
+    val heroTitle = if (heroSlides.isNotEmpty()) heroSlides[slideIndex] else (appControlConfig?.fancodeHeroTitle?.ifBlank { "PREMIUM" } ?: "PREMIUM")
+    val heroSubtitle = appControlConfig?.fancodeHeroSubtitle?.ifBlank { "More Sports. More Action." } ?: "More Sports. More Action."
+    val heroDescription = appControlConfig?.fancodeHeroDescription?.ifBlank { "Get access to live sports, exclusive content, and premium features with FanCode." } ?: "Get access to live sports, exclusive content, and premium features with FanCode."
+    val isHideBannerText = appControlConfig?.fancodeHideBannerText == true || heroTitle.equals("hide", ignoreCase = true)
+
     val subscribeUrl = appControlConfig?.fancodeOverlayBuyUrl?.ifBlank { null }
         ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
         ?: appControlConfig?.fancodeWebUrl?.ifBlank { null }
@@ -1530,36 +1547,89 @@ fun GlobalFanCodeLockScreen(
                             )
                         )
                 ) {
-                    // Admin Banner Image Overlay if configured or default image matching image.png
-                    val isCustomBanner = appControlConfig?.fancodeBannerUrl?.isNotBlank() == true
-                    coil.compose.AsyncImage(
-                        model = bannerUrl,
-                        contentDescription = "FanCode Banner",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = if (isCustomBanner) {
-                                        listOf(
-                                            Color.Black.copy(alpha = 0.25f),
-                                            Color.Black.copy(alpha = 0.85f)
-                                        )
-                                    } else {
-                                        listOf(
-                                            Color(0xFFFF512F).copy(alpha = 0.82f),
-                                            Color(0xFFFF8800).copy(alpha = 0.88f)
-                                        )
-                                    }
-                                )
-                            )
-                    )
+                    // Check if bannerUrl is a video link
+                    val cleanUrl = bannerUrl.lowercase().substringBefore("?")
+                    val isVideo = cleanUrl.endsWith(".mp4") || cleanUrl.endsWith(".m3u8") ||
+                            cleanUrl.endsWith(".webm") || cleanUrl.endsWith(".mkv") ||
+                            cleanUrl.endsWith(".mov") || cleanUrl.contains("/video") || cleanUrl.contains("stream")
 
-                    // Right-side calligraphic sports silhouettes & diagonal speed lines matching image.png
-                    if (!isCustomBanner) {
+                    if (isVideo) {
+                        val exoPlayer = remember(context, bannerUrl) {
+                            val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                                .setAllowCrossProtocolRedirects(true)
+                            val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+                            val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                            val mediaItem = androidx.media3.common.MediaItem.fromUri(android.net.Uri.parse(bannerUrl))
+
+                            androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                                .setMediaSourceFactory(mediaSourceFactory)
+                                .build().apply {
+                                    setMediaItem(mediaItem)
+                                    repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+                                    volume = 0f
+                                    videoScalingMode = androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                                    prepare()
+                                    playWhenReady = true
+                                }
+                        }
+
+                        DisposableEffect(exoPlayer) {
+                            onDispose {
+                                exoPlayer.stop()
+                                exoPlayer.release()
+                            }
+                        }
+
+                        AndroidView(
+                            factory = { ctx ->
+                                androidx.media3.ui.PlayerView(ctx).apply {
+                                    player = exoPlayer
+                                    useController = false
+                                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                    layoutParams = android.view.ViewGroup.LayoutParams(
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        coil.compose.AsyncImage(
+                            model = bannerUrl,
+                            contentDescription = "FanCode Banner",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    }
+
+                    val isCustomBanner = appControlConfig?.fancodeBannerUrl?.isNotBlank() == true
+
+                    // Gradient Overlay (Hidden if isHideBannerText is true for direct full opacity)
+                    if (!isHideBannerText) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = if (isCustomBanner) {
+                                            listOf(
+                                                Color.Black.copy(alpha = 0.25f),
+                                                Color.Black.copy(alpha = 0.85f)
+                                            )
+                                        } else {
+                                            listOf(
+                                                Color(0xFFFF512F).copy(alpha = 0.82f),
+                                                Color(0xFFFF8800).copy(alpha = 0.88f)
+                                            )
+                                        }
+                                    )
+                                )
+                        )
+                    }
+
+                    // Right-side calligraphic sports silhouettes (only shown when not hiding text & using default banner)
+                    if (!isCustomBanner && !isHideBannerText && !isVideo) {
                         Row(
                             modifier = Modifier.fillMaxSize(),
                             horizontalArrangement = Arrangement.End,
@@ -1588,58 +1658,69 @@ fun GlobalFanCodeLockScreen(
                         }
                     }
 
-                    // Content Text Column (Matching image.png typography exactly with shadow for beautiful readability)
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 24.dp, vertical = 20.dp),
-                        verticalArrangement = Arrangement.Bottom
-                    ) {
-                        Text(
-                            text = "REDEEM CODE",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                letterSpacing = 3.sp,
-                                shadow = androidx.compose.ui.graphics.Shadow(
-                                    color = Color.Black.copy(alpha = 0.5f),
-                                    offset = androidx.compose.ui.geometry.Offset(2f, 3f),
-                                    blurRadius = 4f
+                    // Content Text Column (Hidden if isHideBannerText is true for direct full opacity display)
+                    if (!isHideBannerText) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 24.dp, vertical = 20.dp),
+                            verticalArrangement = Arrangement.Bottom
+                        ) {
+                            androidx.compose.animation.AnimatedContent(
+                                targetState = heroTitle,
+                                transitionSpec = {
+                                    androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(500)) togetherWith
+                                            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(500))
+                                },
+                                label = "hero_title_anim"
+                            ) { titleText ->
+                                Text(
+                                    text = titleText,
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontSize = 32.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                        letterSpacing = 2.sp,
+                                        shadow = androidx.compose.ui.graphics.Shadow(
+                                            color = Color.Black.copy(alpha = 0.5f),
+                                            offset = androidx.compose.ui.geometry.Offset(2f, 3f),
+                                            blurRadius = 4f
+                                        )
+                                    ),
+                                    color = Color.White
                                 )
-                            ),
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "More Sports. More Action.",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = 21.sp,
-                                fontWeight = FontWeight.Bold,
-                                shadow = androidx.compose.ui.graphics.Shadow(
-                                    color = Color.Black.copy(alpha = 0.4f),
-                                    offset = androidx.compose.ui.geometry.Offset(1f, 1.5f),
-                                    blurRadius = 2f
-                                )
-                            ),
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Get access to live sports, exclusive content, and premium features with FanCode.",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                lineHeight = 18.sp,
-                                shadow = androidx.compose.ui.graphics.Shadow(
-                                    color = Color.Black.copy(alpha = 0.4f),
-                                    offset = androidx.compose.ui.geometry.Offset(1f, 1f),
-                                    blurRadius = 2f
-                                )
-                            ),
-                            color = Color.White.copy(alpha = 0.95f),
-                            modifier = Modifier.fillMaxWidth(0.85f)
-                        )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = heroSubtitle,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    shadow = androidx.compose.ui.graphics.Shadow(
+                                        color = Color.Black.copy(alpha = 0.4f),
+                                        offset = androidx.compose.ui.geometry.Offset(1f, 1.5f),
+                                        blurRadius = 2f
+                                    )
+                                ),
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = heroDescription,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 16.sp,
+                                    shadow = androidx.compose.ui.graphics.Shadow(
+                                        color = Color.Black.copy(alpha = 0.4f),
+                                        offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                                        blurRadius = 2f
+                                    )
+                                ),
+                                color = Color.White.copy(alpha = 0.95f),
+                                modifier = Modifier.fillMaxWidth(0.88f)
+                            )
+                        }
                     }
 
                     // Back/Close Button for tab/overlay navigation control
