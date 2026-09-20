@@ -103,6 +103,7 @@ data class AppControlConfig(
     val isFanCodeGetCodeEnabled: Boolean = true,
     val fancodeTelegramUrl: String = "",
     val fancodeWebUrl: String = "",
+    val fancodeOverlayBuyUrl: String = "",
     val lockedTabs: List<String> = emptyList(),
     val premiumCategories: List<String> = emptyList(),
     val premiumMediaIds: List<String> = emptyList(),
@@ -343,6 +344,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 isFanCodeGetCodeEnabled = p.getBoolean("isFanCodeGetCodeEnabled", true),
                 fancodeTelegramUrl = p.getString("fancodeTelegramUrl", "") ?: "",
                 fancodeWebUrl = p.getString("fancodeWebUrl", "") ?: "",
+                fancodeOverlayBuyUrl = p.getString("fancodeOverlayBuyUrl", "") ?: "",
                 redeemCode = p.getString("redeemCode", "") ?: "",
                 redeemValidityHours = p.getInt("redeemValidityHours", 24),
                 redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L),
@@ -1371,6 +1373,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 .ifBlank { json.optString("websiteUrl", "") }
                                 .ifBlank { json.optString("fancode_web", "") }
 
+                            val fancodeOverlayBuyUrl = json.optString("fancodeOverlayBuyUrl", "")
+                                .ifBlank { json.optString("fancode_overlay_buy_url", "") }
+
                             val isLiveTvLockEnabled = json.optBoolean("isLiveTvLockEnabled", false)
 
                             val lockedTabs = mutableListOf<String>()
@@ -1732,6 +1737,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putBoolean("isFanCodeGetCodeEnabled", isFanCodeGetCodeEnabled)
                                     .putString("fancodeTelegramUrl", fancodeTelegramUrl)
                                     .putString("fancodeWebUrl", fancodeWebUrl)
+                                    .putString("fancodeOverlayBuyUrl", fancodeOverlayBuyUrl)
                                     .putString("redeemCode", redeemCode)
                                     .putInt("redeemValidityHours", redeemValidityHours)
                                     .putLong("redeemExpiryTimestamp", redeemExpiryTimestamp)
@@ -1782,6 +1788,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 isFanCodeGetCodeEnabled = isFanCodeGetCodeEnabled,
                                 fancodeTelegramUrl = fancodeTelegramUrl,
                                 fancodeWebUrl = fancodeWebUrl,
+                                fancodeOverlayBuyUrl = fancodeOverlayBuyUrl,
                                 lockedTabs = lockedTabs,
                                 premiumCategories = premiumCategories,
                                 premiumMediaIds = premiumMediaIds,

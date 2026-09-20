@@ -1491,8 +1491,7 @@ fun GlobalFanCodeLockScreen(
     val bannerUrl = appControlConfig?.fancodeBannerUrl?.ifBlank { null }
         ?: "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=1000&auto=format&fit=crop"
 
-    val subscribeUrl = appControlConfig?.fancodeWebUrl?.ifBlank { null }
-        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+    val subscribeUrl = appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
         ?: "https://homeair.pages.dev/vip"
 
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -2157,8 +2156,7 @@ fun FanCodeGetCodeOptionsModal(
         ?: "https://t.me/HomeAirTv"
 
     val webUrl = appControlConfig?.fancodeWebUrl?.ifBlank { null }
-        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
-        ?: "https://homeair.pages.dev/vip"
+        ?: "https://www.hmair.xyz/fancodes"
 
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val modalBg = if (isDark) Color(0xFF141418) else Color(0xFFFFF9F2)
@@ -2369,8 +2367,7 @@ fun FanCodeGetCodeModal(
     var applySuccess by remember { mutableStateOf(false) }
 
     val appControlConfig by viewModel.appControlConfig.collectAsState()
-    val subscribeUrl = appControlConfig?.fancodeWebUrl?.ifBlank { null }
-        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+    val subscribeUrl = appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
         ?: "https://homeair.pages.dev/vip"
 
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -2833,7 +2830,6 @@ fun PremiumPaywallDialog(
 
     val appControlConfig by viewModel.appControlConfig.collectAsState()
     val subscribeUrl = buttonUrl.ifBlank { null }
-        ?: appControlConfig?.fancodeWebUrl?.ifBlank { null }
         ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
         ?: "https://homeair.pages.dev/vip"
 
