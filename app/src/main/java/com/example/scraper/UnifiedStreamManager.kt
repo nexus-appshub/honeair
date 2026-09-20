@@ -634,7 +634,8 @@ object UnifiedStreamManager {
         isTv: Boolean,
         season: Int,
         episode: Int,
-        preferredServerKey: String? = null
+        preferredServerKey: String? = null,
+        isAnime: Boolean = false
     ): StreamRaceWinner? = withContext(Dispatchers.IO) {
         val effectiveEpisode = if (episode <= 0) 1 else episode
         val cacheKey = "$tmdbId-$season-$effectiveEpisode"
@@ -791,7 +792,43 @@ object UnifiedStreamManager {
                 } catch (_: Exception) {}
             }
 
-            val allJobs = listOf(jVidrock, jFlixer, jPrime, jHexa, jHindi, jAlfa, jGama, jVidlink, jAutoEmbed)
+            // Server 10: Anikoto Anime
+            val jAnikoto = if (isAnime || com.example.scraper.AnimePosterEngine.isAnime(title, "", "series", tmdbId)) {
+                launch(Dispatchers.IO) {
+                    try {
+                        val cleanTitle = title.replace(Regex("""(?i)(?:season|part|cour|arc|s)\s*\d+.*"""), "").trim()
+                        val slugKey = cleanTitle.lowercase().replace(" ", "-").replace(Regex("[^a-z0-9-]"), "")
+                        var res = AnikotoScraper.getStreamByTitle(slugKey, season, effectiveEpisode)
+                        if (res == null || res.streamUrl.isBlank()) {
+                            res = AnikotoScraper.getStreamByTitle(cleanTitle, season, effectiveEpisode)
+                        }
+                        if (res != null && res.streamUrl.isNotBlank()) {
+                            winnerChannel.trySend(StreamRaceWinner("anikoto", "Anime (Anikoto)", res))
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else null
+
+            // Server 11: Universal Anime Native Scraper
+            val jUniversalAnime = if (isAnime || com.example.scraper.AnimePosterEngine.isAnime(title, "", "series", tmdbId)) {
+                launch(Dispatchers.IO) {
+                    try {
+                        val cleanTitle = title.replace(Regex("""(?i)(?:season|part|cour|arc|s)\s*\d+.*"""), "").trim()
+                        val slugKey = cleanTitle.lowercase().replace(" ", "-").replace(Regex("[^a-z0-9-]"), "")
+                        val nativeTarget = if (slugKey.isNotBlank()) slugKey else cleanTitle
+                        val res = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
+                            title = nativeTarget,
+                            season = season,
+                            episode = effectiveEpisode
+                        )
+                        if (res != null && res.streamUrl.isNotBlank()) {
+                            winnerChannel.trySend(StreamRaceWinner("native_anime", "Anime (Fast)", res))
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else null
+
+            val allJobs = listOfNotNull(jVidrock, jFlixer, jPrime, jHexa, jHindi, jAlfa, jGama, jVidlink, jAutoEmbed, jAnikoto, jUniversalAnime)
 
             var winner: StreamRaceWinner? = null
             try {

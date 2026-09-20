@@ -279,27 +279,16 @@ fun VerticalMediaFeedCard(
                         if (resolvedPreviewUrl.isBlank()) {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
-                                    val streamRes = if (!isAnime) {
-                                        com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
-                                            context = context,
-                                            tmdbId = tmdbId,
-                                            title = item.title,
-                                            isTv = isTv,
-                                            season = effectiveSeason,
-                                            episode = currentEpisode,
-                                            preferredServerKey = "fastest_auto"
-                                        )?.result
-                                    } else {
-                                        com.example.scraper.UnifiedStreamManager.getStream(
-                                            context = context,
-                                            title = item.title,
-                                            tmdbId = tmdbId,
-                                            isTv = isTv,
-                                            season = effectiveSeason,
-                                            episode = currentEpisode,
-                                            isAnime = true
-                                        )
-                                    }
+                                    val streamRes = com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                        context = context,
+                                        tmdbId = tmdbId,
+                                        title = item.title,
+                                        isTv = isTv,
+                                        season = effectiveSeason,
+                                        episode = currentEpisode,
+                                        preferredServerKey = "fastest_auto",
+                                        isAnime = isAnime
+                                    )?.result
                                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                             resolvedPreviewUrl = streamRes.streamUrl
@@ -324,8 +313,19 @@ fun VerticalMediaFeedCard(
                         )
                         val mediaSourceFactory = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpDataSourceFactory)
 
+                        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                            .setBufferDurationsMs(
+                                /* minBufferMs = */ 1000,
+                                /* maxBufferMs = */ 8000,
+                                /* bufferForPlaybackMs = */ 250,
+                                /* bufferForPlaybackAfterRebufferMs = */ 500
+                            )
+                            .setPrioritizeTimeOverSizeThresholds(true)
+                            .build()
+
                         ExoPlayer.Builder(context)
                             .setMediaSourceFactory(mediaSourceFactory)
+                            .setLoadControl(loadControl)
                             .build().apply {
                                 val mediaItemBuilder = Media3Item.Builder().setUri(resolvedPreviewUrl)
                                 val urlLower = resolvedPreviewUrl.lowercase()
@@ -358,7 +358,8 @@ fun VerticalMediaFeedCard(
                                                     isTv = isTv,
                                                     season = currentSeason,
                                                     episode = currentEpisode,
-                                                    preferredServerKey = "vidrock_direct"
+                                                    preferredServerKey = "vidrock_direct",
+                                                    isAnime = isAnime
                                                 )?.result
                                                 if (alt != null && alt.streamUrl.isNotBlank() && alt.streamUrl != resolvedPreviewUrl) {
                                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
