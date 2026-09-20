@@ -665,7 +665,7 @@ object UnifiedStreamManager {
             } catch (_: Exception) {}
         }
 
-        // 3. If user selected a specific provider (e.g., Hindi, VidRock, Flixer, Prime, Hexa)
+        // 3. If user selected a specific provider (e.g., HM VIP, Hindi, MAIN Direct, Prime, Hexa)
         if (!preferredServerKey.isNullOrBlank() && preferredServerKey != "fastest_auto") {
             try {
                 val specificResult: ScrapedStreamResult? = when (preferredServerKey) {
@@ -676,9 +676,9 @@ object UnifiedStreamManager {
                 }
                 if (specificResult != null && specificResult.streamUrl.isNotBlank()) {
                     val serverName = when (preferredServerKey) {
+                        "filxer" -> "HM VIP"
                         "delta" -> "HINDI"
-                        "vidrock_direct" -> "ZOZO (Direct)"
-                        "filxer" -> "Flixer"
+                        "vidrock_direct" -> "MAIN (Direct)"
                         "prime" -> "Prime"
                         "hexa" -> "Hexa"
                         "alfa" -> "Alfa"
@@ -697,32 +697,42 @@ object UnifiedStreamManager {
             }
         }
 
-        // 4. PARALLEL SPEED RACE ACROSS MULTI LIST OF SERVERS:
-        // Hindi, VidRock (direct), Flixer, Prime, Hexa, Alfa, Gama, VidLink, AutoEmbed
+        // 4. INSTANT PARALLEL SPEED RACE ACROSS MULTI LIST OF SERVERS:
+        // 1st: HM VIP (filxer), 2nd: HINDI (delta), 3rd: MAIN Direct (vidrock_direct), Prime, Hexa, Alfa, Gama, VidLink, AutoEmbed, Lamda, Zeta, Catflix
         coroutineScope {
-            val winnerChannel = kotlinx.coroutines.channels.Channel<StreamRaceWinner>(15)
+            val winnerChannel = kotlinx.coroutines.channels.Channel<StreamRaceWinner>(20)
 
-            // Server 1: VidRock Direct
-            val jVidrock = launch(Dispatchers.IO) {
-                try {
-                    val res = VidrockNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("vidrock_direct", "ZOZO (Direct)", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 2: Flixer (Rogflix direct)
+            // Server 1: HM VIP (Flixer / Rogflix direct) - 1st priority server
             val jFlixer = launch(Dispatchers.IO) {
                 try {
                     val res = VidnestNativeScraper.extractStreamFromProvider("filxer", finalTmdbId, isTv, season, effectiveEpisode)
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("filxer", "Flixer", res))
+                        winnerChannel.trySend(StreamRaceWinner("filxer", "HM VIP", res))
                     }
                 } catch (_: Exception) {}
             }
 
-            // Server 3: Prime (Vidrock endpoint)
+            // Server 2: HINDI (Delta endpoint) - 2nd priority server
+            val jHindi = launch(Dispatchers.IO) {
+                try {
+                    val res = VidnestNativeScraper.extractStreamFromProvider("delta", finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("delta", "HINDI", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Server 3: MAIN Direct (VidRock Direct) - 3rd priority server
+            val jVidrock = launch(Dispatchers.IO) {
+                try {
+                    val res = VidrockNativeScraper.extractStream(finalTmdbId, isTv, season, effectiveEpisode)
+                    if (res != null && res.streamUrl.isNotBlank()) {
+                        winnerChannel.trySend(StreamRaceWinner("vidrock_direct", "MAIN (Direct)", res))
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Server 4: Prime (Vidrock endpoint)
             val jPrime = launch(Dispatchers.IO) {
                 try {
                     val res = VidnestNativeScraper.extractStreamFromProvider("prime", finalTmdbId, isTv, season, effectiveEpisode)
@@ -732,22 +742,12 @@ object UnifiedStreamManager {
                 } catch (_: Exception) {}
             }
 
-            // Server 4: Hexa (Vidlink endpoint)
+            // Server 5: Hexa (Vidlink endpoint)
             val jHexa = launch(Dispatchers.IO) {
                 try {
                     val res = VidnestNativeScraper.extractStreamFromProvider("hexa", finalTmdbId, isTv, season, effectiveEpisode)
                     if (res != null && res.streamUrl.isNotBlank()) {
                         winnerChannel.trySend(StreamRaceWinner("hexa", "Hexa", res))
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // Server 5: HINDI (Delta endpoint)
-            val jHindi = launch(Dispatchers.IO) {
-                try {
-                    val res = VidnestNativeScraper.extractStreamFromProvider("delta", finalTmdbId, isTv, season, effectiveEpisode)
-                    if (res != null && res.streamUrl.isNotBlank()) {
-                        winnerChannel.trySend(StreamRaceWinner("delta", "HINDI", res))
                     }
                 } catch (_: Exception) {}
             }
@@ -828,7 +828,7 @@ object UnifiedStreamManager {
                 }
             } else null
 
-            val allJobs = listOfNotNull(jVidrock, jFlixer, jPrime, jHexa, jHindi, jAlfa, jGama, jVidlink, jAutoEmbed, jAnikoto, jUniversalAnime)
+            val allJobs = listOfNotNull(jFlixer, jHindi, jVidrock, jPrime, jHexa, jAlfa, jGama, jVidlink, jAutoEmbed, jAnikoto, jUniversalAnime)
 
             var winner: StreamRaceWinner? = null
             try {

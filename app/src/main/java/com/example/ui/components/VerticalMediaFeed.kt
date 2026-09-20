@@ -799,12 +799,12 @@ fun VerticalMediaFeedCard(
                                     }
                                 }
                             } else {
-                                // Non-anime stream servers list (Fastest Auto, Hindi, VidRock, Flixer, Prime, Hexa, etc.)
+                                // Non-anime stream servers list (HM VIP, Hindi, MAIN Direct, Fastest Auto, Prime, Hexa, etc.)
                                 val providers = listOf(
-                                    "⚡ Fastest (Auto Parallel)" to "fastest_auto",
+                                    "HM VIP Server" to "filxer",
                                     "HINDI Server" to "delta",
-                                    "ZOZO Server (Direct)" to "vidrock_direct",
-                                    "Flixer Server" to "filxer",
+                                    "MAIN Server (Direct)" to "vidrock_direct",
+                                    "⚡ Fastest (Auto Parallel)" to "fastest_auto",
                                     "Prime Server" to "prime",
                                     "Hexa Server" to "hexa",
                                     "Alfa Server" to "alfa",
@@ -1152,10 +1152,10 @@ fun VerticalMediaFeedCard(
             Spacer(modifier = Modifier.height(6.dp))
 
             val streamServers = listOf(
-                Triple("fastest_auto", "⚡ Fastest Direct", Color(0xFF00E5FF)),
+                Triple("filxer", "HM VIP", Color(0xFF00E5FF)),
                 Triple("delta", "HINDI", Color(0xFFFF9800)),
-                Triple("vidrock_direct", "ZOZO (Direct)", Color(0xFFB388FF)),
-                Triple("filxer", "Flixer", Color(0xFF00E5FF)),
+                Triple("vidrock_direct", "MAIN (Direct)", Color(0xFFB388FF)),
+                Triple("fastest_auto", "⚡ Fastest Auto", Color(0xFF00E5FF)),
                 Triple("prime", "Prime", Color(0xFF00E676)),
                 Triple("hexa", "Hexa", Color(0xFFE040FB)),
                 Triple("alfa", "Alfa", Color(0xFF00E5FF)),
@@ -1175,7 +1175,7 @@ fun VerticalMediaFeedCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 items(streamServers) { (key, label, accentColor) ->
-                    val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "fastest_auto")
+                    val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "filxer")
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = if (isSelected) accentColor.copy(alpha = 0.22f) else if (isDark) Color(0xFF1C1C20) else Color(0xFFF2F2F5),

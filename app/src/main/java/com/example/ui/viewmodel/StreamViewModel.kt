@@ -2077,7 +2077,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _activeMediaEpisode = MutableStateFlow(1)
     val activeMediaEpisode: StateFlow<Int> = _activeMediaEpisode.asStateFlow()
 
-    private val _selectedStreamServerKey = MutableStateFlow<String?>("fastest_auto")
+    private val _selectedStreamServerKey = MutableStateFlow<String?>("filxer")
     val selectedStreamServerKey: StateFlow<String?> = _selectedStreamServerKey.asStateFlow()
 
     fun selectStreamServerKey(key: String?) {
