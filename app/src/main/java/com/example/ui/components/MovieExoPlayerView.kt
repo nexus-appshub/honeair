@@ -210,9 +210,11 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
     // Initialize and maintain ExoPlayer
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var isRetryingWithoutSidecarSubtitles by remember(currentUrl) { mutableStateOf(false) }
+    var hasRenderedVideoFrame by remember(currentUrl) { mutableStateOf(false) }
 
     LaunchedEffect(currentUrl, customHeaders, isRetryingWithoutSidecarSubtitles) {
         errorMessage = null
+        hasRenderedVideoFrame = false
         exoPlayer?.release()
 
         val sharedPrefs = context.getSharedPreferences("stream_app_prefs", android.content.Context.MODE_PRIVATE)
@@ -318,6 +320,7 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
             }
 
             override fun onRenderedFirstFrame() {
+                hasRenderedVideoFrame = true
                 isPlaying = true
                 player.playWhenReady = true
                 player.play()
@@ -337,15 +340,38 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         exoPlayer = player
     }
 
-    // Aggressive Auto-play kicker loop for instant playback upon ready
+    // Aggressive Auto-play kicker & stall-recovery loop for instant playback
     LaunchedEffect(exoPlayer, currentUrl) {
         val p = exoPlayer ?: return@LaunchedEffect
-        for (i in 0..12) {
-            if (p.playbackState == Player.STATE_READY && !p.isPlaying) {
-                p.playWhenReady = true
-                p.play()
+        p.playWhenReady = true
+        p.play()
+
+        var stallTicks = 0
+        for (i in 0..25) {
+            delay(250)
+            if (p.playbackState == Player.STATE_READY) {
+                if (!p.isPlaying || !p.playWhenReady) {
+                    p.playWhenReady = true
+                    p.play()
+                }
             }
-            delay(200)
+            if (p.playbackState == Player.STATE_READY || p.playbackState == Player.STATE_BUFFERING) {
+                if (p.currentPosition == 0L && !hasRenderedVideoFrame) {
+                    stallTicks++
+                    if (stallTicks == 8) { // 2 seconds stuck at 00:00, nudge timeline by 100ms
+                        p.seekTo(100L)
+                        p.playWhenReady = true
+                        p.play()
+                    }
+                    if (stallTicks >= 20) { // 5 seconds frozen at 00:00 without rendering first frame
+                        android.util.Log.w("MovieExoPlayerView", "Playback stuck at 00:00 for 5 seconds without video frame. Auto-switching server...")
+                        onPlaybackError("Stream stalled at 00:00, auto-switching...")
+                        break
+                    }
+                } else if (p.currentPosition > 0L || hasRenderedVideoFrame) {
+                    break
+                }
+            }
         }
     }
 

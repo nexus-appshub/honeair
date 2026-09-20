@@ -13,7 +13,8 @@ import org.json.JSONObject
 
 object UnifiedStreamManager {
     private const val TAG = "UnifiedStreamManager"
-    private val streamCache = java.util.concurrent.ConcurrentHashMap<String, ScrapedStreamResult>()
+    private data class TimestampedStream(val result: ScrapedStreamResult, val timestamp: Long = System.currentTimeMillis())
+    private val streamCache = java.util.concurrent.ConcurrentHashMap<String, TimestampedStream>()
     private val httpClient = okhttp3.OkHttpClient.Builder()
         .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
@@ -106,11 +107,17 @@ object UnifiedStreamManager {
     fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
         val key = "$tmdbId-$season-$effectiveEpisode"
-        val cached = streamCache[key] ?: streamCache["$tmdbId-$season-$episode"]
-        if (cached != null && !blacklistedUrls.contains(cached.streamUrl)) {
-            return cached
+        val entry = streamCache[key] ?: streamCache["$tmdbId-$season-$episode"]
+        if (entry != null && (System.currentTimeMillis() - entry.timestamp < 15 * 60 * 1000L) && !blacklistedUrls.contains(entry.result.streamUrl)) {
+            return entry.result
         }
         return null
+    }
+
+    fun cacheStream(tmdbId: String, season: Int = 1, episode: Int = 1, result: ScrapedStreamResult) {
+        val effectiveEpisode = if (episode <= 0) 1 else episode
+        val key = "$tmdbId-$season-$effectiveEpisode"
+        streamCache[key] = TimestampedStream(result)
     }
 
     suspend fun getStream(
@@ -124,8 +131,9 @@ object UnifiedStreamManager {
     ): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
         val cacheKey = "$tmdbId-$season-$effectiveEpisode"
-        streamCache[cacheKey]?.let {
-            if (it.streamUrl.isNotBlank()) return it
+        val memCached = streamCache[cacheKey]
+        if (memCached != null && System.currentTimeMillis() - memCached.timestamp < 15 * 60 * 1000L && !blacklistedUrls.contains(memCached.result.streamUrl)) {
+            if (memCached.result.streamUrl.isNotBlank()) return memCached.result
         }
 
         // Try to load from Local Room Cache first to prevent redundant scraping
@@ -133,15 +141,15 @@ object UnifiedStreamManager {
             val db = com.example.data.database.AppDatabase.getDatabase(context)
             val cachedEntity = db.scrapedStreamDao().getStreamById(cacheKey)
             if (cachedEntity != null) {
-                // Check if it is fresh (within 24 hours)
-                if (System.currentTimeMillis() - cachedEntity.timestamp < 24 * 60 * 60 * 1000L) {
+                // Check if it is fresh (within 30 minutes)
+                if (System.currentTimeMillis() - cachedEntity.timestamp < 30 * 60 * 1000L) {
                     val headers = jsonToMap(cachedEntity.headersJson)
                     val result = ScrapedStreamResult(
                         streamUrl = cachedEntity.streamUrl,
                         headers = headers,
                         referer = cachedEntity.referer
                     )
-                    streamCache[cacheKey] = result
+                    streamCache[cacheKey] = TimestampedStream(result)
                     Log.d(TAG, "Loaded stream from local Room cache for key: $cacheKey")
                     return result
                 } else {
@@ -195,7 +203,7 @@ object UnifiedStreamManager {
 
                 if (animeStream != null && animeStream.streamUrl.isNotEmpty()) {
                     Log.d(TAG, "Tier 0: Anime stream resolved successfully via API: ${animeStream.streamUrl}")
-                    streamCache[cacheKey] = animeStream
+                    streamCache[cacheKey] = TimestampedStream(animeStream)
                     saveToRoomCache(context, cacheKey, animeStream)
                     return animeStream
                 }
@@ -209,7 +217,7 @@ object UnifiedStreamManager {
                 )
                 if (nativeStream != null && nativeStream.streamUrl.isNotEmpty()) {
                     Log.d(TAG, "Tier 0: Anime stream resolved via Native In-App Scraper: ${nativeStream.streamUrl}")
-                    streamCache[cacheKey] = nativeStream
+                    streamCache[cacheKey] = TimestampedStream(nativeStream)
                     saveToRoomCache(context, cacheKey, nativeStream)
                     return nativeStream
                 }
@@ -345,7 +353,7 @@ object UnifiedStreamManager {
 
         if (vidnestResult != null && vidnestResult.streamUrl.isNotBlank() && verifyStreamAlive(vidnestResult.streamUrl, vidnestResult.headers)) {
             Log.d(TAG, "Primary Vidnest.fun resolved direct stream successfully: ${vidnestResult.streamUrl}")
-            streamCache[cacheKey] = vidnestResult
+            streamCache[cacheKey] = TimestampedStream(vidnestResult)
             saveToRoomCache(context, cacheKey, vidnestResult)
             return vidnestResult
         }
@@ -445,7 +453,7 @@ object UnifiedStreamManager {
 
             if (winningStream != null && winningStream.streamUrl.isNotBlank()) {
                 Log.d(TAG, "Secondary Deep Scraping Winning Stream selected: ${winningStream.streamUrl}")
-                streamCache[cacheKey] = winningStream
+                streamCache[cacheKey] = TimestampedStream(winningStream)
                 saveToRoomCache(context, cacheKey, winningStream)
                 return@coroutineScope winningStream
             }
@@ -461,7 +469,7 @@ object UnifiedStreamManager {
                         episode = if (effectiveIsTv) episode else 0
                     )
                     if (res != null && res.streamUrl.isNotBlank()) {
-                        streamCache[cacheKey] = res
+                        streamCache[cacheKey] = TimestampedStream(res)
                         saveToRoomCache(context, cacheKey, res)
                         return@coroutineScope res
                     }
@@ -483,7 +491,7 @@ object UnifiedStreamManager {
                 )
                 if (webStream != null && webStream.streamUrl.isNotEmpty()) {
                     Log.d(TAG, "Tier 3: In-App Headless Scraper resolved stream successfully!")
-                    streamCache[cacheKey] = webStream
+                    streamCache[cacheKey] = TimestampedStream(webStream)
                     saveToRoomCache(context, cacheKey, webStream)
                     return@coroutineScope webStream
                 }
@@ -497,7 +505,7 @@ object UnifiedStreamManager {
                 val fallback = queryFallbackApi(finalTmdbId, effectiveIsTv, effectiveSeason, episode)
                 if (fallback != null) {
                     Log.d(TAG, "Tier 4: Fallback stream resolved successfully!")
-                    streamCache[cacheKey] = fallback
+                    streamCache[cacheKey] = TimestampedStream(fallback)
                     saveToRoomCache(context, cacheKey, fallback)
                     return@coroutineScope fallback
                 }
@@ -730,8 +738,8 @@ object UnifiedStreamManager {
             if (serverList.none { it.key == key }) {
                 serverList.add(item)
                 verifiedServerDirectCache["$cacheKey-$key"] = res
-                if (streamCache[cacheKey] == null || streamCache[cacheKey]?.streamUrl.isNullOrBlank()) {
-                    streamCache[cacheKey] = res
+                if (streamCache[cacheKey] == null || streamCache[cacheKey]?.result?.streamUrl.isNullOrBlank()) {
+                    streamCache[cacheKey] = TimestampedStream(res)
                     saveToRoomCache(context, cacheKey, res)
                 }
                 onServerFound?.invoke(item)
@@ -889,9 +897,10 @@ object UnifiedStreamManager {
 
         // 1. Check in-memory cache if no specific server is forced
         if (preferredServerKey == null || preferredServerKey == "fastest_auto") {
-            streamCache[cacheKey]?.let {
-                if (it.streamUrl.isNotBlank() && !blacklistedUrls.contains(it.streamUrl)) {
-                    return@withContext StreamRaceWinner("fastest_auto", "Fastest Direct", it)
+            val memCached = streamCache[cacheKey]
+            if (memCached != null && System.currentTimeMillis() - memCached.timestamp < 15 * 60 * 1000L && !blacklistedUrls.contains(memCached.result.streamUrl)) {
+                if (memCached.result.streamUrl.isNotBlank()) {
+                    return@withContext StreamRaceWinner("fastest_auto", "Fastest Direct", memCached.result)
                 }
             }
         }
@@ -979,7 +988,7 @@ object UnifiedStreamManager {
                         "vidsrc_direct" -> "VidSrc (Multi)"
                         else -> preferredServerKey.uppercase()
                     }
-                    streamCache[cacheKey] = specificResult
+                    streamCache[cacheKey] = TimestampedStream(specificResult)
                     saveToRoomCache(context, cacheKey, specificResult)
                     return@withContext StreamRaceWinner(preferredServerKey, serverName, specificResult)
                 }
@@ -1137,7 +1146,7 @@ object UnifiedStreamManager {
 
         if (vidnestWinner != null && vidnestWinner.result.streamUrl.isNotBlank()) {
             Log.d(TAG, "Fastest Vidnest.fun Sub-Server Winner: [${vidnestWinner.serverName}] -> ${vidnestWinner.result.streamUrl}")
-            streamCache[cacheKey] = vidnestWinner.result
+            streamCache[cacheKey] = TimestampedStream(vidnestWinner.result)
             saveToRoomCache(context, cacheKey, vidnestWinner.result)
             return@withContext vidnestWinner
         }
@@ -1208,7 +1217,7 @@ object UnifiedStreamManager {
 
             if (fallbackWinner != null && fallbackWinner.result.streamUrl.isNotBlank()) {
                 Log.d(TAG, "Secondary Deep Scraping Winner: [${fallbackWinner.serverName}] -> ${fallbackWinner.result.streamUrl}")
-                streamCache[cacheKey] = fallbackWinner.result
+                streamCache[cacheKey] = TimestampedStream(fallbackWinner.result)
                 saveToRoomCache(context, cacheKey, fallbackWinner.result)
                 return@coroutineScope fallbackWinner
             }
