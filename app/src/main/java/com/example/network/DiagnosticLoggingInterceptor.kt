@@ -39,7 +39,7 @@ class DiagnosticLoggingInterceptor(
         val currentReferer = originalRequest.header("Referer")
 
         if (currentReferer.isNullOrBlank()) {
-            if (requestUrl.contains("megaplay") || requestUrl.contains("kryntal") || requestUrl.contains("nexabloom") || requestUrl.contains("quavex") || requestUrl.contains("/anime/")) {
+            if (requestUrl.contains("megaplay.buzz") || requestUrl.contains("kryntal.top")) {
                 requestBuilder.header("Referer", "https://megaplay.buzz/")
                 requestBuilder.header("Origin", "https://megaplay.buzz")
             } else if (requestUrl.contains("vidnest")) {

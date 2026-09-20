@@ -104,6 +104,7 @@ data class AppControlConfig(
     val fancodeTelegramUrl: String = "",
     val fancodeWebUrl: String = "",
     val fancodeOverlayBuyUrl: String = "",
+    val fancodeOverlayBuyText: String = "",
     val lockedTabs: List<String> = emptyList(),
     val premiumCategories: List<String> = emptyList(),
     val premiumMediaIds: List<String> = emptyList(),
@@ -345,6 +346,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 fancodeTelegramUrl = p.getString("fancodeTelegramUrl", "") ?: "",
                 fancodeWebUrl = p.getString("fancodeWebUrl", "") ?: "",
                 fancodeOverlayBuyUrl = p.getString("fancodeOverlayBuyUrl", "") ?: "",
+                fancodeOverlayBuyText = p.getString("fancodeOverlayBuyText", "") ?: "",
                 redeemCode = p.getString("redeemCode", "") ?: "",
                 redeemValidityHours = p.getInt("redeemValidityHours", 24),
                 redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L),
@@ -1375,6 +1377,13 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
                             val fancodeOverlayBuyUrl = json.optString("fancodeOverlayBuyUrl", "")
                                 .ifBlank { json.optString("fancode_overlay_buy_url", "") }
+                                .ifBlank { json.optString("fancodeOverlayBuyLink", "") }
+                                .ifBlank { json.optString("fancodeBuyUrl", "") }
+                                .ifBlank { json.optString("fancode_buy_url", "") }
+
+                            val fancodeOverlayBuyText = json.optString("fancodeOverlayBuyText", "")
+                                .ifBlank { json.optString("fancode_overlay_buy_text", "") }
+                                .ifBlank { json.optString("fancodeBuyText", "") }
 
                             val isLiveTvLockEnabled = json.optBoolean("isLiveTvLockEnabled", false)
 
@@ -1738,6 +1747,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                     .putString("fancodeTelegramUrl", fancodeTelegramUrl)
                                     .putString("fancodeWebUrl", fancodeWebUrl)
                                     .putString("fancodeOverlayBuyUrl", fancodeOverlayBuyUrl)
+                                    .putString("fancodeOverlayBuyText", fancodeOverlayBuyText)
                                     .putString("redeemCode", redeemCode)
                                     .putInt("redeemValidityHours", redeemValidityHours)
                                     .putLong("redeemExpiryTimestamp", redeemExpiryTimestamp)
@@ -1789,6 +1799,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                                 fancodeTelegramUrl = fancodeTelegramUrl,
                                 fancodeWebUrl = fancodeWebUrl,
                                 fancodeOverlayBuyUrl = fancodeOverlayBuyUrl,
+                                fancodeOverlayBuyText = fancodeOverlayBuyText,
                                 lockedTabs = lockedTabs,
                                 premiumCategories = premiumCategories,
                                 premiumMediaIds = premiumMediaIds,
@@ -2077,7 +2088,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _activeMediaEpisode = MutableStateFlow(1)
     val activeMediaEpisode: StateFlow<Int> = _activeMediaEpisode.asStateFlow()
 
-    private val _selectedStreamServerKey = MutableStateFlow<String?>("filxer")
+    private val _selectedStreamServerKey = MutableStateFlow<String?>("fastest_auto")
     val selectedStreamServerKey: StateFlow<String?> = _selectedStreamServerKey.asStateFlow()
 
     fun selectStreamServerKey(key: String?) {

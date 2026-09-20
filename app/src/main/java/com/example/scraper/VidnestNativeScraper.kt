@@ -27,7 +27,7 @@ object VidnestNativeScraper {
 
     val PROVIDERS = listOf(
         VidnestProviderInfo("delta", "HINDI", "allmovies", "https://vidnest.fun/"),
-        VidnestProviderInfo("filxer", "HM VIP", "rogflix", "https://rogflix.fun/"),
+        VidnestProviderInfo("filxer", "Filxer", "rogflix", "https://rogflix.fun/"),
         VidnestProviderInfo("lamda", "Lamda", "allmovies", "https://vidnest.fun/"),
         VidnestProviderInfo("prime", "Prime", "vidrock", "https://vidrock.net/"),
         VidnestProviderInfo("hexa", "Hexa", "vidlink", "https://vidlink.pro/"),

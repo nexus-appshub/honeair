@@ -279,16 +279,27 @@ fun VerticalMediaFeedCard(
                         if (resolvedPreviewUrl.isBlank()) {
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
-                                    val streamRes = com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
-                                        context = context,
-                                        tmdbId = tmdbId,
-                                        title = item.title,
-                                        isTv = isTv,
-                                        season = effectiveSeason,
-                                        episode = currentEpisode,
-                                        preferredServerKey = "fastest_auto",
-                                        isAnime = isAnime
-                                    )?.result
+                                    val streamRes = if (!isAnime) {
+                                        com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                            context = context,
+                                            tmdbId = tmdbId,
+                                            title = item.title,
+                                            isTv = isTv,
+                                            season = effectiveSeason,
+                                            episode = currentEpisode,
+                                            preferredServerKey = "fastest_auto"
+                                        )?.result
+                                    } else {
+                                        com.example.scraper.UnifiedStreamManager.getStream(
+                                            context = context,
+                                            title = item.title,
+                                            tmdbId = tmdbId,
+                                            isTv = isTv,
+                                            season = effectiveSeason,
+                                            episode = currentEpisode,
+                                            isAnime = true
+                                        )
+                                    }
                                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                             resolvedPreviewUrl = streamRes.streamUrl
@@ -313,19 +324,8 @@ fun VerticalMediaFeedCard(
                         )
                         val mediaSourceFactory = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpDataSourceFactory)
 
-                        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                            .setBufferDurationsMs(
-                                /* minBufferMs = */ 1000,
-                                /* maxBufferMs = */ 8000,
-                                /* bufferForPlaybackMs = */ 250,
-                                /* bufferForPlaybackAfterRebufferMs = */ 500
-                            )
-                            .setPrioritizeTimeOverSizeThresholds(true)
-                            .build()
-
                         ExoPlayer.Builder(context)
                             .setMediaSourceFactory(mediaSourceFactory)
-                            .setLoadControl(loadControl)
                             .build().apply {
                                 val mediaItemBuilder = Media3Item.Builder().setUri(resolvedPreviewUrl)
                                 val urlLower = resolvedPreviewUrl.lowercase()
@@ -358,8 +358,7 @@ fun VerticalMediaFeedCard(
                                                     isTv = isTv,
                                                     season = currentSeason,
                                                     episode = currentEpisode,
-                                                    preferredServerKey = "vidrock_direct",
-                                                    isAnime = isAnime
+                                                    preferredServerKey = "vidrock_direct"
                                                 )?.result
                                                 if (alt != null && alt.streamUrl.isNotBlank() && alt.streamUrl != resolvedPreviewUrl) {
                                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
@@ -799,12 +798,12 @@ fun VerticalMediaFeedCard(
                                     }
                                 }
                             } else {
-                                // Non-anime stream servers list (HM VIP, Hindi, MAIN Direct, Fastest Auto, Prime, Hexa, etc.)
+                                // Non-anime stream servers list (Fastest Auto, Hindi, VidRock, Flixer, Prime, Hexa, etc.)
                                 val providers = listOf(
-                                    "HM VIP Server" to "filxer",
-                                    "HINDI Server" to "delta",
-                                    "MAIN Server (Direct)" to "vidrock_direct",
                                     "⚡ Fastest (Auto Parallel)" to "fastest_auto",
+                                    "HINDI Server" to "delta",
+                                    "ZOZO Server (Direct)" to "vidrock_direct",
+                                    "Flixer Server" to "filxer",
                                     "Prime Server" to "prime",
                                     "Hexa Server" to "hexa",
                                     "Alfa Server" to "alfa",
@@ -1152,10 +1151,10 @@ fun VerticalMediaFeedCard(
             Spacer(modifier = Modifier.height(6.dp))
 
             val streamServers = listOf(
-                Triple("filxer", "HM VIP", Color(0xFF00E5FF)),
+                Triple("fastest_auto", "⚡ Fastest Direct", Color(0xFF00E5FF)),
                 Triple("delta", "HINDI", Color(0xFFFF9800)),
-                Triple("vidrock_direct", "MAIN (Direct)", Color(0xFFB388FF)),
-                Triple("fastest_auto", "⚡ Fastest Auto", Color(0xFF00E5FF)),
+                Triple("vidrock_direct", "ZOZO (Direct)", Color(0xFFB388FF)),
+                Triple("filxer", "Flixer", Color(0xFF00E5FF)),
                 Triple("prime", "Prime", Color(0xFF00E676)),
                 Triple("hexa", "Hexa", Color(0xFFE040FB)),
                 Triple("alfa", "Alfa", Color(0xFF00E5FF)),
@@ -1175,7 +1174,7 @@ fun VerticalMediaFeedCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 items(streamServers) { (key, label, accentColor) ->
-                    val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "filxer")
+                    val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "fastest_auto")
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = if (isSelected) accentColor.copy(alpha = 0.22f) else if (isDark) Color(0xFF1C1C20) else Color(0xFFF2F2F5),

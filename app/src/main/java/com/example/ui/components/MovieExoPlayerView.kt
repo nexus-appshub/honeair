@@ -67,7 +67,6 @@ import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.NeonPurple
 import com.example.ui.theme.SpaceBlack
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -246,6 +245,27 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                     mediaItemBuilder.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MP4)
                 }
 
+                if (subtitles.isNotEmpty() && !isRetryingWithoutSidecarSubtitles) {
+                    val subtitleConfigs = subtitles.map { sub ->
+                        val mimeType = if (sub.url.lowercase().contains(".vtt") || sub.url.lowercase().contains("vtt")) {
+                            androidx.media3.common.MimeTypes.TEXT_VTT
+                        } else if (sub.url.lowercase().contains(".srt") || sub.url.lowercase().contains("srt")) {
+                            androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
+                        } else if (sub.url.lowercase().contains(".ass") || sub.url.lowercase().contains(".ssa")) {
+                            androidx.media3.common.MimeTypes.TEXT_SSA
+                        } else {
+                            androidx.media3.common.MimeTypes.TEXT_VTT
+                        }
+                        MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
+                            .setMimeType(mimeType)
+                            .setLanguage(sub.lang.ifBlank { "en" })
+                            .setLabel(sub.label.ifBlank { "English" })
+                            .setSelectionFlags(if (sub.default) C.SELECTION_FLAG_DEFAULT else 0)
+                            .build()
+                    }
+                    mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs)
+                }
+
                 setMediaItem(mediaItemBuilder.build())
                 prepare()
                 if (initialStartPositionMs > 0L) {
@@ -253,45 +273,6 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                 }
                 setPlaybackSpeed(playbackSpeed)
                 playWhenReady = true
-
-                // Asynchronous / Non-blocking Subtitle Injection:
-                // Start video playback immediately without stalling for sidecar subtitles.
-                // Subtitles are attached as secondary tracks so network delays or slow subtitle
-                // CDNs will never block or freeze video playback startup.
-                if (subtitles.isNotEmpty() && !isRetryingWithoutSidecarSubtitles) {
-                    scope.launch(Dispatchers.Main) {
-                        try {
-                            val subtitleConfigs = subtitles.map { sub ->
-                                val mimeType = if (sub.url.lowercase().contains(".vtt") || sub.url.lowercase().contains("vtt")) {
-                                    androidx.media3.common.MimeTypes.TEXT_VTT
-                                } else if (sub.url.lowercase().contains(".srt") || sub.url.lowercase().contains("srt")) {
-                                    androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
-                                } else if (sub.url.lowercase().contains(".ass") || sub.url.lowercase().contains(".ssa")) {
-                                    androidx.media3.common.MimeTypes.TEXT_SSA
-                                } else {
-                                    androidx.media3.common.MimeTypes.TEXT_VTT
-                                }
-                                MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url))
-                                    .setMimeType(mimeType)
-                                    .setLanguage(sub.lang.ifBlank { "en" })
-                                    .setLabel(sub.label.ifBlank { "English" })
-                                    .setSelectionFlags(if (sub.default) C.SELECTION_FLAG_DEFAULT else 0)
-                                    .build()
-                            }
-                            // Only update media item if player is active and same session
-                            val activePlayer = exoPlayer
-                            if (activePlayer != null && activePlayer.playbackState != Player.STATE_IDLE) {
-                                val currentPos = activePlayer.currentPosition
-                                val isCurrentlyPlaying = activePlayer.playWhenReady
-                                val updatedMediaItem = mediaItemBuilder.setSubtitleConfigurations(subtitleConfigs).build()
-                                activePlayer.setMediaItem(updatedMediaItem, currentPos)
-                                activePlayer.playWhenReady = isCurrentlyPlaying
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("MovieExoPlayerView", "Async subtitle loading skipped: ${e.message}")
-                        }
-                    }
-                }
             }
 
         player.addListener(object : Player.Listener {

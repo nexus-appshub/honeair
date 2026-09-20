@@ -174,7 +174,7 @@ object SmartNetworkBoosterEngine {
                     baseHeaders["sec-ch-ua-mobile"] = "?0"
                     baseHeaders["sec-ch-ua-platform"] = "\"Windows\""
                 }
-                urlLower.contains("kryntal") || urlLower.contains("megaplay") || urlLower.contains("anikoto") || urlLower.contains("nexabloom") || urlLower.contains("quavex") || urlLower.contains("/anime/") -> {
+                urlLower.contains("kryntal.top") || urlLower.contains("megaplay") || urlLower.contains("anikoto") -> {
                     if (!baseHeaders.containsKey("Referer")) baseHeaders["Referer"] = "https://megaplay.buzz/"
                     if (!baseHeaders.containsKey("Origin")) baseHeaders["Origin"] = "https://megaplay.buzz"
                     baseHeaders["sec-ch-ua"] = "\"Google Chrome\";v=\"120\", \"Chromium\";v=\"120\", \"Not?A_Brand\";v=\"24\""
@@ -253,39 +253,39 @@ object SmartNetworkBoosterEngine {
         val backBufferDuration: Int
 
         when (bufferIndex) {
-            0 -> { // Ultra Low Latency - Instant Start
-                minBuffer = if (isLiveStream) 10000 else 12000
-                maxBuffer = if (isLiveStream) 30000 else 40000
-                bufferForPlayback = 400 // 400ms instant playback start
-                bufferAfterRebuffer = 1200
+            0 -> { // Ultra Low Latency (2s) - Fast start
+                minBuffer = if (isLiveStream) 12000 else 15000
+                maxBuffer = if (isLiveStream) 35000 else 45000
+                bufferForPlayback = 1000
+                bufferAfterRebuffer = 2000
                 backBufferDuration = 8000
             }
-            1 -> { // Medium - Fast Playback Start (500ms) with Deep Cushion (Anti-Buffer)
-                minBuffer = if (isLiveStream) 20000 else 30000
-                maxBuffer = if (isLiveStream) 60000 else 80000
-                bufferForPlayback = 500 // 500ms Instant Playback Start
-                bufferAfterRebuffer = 1500
+            1 -> { // Medium (5 sec) - Recommended for Live Channels / Toffee / Sports / Movies
+                minBuffer = if (isLiveStream) 25000 else 35000
+                maxBuffer = if (isLiveStream) 70000 else 90000
+                bufferForPlayback = 1500
+                bufferAfterRebuffer = 3500
                 backBufferDuration = 20000
             }
-            2 -> { // Large - Anti-Freeze & Heavy Traffic Stability
-                minBuffer = if (isLiveStream) 40000 else 50000
-                maxBuffer = if (isLiveStream) 100000 else 120000
-                bufferForPlayback = 800 // Fast start even on large buffer mode
-                bufferAfterRebuffer = 2500
+            2 -> { // Large (10 sec) - Anti-Freeze & Heavy Traffic Stability
+                minBuffer = if (isLiveStream) 45000 else 60000
+                maxBuffer = if (isLiveStream) 120000 else 150000
+                bufferForPlayback = 2500
+                bufferAfterRebuffer = 5000
                 backBufferDuration = 30000
             }
-            3 -> { // Maximum Anti-Buffer - Deep Buffer for Weak Networks
-                minBuffer = if (isLiveStream) 70000 else 90000
-                maxBuffer = if (isLiveStream) 200000 else 250000
-                bufferForPlayback = 1000 // 1s start for weak networks
-                bufferAfterRebuffer = 3000
+            3 -> { // Maximum Anti-Buffer (25 sec) - Deep Buffer for Weak Networks
+                minBuffer = if (isLiveStream) 80000 else 100000
+                maxBuffer = if (isLiveStream) 240000 else 300000
+                bufferForPlayback = 3500
+                bufferAfterRebuffer = 8000
                 backBufferDuration = 50000
             }
             else -> {
-                minBuffer = if (isLiveStream) 20000 else 30000
-                maxBuffer = if (isLiveStream) 60000 else 80000
-                bufferForPlayback = 500
-                bufferAfterRebuffer = 1500
+                minBuffer = if (isLiveStream) 25000 else 35000
+                maxBuffer = if (isLiveStream) 70000 else 90000
+                bufferForPlayback = 1500
+                bufferAfterRebuffer = 3500
                 backBufferDuration = 20000
             }
         }

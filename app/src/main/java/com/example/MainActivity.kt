@@ -1491,8 +1491,10 @@ fun GlobalFanCodeLockScreen(
     val bannerUrl = appControlConfig?.fancodeBannerUrl?.ifBlank { null }
         ?: "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?q=80&w=1000&auto=format&fit=crop"
 
-    val subscribeUrl = appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
-        ?: "https://homeair.pages.dev/vip"
+    val subscribeUrl = appControlConfig?.fancodeOverlayBuyUrl?.ifBlank { null }
+        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+        ?: appControlConfig?.fancodeWebUrl?.ifBlank { null }
+        ?: "https://www.hmair.xyz/vip"
 
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val pageBg = if (isDark) Color(0xFF121214) else Color(0xFFFFF9F2)
@@ -1946,7 +1948,7 @@ fun GlobalFanCodeLockScreen(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "Subscribe Now",
+                                    text = appControlConfig?.fancodeOverlayBuyText?.ifBlank { null } ?: "Subscribe Now",
                                     color = Color.White,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.ExtraBold
@@ -2367,8 +2369,10 @@ fun FanCodeGetCodeModal(
     var applySuccess by remember { mutableStateOf(false) }
 
     val appControlConfig by viewModel.appControlConfig.collectAsState()
-    val subscribeUrl = appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
-        ?: "https://homeair.pages.dev/vip"
+    val subscribeUrl = appControlConfig?.fancodeOverlayBuyUrl?.ifBlank { null }
+        ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
+        ?: appControlConfig?.fancodeWebUrl?.ifBlank { null }
+        ?: "https://www.hmair.xyz/vip"
 
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val modalBg = if (isDark) Color(0xFF141418) else Color(0xFFFFF9F2)
@@ -2830,8 +2834,10 @@ fun PremiumPaywallDialog(
 
     val appControlConfig by viewModel.appControlConfig.collectAsState()
     val subscribeUrl = buttonUrl.ifBlank { null }
+        ?: appControlConfig?.fancodeOverlayBuyUrl?.ifBlank { null }
         ?: appControlConfig?.premiumPaywallButtonUrl?.ifBlank { null }
-        ?: "https://homeair.pages.dev/vip"
+        ?: appControlConfig?.fancodeWebUrl?.ifBlank { null }
+        ?: "https://www.hmair.xyz/vip"
 
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,

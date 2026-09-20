@@ -530,9 +530,9 @@ fun MediaDetailSheet(
 
                     // Active server badge
                     val activeLabel = when (selectedStreamServerKey) {
-                        "filxer" -> "HM VIP"
                         "delta" -> "HINDI"
-                        "vidrock_direct" -> "MAIN (Direct)"
+                        "vidrock_direct" -> "ZOZO (Direct)"
+                        "filxer" -> "FLIXER"
                         "prime" -> "PRIME"
                         "hexa" -> "HEXA"
                         "alfa" -> "ALFA"
@@ -542,11 +542,9 @@ fun MediaDetailSheet(
                         "catflix" -> "CATFLIX"
                         "vidlink_direct" -> "VIDLINK"
                         "autoembed_direct" -> "AUTOEMBED"
-                        "fastest_auto" -> "⚡ AUTO PARALLEL"
-                        else -> "HM VIP"
+                        else -> "⚡ AUTO PARALLEL FASTEST"
                     }
                     val badgeColor = when (selectedStreamServerKey) {
-                        "filxer" -> NeonCyan
                         "delta" -> Color(0xFFFF9800)
                         "vidrock_direct" -> NeonPurple
                         "prime" -> Color(0xFF00E676)
@@ -570,10 +568,10 @@ fun MediaDetailSheet(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 val normalServers = listOf(
-                    Triple("filxer", "HM VIP", NeonCyan),
+                    Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan),
                     Triple("delta", "HINDI", Color(0xFFFF9800)),
-                    Triple("vidrock_direct", "MAIN (Direct)", NeonPurple),
-                    Triple("fastest_auto", "⚡ Auto Parallel", NeonCyan),
+                    Triple("vidrock_direct", "ZOZO (Direct)", NeonPurple),
+                    Triple("filxer", "Flixer", NeonCyan),
                     Triple("prime", "Prime", Color(0xFF00E676)),
                     Triple("hexa", "Hexa", Color(0xFFE040FB)),
                     Triple("alfa", "Alfa", NeonCyan),
@@ -590,7 +588,7 @@ fun MediaDetailSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     items(normalServers) { (key, label, accentColor) ->
-                        val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "filxer")
+                        val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "fastest_auto")
                         FilterChip(
                             selected = isSelected,
                             onClick = {

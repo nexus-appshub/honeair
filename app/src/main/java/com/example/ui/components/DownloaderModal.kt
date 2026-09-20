@@ -1671,31 +1671,33 @@ fun DownloaderWebViewModal(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(DeepSlate)
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (canGoBackState) {
                         IconButton(
                             onClick = { webViewRef?.goBack() },
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Go Back",
-                                tint = NeonCyan
+                                tint = NeonCyan,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
 
                     IconButton(
                         onClick = onClose,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close Downloader",
-                            tint = NeonCyan
+                            tint = NeonCyan,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
 
@@ -1705,14 +1707,14 @@ fun DownloaderWebViewModal(
                         onValueChange = { editableTitle = it },
                         placeholder = {
                             Text(
-                                text = "Media Name (e.g. Solo Leveling S01E01)",
+                                text = "Media Name...",
                                 color = TextSecondary.copy(alpha = 0.6f),
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             )
                         },
                         singleLine = true,
                         textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = TextPrimary
                         ),
@@ -1725,17 +1727,17 @@ fun DownloaderWebViewModal(
                                         webViewRef?.loadUrl(searchJs)
                                     }
                                 },
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(24.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Search,
                                     contentDescription = "Search In Page",
                                     tint = NeonCyan,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NeonCyan,
                             unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
@@ -1745,88 +1747,20 @@ fun DownloaderWebViewModal(
                         ),
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
+                            .height(36.dp)
                     )
 
                     IconButton(
                         onClick = { webViewRef?.reload() },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh",
-                            tint = TextPrimary
+                            tint = TextPrimary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                }
-
-                // Downloader Mirror Switcher Tabs
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.4f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = currentUrl == videoDownloaderSiteUrl,
-                        onClick = {
-                            currentUrl = videoDownloaderSiteUrl
-                            webViewRef?.loadUrl(videoDownloaderSiteUrl)
-                        },
-                        label = { Text("Option 1", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = NeonCyan,
-                            selectedLabelColor = Color.Black,
-                            containerColor = DeepSlate,
-                            labelColor = TextPrimary
-                        )
-                    )
-
-                    FilterChip(
-                        selected = currentUrl == movieDownloader02SiteUrl,
-                        onClick = {
-                            currentUrl = movieDownloader02SiteUrl
-                            webViewRef?.loadUrl(movieDownloader02SiteUrl)
-                        },
-                        label = { Text("Option 2", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = NeonMagenta,
-                            selectedLabelColor = Color.White,
-                            containerColor = DeepSlate,
-                            labelColor = TextPrimary
-                        )
-                    )
-
-                    FilterChip(
-                        selected = currentUrl == vidsrcSiteUrl,
-                        onClick = {
-                            currentUrl = vidsrcSiteUrl
-                            webViewRef?.loadUrl(vidsrcSiteUrl)
-                        },
-                        label = { Text("Option 3", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFFFFB74D),
-                            selectedLabelColor = Color.Black,
-                            containerColor = DeepSlate,
-                            labelColor = TextPrimary
-                        )
-                    )
-                    
-                    FilterChip(
-                        selected = currentUrl == directMediaDownloaderSiteUrl,
-                        onClick = {
-                            currentUrl = directMediaDownloaderSiteUrl
-                            webViewRef?.loadUrl(directMediaDownloaderSiteUrl)
-                        },
-                        label = { Text("Option 4", fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFFE040FB),
-                            selectedLabelColor = Color.White,
-                            containerColor = DeepSlate,
-                            labelColor = TextPrimary
-                        )
-                    )
                 }
 
                 if (isLoading) {
