@@ -277,25 +277,26 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             ?: allMediaItems.find { it.title == title }
     }
 
-    val isSeries = remember(type, currentMediaItem, mediaDetailState) {
+    val isSeries = remember(imdbId, type, currentMediaItem, mediaDetailState, currentSeason, currentEpisode) {
+        val rawId = imdbId.lowercase()
+        val itemId = currentMediaItem?.id?.lowercase() ?: ""
         val t = type.lowercase()
         val cat = currentMediaItem?.category?.lowercase() ?: ""
         val itemType = currentMediaItem?.type?.lowercase() ?: ""
         val hasSeasonsInDetail = (mediaDetailState?.number_of_seasons != null && (mediaDetailState?.number_of_seasons ?: 0) > 0)
         val isExplicitMovieInDetail = (mediaDetailState?.runtime != null && (mediaDetailState?.number_of_seasons ?: 0) == 0)
         val isEpisodic = (currentMediaItem?.episodes?.isNotBlank() == true && currentMediaItem?.episodes?.contains("Season", ignoreCase = true) == true)
+        val hasMultipleEpisodes = currentEpisode > 1 || currentSeason > 1
+        val isSeriesCategory = cat.contains("series") || cat.contains("tv show") || cat.contains("natok") || cat.contains("drama") || cat.contains("k-drama")
+        val isSeriesType = t == "series" || t == "tv" || itemType == "series" || itemType == "tv"
+        val isSeriesId = rawId.startsWith("series_") || itemId.startsWith("series_")
 
-        if (hasSeasonsInDetail) {
+        if (hasSeasonsInDetail || hasMultipleEpisodes || isSeriesCategory || isSeriesType || isEpisodic || isSeriesId) {
             true
-        } else if (isExplicitMovieInDetail) {
+        } else if (isExplicitMovieInDetail || t == "movie" || itemType == "movie" || rawId.startsWith("movie_") || itemId.startsWith("movie_")) {
             false
-        } else if (t == "movie" || itemType == "movie") {
-            false
-        } else if (t == "series" || t == "tv" || itemType == "series" || itemType == "tv") {
-            true
         } else {
-            cat.contains("series", ignoreCase = true) || cat.contains("tv show", ignoreCase = true) ||
-            cat.contains("natok", ignoreCase = true) || isEpisodic
+            false
         }
     }
     val isNativeMatching = (currentSeason == season && currentEpisode == episode)
@@ -308,13 +309,15 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
 
     LaunchedEffect(vmActiveStreamUrl, vmActiveSeason, vmActiveEpisode, currentSeason, currentEpisode) {
         if (!vmActiveStreamUrl.isNullOrBlank() && (vmActiveSeason == currentSeason && vmActiveEpisode == currentEpisode)) {
-            capturedVideoUrl = vmActiveStreamUrl
-            customScrapedHeaders = vmActiveStreamHeaders
-            mainScrapedVideoUrl = vmActiveStreamUrl
-            mainScrapedHeaders = vmActiveStreamHeaders
-            useExoPlayer = true
-            isScrapingDirectStream = false
-            directScrapeSecondsRemaining = 0
+            if (capturedVideoUrl != vmActiveStreamUrl) {
+                capturedVideoUrl = vmActiveStreamUrl
+                customScrapedHeaders = vmActiveStreamHeaders
+                mainScrapedVideoUrl = vmActiveStreamUrl
+                mainScrapedHeaders = vmActiveStreamHeaders
+                useExoPlayer = true
+                isScrapingDirectStream = false
+                directScrapeSecondsRemaining = 0
+            }
         }
     }
 
@@ -338,7 +341,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     }
 
     // Automatic In-App Scraping to enable ExoPlayer playback immediately on Server 0
-    LaunchedEffect(imdbId, title, currentSeason, currentEpisode, isAnime, directScrapeAttemptCount) {
+    LaunchedEffect(imdbId, title, isSeries, currentSeason, currentEpisode, isAnime, directScrapeAttemptCount) {
         if (isAnime) {
             val tempItem = currentMediaItem ?: MediaItem(
                 id = imdbId,
@@ -395,7 +398,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             withContext(Dispatchers.IO) {
                 val loopStartTime = System.currentTimeMillis()
                 var iteration = 1
-                while (capturedVideoUrl.isNullOrBlank() && (System.currentTimeMillis() - loopStartTime) < 300000L) {
+                while (capturedVideoUrl.isNullOrBlank() && (System.currentTimeMillis() - loopStartTime) < 25000L) {
                     try {
                         withContext(Dispatchers.Main) {
                             directScrapeStatusText = when (iteration % 4) {
@@ -406,6 +409,9 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             }
                         }
 
+                        // On second iteration, if preferred server didn't respond, widen search to all servers
+                        val keyToUse = if (iteration > 1) "fastest_auto" else (selectedVidnestServerKey ?: "fastest_auto")
+
                         val result = if (!isAnime) {
                             com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
                                 context = context,
@@ -414,7 +420,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 isTv = isSeries,
                                 season = currentSeason,
                                 episode = currentEpisode,
-                                preferredServerKey = selectedVidnestServerKey ?: "fastest_auto"
+                                preferredServerKey = keyToUse
                             )?.result
                         } else {
                             com.example.scraper.UnifiedStreamManager.getStream(
@@ -469,8 +475,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
 
                     iteration++
                     val elapsed = System.currentTimeMillis() - loopStartTime
-                    if (elapsed < 298000L && capturedVideoUrl.isNullOrBlank()) {
-                        delay(1500)
+                    if (elapsed < 20000L && capturedVideoUrl.isNullOrBlank()) {
+                        delay(1200)
                     } else {
                         break
                     }
@@ -478,6 +484,11 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
 
                 withContext(Dispatchers.Main) {
                     isScrapingDirectStream = false
+                    directScrapeSecondsRemaining = 0
+                    if (capturedVideoUrl.isNullOrBlank()) {
+                        // If direct native extraction has no stream for this episode, seamlessly switch to embed player
+                        useExoPlayer = false
+                    }
                 }
             }
         }
@@ -780,7 +791,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     }
 
     var resolvedTmdbId by remember(imdbId, title) {
-        mutableStateOf<String?>(if (imdbId.isNotBlank() && !imdbId.startsWith("tt") && imdbId.all { it.isDigit() }) imdbId else null)
+        val clean = imdbId.removePrefix("series_").removePrefix("movie_").removePrefix("anikoto_").trim()
+        mutableStateOf<String?>(if (clean.isNotBlank() && !clean.startsWith("tt") && clean.all { it.isDigit() }) clean else null)
     }
 
     LaunchedEffect(imdbId, title, isAnime) {
@@ -884,7 +896,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
         val directUrl = capturedVideoUrl ?: effectiveNativeUrl ?: "native://sr0"
         servers.add(Pair("Servers", directUrl))
 
-        val effectiveId = resolvedTmdbId ?: (if (imdbId.startsWith("tt") || (imdbId.isNotBlank() && imdbId.all { it.isDigit() })) imdbId else "")
+        val cleanRaw = imdbId.removePrefix("series_").removePrefix("movie_").removePrefix("anikoto_").trim()
+        val effectiveId = resolvedTmdbId ?: (if (cleanRaw.startsWith("tt") || (cleanRaw.isNotBlank() && cleanRaw.all { it.isDigit() })) cleanRaw else "")
         val isImdb = effectiveId.startsWith("tt")
         val tmdbOrImdb = if (isImdb) "imdb" else "tmdb"
         
@@ -1406,20 +1419,20 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         onFullScreenToggle = { onFullScreenChange(!isFullScreen) },
                         onPlaybackError = { _ ->
                             val failedUrl = capturedVideoUrl
-                            com.example.scraper.UnifiedStreamManager.invalidateCache(imdbId, currentSeason, currentEpisode, failedUrl)
+                            com.example.scraper.UnifiedStreamManager.invalidateCache(imdbId, currentSeason, currentEpisode, failedUrl, context)
                             if (directScrapeAttemptCount < 3) {
-                                // Try reliable fallback server sequence: Beta -> Sigma -> VidLink Direct -> ZOZO Direct
-                                selectedVidnestServerKey = when (directScrapeAttemptCount) {
-                                    0 -> "beta"
-                                    1 -> "sigma"
-                                    else -> "vidlink_direct"
-                                }
+                                // Race all available servers dynamically instead of forcing a specific broken server
+                                selectedVidnestServerKey = null
                                 capturedVideoUrl = null
                                 directScrapeAttemptCount++
+                                isScrapingDirectStream = true
                             } else {
                                 // Gracefully fallback to Embed Web Player without refreshing loops
                                 useExoPlayer = false
                                 isScrapingDirectStream = false
+                                if (embedServers.size > 1) {
+                                    currentServerIndex = 1
+                                }
                             }
                         },
                         onBack = onClosePlayer,
@@ -2850,9 +2863,10 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                         isLoading = false
                                                         hasError = false
                                                     } else {
-                                                        scope.launch(Dispatchers.IO) {
+                                                         scope.launch(Dispatchers.IO) {
                                                             withContext(Dispatchers.Main) {
                                                                 isLoading = true
+                                                                isScrapingDirectStream = true
                                                                 hasError = false
                                                             }
                                                             val extracted = when (key) {
@@ -2877,6 +2891,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                                 )
                                                             }
                                                             withContext(Dispatchers.Main) {
+                                                                isLoading = false
+                                                                isScrapingDirectStream = false
                                                                 if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                                                     capturedVideoUrl = extracted.streamUrl
                                                                     customScrapedHeaders = extracted.headers
@@ -2884,10 +2900,27 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                                         activeSubtitles = extracted.subtitles
                                                                     }
                                                                     useExoPlayer = true
-                                                                    isLoading = false
                                                                     hasError = false
                                                                 } else {
-                                                                    isLoading = false
+                                                                    // Fallback: race fastest server across cloud providers
+                                                                    scope.launch(Dispatchers.IO) {
+                                                                        val fallback = com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
+                                                                            context = context,
+                                                                            tmdbId = imdbId,
+                                                                            title = title,
+                                                                            isTv = isSeries,
+                                                                            season = currentSeason,
+                                                                            episode = currentEpisode,
+                                                                            preferredServerKey = "fastest_auto"
+                                                                        )?.result
+                                                                        withContext(Dispatchers.Main) {
+                                                                            if (fallback != null && fallback.streamUrl.isNotBlank()) {
+                                                                                capturedVideoUrl = fallback.streamUrl
+                                                                                customScrapedHeaders = fallback.headers
+                                                                                useExoPlayer = true
+                                                                            }
+                                                                        }
+                                                                    }
                                                                 }
                                                             }
                                                         }

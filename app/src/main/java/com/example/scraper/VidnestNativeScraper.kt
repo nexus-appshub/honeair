@@ -26,18 +26,18 @@ object VidnestNativeScraper {
     private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
     val PROVIDERS = listOf(
+        VidnestProviderInfo("beta", "Beta", "vidxyz", "https://moviesapi.to/"),
+        VidnestProviderInfo("prime", "Prime", "vidrock", "https://vidrock.net/"),
+        VidnestProviderInfo("hexa", "Hexa", "vidlink", "https://vidlink.pro/"),
+        VidnestProviderInfo("alfa", "Alfa", "videasy", "https://tiktoks.animanga.fun/"),
+        VidnestProviderInfo("gama", "Gama", "vidzee", "https://s1.streamflixapi.site/"),
         VidnestProviderInfo("delta", "HINDI", "allmovies", "https://vidnest.fun/"),
         VidnestProviderInfo("filxer", "HM VIP", "rogflix", "https://rogflix.fun/"),
         VidnestProviderInfo("lamda", "Lamda", "allmovies", "https://vidnest.fun/"),
-        VidnestProviderInfo("prime", "Prime", "vidrock", "https://vidrock.net/"),
-        VidnestProviderInfo("hexa", "Hexa", "vidlink", "https://vidlink.pro/"),
-        VidnestProviderInfo("zeta", "Zeta", "nextgencloudfabric", "https://nextgencloudfabric.com/"),
-        VidnestProviderInfo("alfa", "Alfa", "videasy", "https://tiktoks.animanga.fun/"),
-        VidnestProviderInfo("gama", "Gama", "vidzee", "https://s1.streamflixapi.site/"),
-        VidnestProviderInfo("ophim", "Ophim", "klikxxi", "https://vidnest.fun/"),
+        VidnestProviderInfo("sigma", "Sigma", "hollymoviehd", "https://vidnest.fun/"),
         VidnestProviderInfo("catflix", "Catflix", "buzz", "https://ployan.me/"),
-        VidnestProviderInfo("beta", "Beta", "vidxyz", "https://moviesapi.to/"),
-        VidnestProviderInfo("sigma", "Sigma", "hollymoviehd", "https://vidnest.fun/")
+        VidnestProviderInfo("ophim", "Ophim", "klikxxi", "https://vidnest.fun/"),
+        VidnestProviderInfo("zeta", "Zeta", "nextgencloudfabric", "https://nextgencloudfabric.com/")
     )
 
     private val BASE_URLS = listOf(
@@ -166,8 +166,9 @@ object VidnestNativeScraper {
             return@withContext primaryResult
         }
 
-        if (season <= 1 && episode <= 1) {
-            val fallbackResult = executeProviderRequest(provider, numericId, !isTv, season, episode)
+        // Fallback only if media was queried as a movie (!isTv) and season/episode <= 1 to see if it's TV, but never invert a known TV series into a movie query
+        if (!isTv && season <= 1 && episode <= 1) {
+            val fallbackResult = executeProviderRequest(provider, numericId, true, season, episode)
             if (fallbackResult != null && fallbackResult.streamUrl.isNotBlank()) {
                 return@withContext fallbackResult
             }
@@ -479,20 +480,25 @@ object VidnestNativeScraper {
             }
 
             // Ensure essential headers exist for playback
+            if (extractedUrl.contains("netrocdn") || provider.key == "beta" || provider.pathSegment == "vidxyz") {
+                headersMap["Referer"] = "https://moviesapi.to/"
+                headersMap["Origin"] = "https://moviesapi.to"
+            } else {
+                if (!headersMap.containsKey("Referer")) {
+                    headersMap["Referer"] = provider.defaultReferer
+                }
+                if (!headersMap.containsKey("Origin")) {
+                    headersMap["Origin"] = try {
+                        val uri = android.net.Uri.parse(provider.defaultReferer)
+                        val host = uri.host
+                        if (host != null) "${uri.scheme}://$host" else "https://vidnest.fun"
+                    } catch (_: Exception) {
+                        "https://vidnest.fun"
+                    }
+                }
+            }
             if (!headersMap.containsKey("User-Agent")) {
                 headersMap["User-Agent"] = DEFAULT_UA
-            }
-            if (!headersMap.containsKey("Referer")) {
-                headersMap["Referer"] = provider.defaultReferer
-            }
-            if (!headersMap.containsKey("Origin")) {
-                headersMap["Origin"] = try {
-                    val uri = android.net.Uri.parse(provider.defaultReferer)
-                    val host = uri.host
-                    if (host != null) "${uri.scheme}://$host" else "https://vidnest.fun"
-                } catch (_: Exception) {
-                    "https://vidnest.fun"
-                }
             }
 
             val referer = headersMap["Referer"] ?: provider.defaultReferer

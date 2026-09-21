@@ -16,8 +16,8 @@ object UnifiedStreamManager {
     private data class TimestampedStream(val result: ScrapedStreamResult, val timestamp: Long = System.currentTimeMillis())
     private val streamCache = java.util.concurrent.ConcurrentHashMap<String, TimestampedStream>()
     private val httpClient = okhttp3.OkHttpClient.Builder()
-        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
@@ -41,8 +41,13 @@ object UnifiedStreamManager {
         }
     }
 
-    private suspend fun verifyStreamAlive(url: String, headers: Map<String, String>): Boolean = withContext(Dispatchers.IO) {
+    suspend fun verifyStreamAlive(url: String, headers: Map<String, String>): Boolean = withContext(Dispatchers.IO) {
         if (!url.startsWith("http")) return@withContext false
+        if (blacklistedUrls.contains(url)) return@withContext false
+        val lowerUrl = url.lowercase()
+        if (lowerUrl.contains("cinevaro") || lowerUrl.contains("/error") || lowerUrl.contains("blocked") || lowerUrl.contains("notfound")) {
+            return@withContext false
+        }
         try {
             val reqBuilder = Request.Builder().url(url)
             
@@ -71,16 +76,37 @@ object UnifiedStreamManager {
 
                 if (isM3u8) {
                     val source = resp.body?.source() ?: run { resp.close(); return@withContext false }
-                    source.request(2048)
+                    source.request(8192)
                     val bodyStr = source.buffer.clone().readUtf8()
                     resp.close()
 
-                    if (bodyStr.contains("<html", ignoreCase = true) || bodyStr.contains("<!DOCTYPE", ignoreCase = true)) {
+                    val lowerBody = bodyStr.lowercase()
+                    if (lowerBody.contains("<html") || lowerBody.contains("<!doctype") ||
+                        lowerBody.contains("cinevaro") || lowerBody.contains("error loading") ||
+                        lowerBody.contains("couldn't be loaded") || lowerBody.contains("not found")) {
                         return@withContext false
+                    }
+                    // If m3u8 has ENDLIST and total duration is under 30 seconds, it's an error card clip
+                    if (bodyStr.contains("#EXT-X-ENDLIST")) {
+                        val segmentDurations = Regex("""#EXTINF:([0-9.]+)""").findAll(bodyStr)
+                            .mapNotNull { it.groupValues[1].toDoubleOrNull() }.toList()
+                        if (segmentDurations.isNotEmpty()) {
+                            val totalSecs = segmentDurations.sum()
+                            if (totalSecs in 0.1..30.0) {
+                                Log.w(TAG, "Stream rejected: total m3u8 duration is only ${totalSecs}s (likely an error card clip)")
+                                return@withContext false
+                            }
+                        }
                     }
                     return@withContext bodyStr.contains("#EXTM3U") || bodyStr.contains("#EXT-X-") || bodyStr.contains("#EXTINF")
                 } else {
+                    val contentLength = resp.header("Content-Length")?.toLongOrNull() ?: 0L
                     resp.close()
+                    // Reject small video files under 3MB as error clips
+                    if (contentLength in 1..3_000_000L) {
+                        Log.w(TAG, "Stream rejected: direct media size is only $contentLength bytes (likely an error card)")
+                        return@withContext false
+                    }
                     return@withContext true
                 }
             } else {
@@ -94,13 +120,28 @@ object UnifiedStreamManager {
 
     private val blacklistedUrls = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    fun invalidateCache(tmdbId: String, season: Int = 1, episode: Int = 1, failedUrl: String? = null) {
+    fun blacklistStreamUrl(url: String) {
+        if (url.isNotBlank()) {
+            blacklistedUrls.add(url)
+        }
+    }
+
+    fun invalidateCache(tmdbId: String, season: Int = 1, episode: Int = 1, failedUrl: String? = null, context: Context? = null) {
         val effectiveEpisode = if (episode <= 0) 1 else episode
         val key = "$tmdbId-$season-$effectiveEpisode"
         streamCache.remove(key)
         streamCache.remove("$tmdbId-$season-$episode")
         if (!failedUrl.isNullOrBlank()) {
             blacklistedUrls.add(failedUrl)
+        }
+        if (context != null) {
+            try {
+                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    val db = com.example.data.database.AppDatabase.getDatabase(context)
+                    db.scrapedStreamDao().deleteStreamById(key)
+                    db.scrapedStreamDao().deleteStreamById("$tmdbId-$season-$episode")
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -906,7 +947,7 @@ object UnifiedStreamManager {
         }
 
         // 2. Resolve numeric TMDB ID & clean title once upfront
-        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1))
+        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1 || episode > 1))
         var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, effectiveIsTv)
         if (finalTmdbId.startsWith("movie_")) {
             finalTmdbId = finalTmdbId.removePrefix("movie_")

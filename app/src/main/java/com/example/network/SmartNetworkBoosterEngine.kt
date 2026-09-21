@@ -181,6 +181,10 @@ object SmartNetworkBoosterEngine {
                     baseHeaders["sec-ch-ua-mobile"] = "?0"
                     baseHeaders["sec-ch-ua-platform"] = "\"Windows\""
                 }
+                urlLower.contains("netrocdn") || urlLower.contains("moviesapi") || urlLower.contains("vidxyz") -> {
+                    baseHeaders["Referer"] = "https://moviesapi.to/"
+                    baseHeaders["Origin"] = "https://moviesapi.to"
+                }
                 urlLower.contains("vidnest") || urlLower.contains("vidsrc") || urlLower.contains("autoembed") ||
                 urlLower.contains("vidlink") || urlLower.contains("vidrock") || urlLower.contains("moviebox") ||
                 urlLower.contains("apuseen") || urlLower.contains("hakunamatata") || urlLower.contains("aoneroom") ||

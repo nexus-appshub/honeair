@@ -211,8 +211,14 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var isRetryingWithoutSidecarSubtitles by remember(currentUrl) { mutableStateOf(false) }
     var hasRenderedVideoFrame by remember(currentUrl) { mutableStateOf(false) }
+    var lastLoadedUrl by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(currentUrl, customHeaders, isRetryingWithoutSidecarSubtitles) {
+    LaunchedEffect(currentUrl, isRetryingWithoutSidecarSubtitles) {
+        if (currentUrl.isBlank()) return@LaunchedEffect
+        if (currentUrl == lastLoadedUrl && exoPlayer != null && !isRetryingWithoutSidecarSubtitles) {
+            return@LaunchedEffect
+        }
+        lastLoadedUrl = currentUrl
         errorMessage = null
         hasRenderedVideoFrame = false
         exoPlayer?.release()
@@ -308,14 +314,27 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                 playbackState = state
                 if (state == Player.STATE_READY) {
                     errorMessage = null
-                    // If video was saved near or at the end, reset to start to ensure instant playback
-                    if (player.duration > 0 && player.currentPosition >= player.duration - 4000L) {
-                        player.seekTo(0L)
-                    }
                     player.playWhenReady = true
                     player.play()
                 } else if (state == Player.STATE_BUFFERING) {
                     errorMessage = null
+                } else if (state == Player.STATE_ENDED) {
+                    val pos = player.currentPosition
+                    val dur = player.duration
+                    // Only treat as an error card if total duration is definitively under 30 seconds
+                    if (dur in 1L..30_000L && pos < dur) {
+                        android.util.Log.w("MovieExoPlayerView", "Stream ended prematurely at ${pos}ms (duration: ${dur}ms). Rejecting error stream...")
+                        onPlaybackError("Stream ended prematurely (error card detected).")
+                    } else if (pos < 30_000L && dur > 60_000L) {
+                        // Real episode/movie reached segment boundary or transient buffer end; resume smoothly
+                        android.util.Log.w("MovieExoPlayerView", "Stream ended early during initial segment at ${pos}ms (duration: ${dur}ms). Retrying playback at position...")
+                        player.seekTo(pos)
+                        player.prepare()
+                        player.playWhenReady = true
+                        player.play()
+                    } else if (isSeries) {
+                        onNextEpisode?.invoke()
+                    }
                 }
             }
 
@@ -340,37 +359,21 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         exoPlayer = player
     }
 
-    // Aggressive Auto-play kicker & stall-recovery loop for instant playback
+    // Safe Auto-play kicker: ensures video starts playing smoothly as soon as ExoPlayer is ready
     LaunchedEffect(exoPlayer, currentUrl) {
         val p = exoPlayer ?: return@LaunchedEffect
         p.playWhenReady = true
         p.play()
 
-        var stallTicks = 0
-        for (i in 0..25) {
-            delay(250)
+        // Wait for player to be ready and verify playback starts without interrupting the network buffer
+        for (i in 0..20) {
+            delay(500)
             if (p.playbackState == Player.STATE_READY) {
                 if (!p.isPlaying || !p.playWhenReady) {
                     p.playWhenReady = true
                     p.play()
                 }
-            }
-            if (p.playbackState == Player.STATE_READY || p.playbackState == Player.STATE_BUFFERING) {
-                if (p.currentPosition == 0L && !hasRenderedVideoFrame) {
-                    stallTicks++
-                    if (stallTicks == 8) { // 2 seconds stuck at 00:00, nudge timeline by 100ms
-                        p.seekTo(100L)
-                        p.playWhenReady = true
-                        p.play()
-                    }
-                    if (stallTicks >= 20) { // 5 seconds frozen at 00:00 without rendering first frame
-                        android.util.Log.w("MovieExoPlayerView", "Playback stuck at 00:00 for 5 seconds without video frame. Auto-switching server...")
-                        onPlaybackError("Stream stalled at 00:00, auto-switching...")
-                        break
-                    }
-                } else if (p.currentPosition > 0L || hasRenderedVideoFrame) {
-                    break
-                }
+                break
             }
         }
     }
@@ -390,10 +393,11 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         }
     }
 
-    // Force controls to always remain open and never auto-hide
-    LaunchedEffect(showControls) {
-        if (!showControls) {
-            showControls = true
+    // Auto-hide controls after 4 seconds of active playback
+    LaunchedEffect(showControls, isPlaying, isScreenLocked) {
+        if (showControls && isPlaying && !isScreenLocked) {
+            delay(4000)
+            showControls = false
         }
     }
 
