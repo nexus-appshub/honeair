@@ -10975,7 +10975,11 @@ fun MediaHubScreen(
                                             Spacer(modifier = Modifier.height(8.dp))
                                             com.example.ui.components.AutoScrollingBannerCarousel(
                                                 items = popularList,
-                                                onItemClick = { item -> viewModel.playMediaItem(item, 1, 1); activeWebPlayer = WebPlayerState(item, 1, 1) }
+                                                onItemClick = { item ->
+                                                    viewModel.preScrapeMediaItem(item)
+                                                    viewModel.playMediaItem(item, 1, 1)
+                                                    activeWebPlayer = WebPlayerState(item, 1, 1)
+                                                }
                                             )
                                         }
                                     }
@@ -11046,7 +11050,11 @@ fun MediaHubScreen(
                                             Spacer(modifier = Modifier.height(8.dp))
                                             com.example.ui.components.AutoScrollingBannerCarousel(
                                                 items = animeFeatured,
-                                                onItemClick = { item -> viewModel.playMediaItem(item, 1, 1); activeWebPlayer = WebPlayerState(item, 1, 1) }
+                                                onItemClick = { item ->
+                                                    viewModel.preScrapeMediaItem(item)
+                                                    viewModel.playMediaItem(item, 1, 1)
+                                                    activeWebPlayer = WebPlayerState(item, 1, 1)
+                                                }
                                             )
                                         }
                                     }
@@ -11186,7 +11194,11 @@ fun MediaHubScreen(
                                             Spacer(modifier = Modifier.height(8.dp))
                                             com.example.ui.components.AutoScrollingBannerCarousel(
                                                 items = latestList.take(6),
-                                                onItemClick = { item -> viewModel.playMediaItem(item, 1, 1); activeWebPlayer = WebPlayerState(item, 1, 1) }
+                                                onItemClick = { item ->
+                                                    viewModel.preScrapeMediaItem(item)
+                                                    viewModel.playMediaItem(item, 1, 1)
+                                                    activeWebPlayer = WebPlayerState(item, 1, 1)
+                                                }
                                             )
                                         }
                                         item {
@@ -11244,7 +11256,11 @@ fun MediaHubScreen(
                                         item {
                                             com.example.ui.components.AutoScrollingBannerCarousel(
                                                 items = popularList,
-                                                onItemClick = { item -> viewModel.playMediaItem(item, 1, 1); activeWebPlayer = WebPlayerState(item, 1, 1) },
+                                                onItemClick = { item ->
+                                                    viewModel.preScrapeMediaItem(item)
+                                                    viewModel.playMediaItem(item, 1, 1)
+                                                    activeWebPlayer = WebPlayerState(item, 1, 1)
+                                                },
                                                 edgeToEdge = true
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))

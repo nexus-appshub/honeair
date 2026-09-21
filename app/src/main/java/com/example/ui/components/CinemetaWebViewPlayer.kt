@@ -651,10 +651,10 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                     }
                     .build()
 
-                var tmdbTvId = imdbId
-                if (imdbId.startsWith("tt")) {
+                var tmdbTvId = imdbId.removePrefix("series_").removePrefix("movie_").removePrefix("anikoto_").trim()
+                if (tmdbTvId.startsWith("tt")) {
                     try {
-                        val findUrl = "https://api.themoviedb.org/3/find/$imdbId?external_source=imdb_id&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
+                        val findUrl = "https://api.themoviedb.org/3/find/$tmdbTvId?external_source=imdb_id&api_key=a359b11d9aa4c4803d25ef86cf7fb19c"
                         val findReq = Request.Builder().url(findUrl).build()
                         client.newCall(findReq).execute().use { resp ->
                             if (resp.isSuccessful) {
@@ -1517,7 +1517,17 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             .background(SpaceBlack),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (isScrapingDirectStream || directScrapeSecondsRemaining > 0) {
+                        if (isScrapingDirectStream || directScrapeSecondsRemaining > 0 || (!isAnime && playableDirectUrl.isNullOrBlank())) {
+                            LaunchedEffect(!isScrapingDirectStream, directScrapeSecondsRemaining, playableDirectUrl) {
+                                if (!isAnime && playableDirectUrl.isNullOrBlank() && !isScrapingDirectStream && directScrapeSecondsRemaining <= 0) {
+                                    val sr2Index = embedServers.indexOfFirst { it.second.contains("vidsrc.sbs") }.takeIf { it >= 0 }
+                                        ?: embedServers.indexOfFirst { it.first.contains("Sr-2", ignoreCase = true) }.takeIf { it >= 0 }
+                                        ?: 3
+                                    currentServerIndex = sr2Index
+                                    useExoPlayer = false
+                                }
+                            }
+
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
@@ -1529,19 +1539,19 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    text = "Hey Almost Done...",
+                                    text = if (isScrapingDirectStream || directScrapeSecondsRemaining > 0) "Connecting to high-speed stream..." else "Switching to Sr-2...",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = TextPrimary
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Launching high-speed direct stream...",
+                                    text = "Loading media player...",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextSecondary
                                 )
                             }
                         } else {
-                            // Only displayed after the FULL 60 seconds have elapsed without finding a stream
+                            // Anime server selection fallback if needed
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
@@ -1557,7 +1567,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = if (isAnime) "Select Streaming Server" else "Server 0 Parallel Scrape Complete",
+                                    text = "Select Streaming Server",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
@@ -1565,7 +1575,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = if (isAnime) "Tap any server below to play in HD" else "Direct HLS not found on Server 0 after 60s scan. You can retry scraping or switch to Server 1 web player.",
+                                    text = "Tap any server below to play in HD",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
@@ -1613,48 +1623,6 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                     )
                                                 }
                                             }
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                }
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Button(
-                                        onClick = {
-                                            directScrapeAttemptCount++
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = NeonCyan,
-                                            contentColor = SpaceBlack
-                                        ),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.testTag("player_retry_scrape_btn")
-                                    ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = "Retry", modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Retry 60s Scrape", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
-                                    }
-
-                                    if (!isAnime) {
-                                        Button(
-                                            onClick = {
-                                                currentServerIndex = 1
-                                                useExoPlayer = false
-                                            },
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = DeepSlate,
-                                                contentColor = TextPrimary
-                                            ),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.testTag("player_switch_web_btn")
-                                        ) {
-                                            Text(
-                                                "Server 1 (Web)",
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
                                         }
                                     }
                                 }
@@ -2777,25 +2745,21 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     }
                                 }
 
-                                val serverChipList = buildList {
-                                    add(Triple("parallel", "Parallel", NeonMagenta))
-                                    if (verifiedServers.isNotEmpty()) {
-                                        verifiedServers.forEach { srv ->
-                                            add(Triple(srv.key, srv.name, Color(srv.accentColorHex)))
-                                        }
-                                    } else {
-                                        add(Triple("beta", "Beta", Color(0xFF00E5FF)))
-                                        add(Triple("sigma", "Sigma", Color(0xFF3F51B5)))
-                                        add(Triple("vidlink_direct", "VidLink", Color(0xFF6C5CE7)))
-                                        add(Triple("vidrock_direct", "ZOZO", Color(0xFF00E5FF)))
-                                        add(Triple("prime", "Prime", Color(0xFF00E676)))
-                                        add(Triple("hexa", "Hexa Prime", Color(0xFF009688)))
-                                        add(Triple("gama", "Gamma", Color(0xFFFF5722)))
-                                        add(Triple("alfa", "Alfa", Color(0xFF4CAF50)))
-                                        add(Triple("delta", "Hindi", Color(0xFFFF9800)))
-                                        add(Triple("filxer", "HM VIP", Color(0xFFE91E63)))
-                                    }
-                                }
+                                val serverChipList = listOf(
+                                    Triple("parallel", "Parallel", NeonMagenta),
+                                    Triple("filxer", "Flixer", Color(0xFFFF4081)),
+                                    Triple("beta", "Beta", Color(0xFF00E5FF)),
+                                    Triple("delta", "delta", Color(0xFF9C27B0)),
+                                    Triple("zeta", "Zeta", Color(0xFFFF9800)),
+                                    Triple("ophim", "Ophim", Color(0xFF00B0FF)),
+                                    Triple("alfa", "Alfa", Color(0xFF4CAF50)),
+                                    Triple("gama", "Gamma", Color(0xFFFF5722)),
+                                    Triple("catflix", "Catflix", Color(0xFFFFEB3B)),
+                                    Triple("sigma", "Sigma", Color(0xFF3F51B5)),
+                                    Triple("hexa", "Hexa Prime", Color(0xFF009688)),
+                                    Triple("lamda", "Lamda", Color(0xFFE91E63)),
+                                    Triple("vidrock_direct", "ZOZO", Color(0xFF00E5FF))
+                                )
 
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2804,6 +2768,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     items(serverChipList) { item ->
                                         val (key, label, accentColor) = item
                                         val isSelected = if (key == "parallel") isMainSelected else (!isMainSelected && selectedVidnestServerKey == key)
+                                        val isVerified = verifiedServers.any { it.key == key && it.result.streamUrl.isNotBlank() }
 
                                         FilterChip(
                                             selected = isSelected,
@@ -2928,11 +2893,18 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                 }
                                             },
                                             label = {
-                                                Text(
-                                                    text = label,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                                )
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    if (key == "parallel") {
+                                                        Text("⚡ ", fontSize = 11.sp)
+                                                    } else if (isVerified) {
+                                                        Text("● ", color = Color(0xFF00E676), fontSize = 10.sp)
+                                                    }
+                                                    Text(
+                                                        text = label,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                    )
+                                                }
                                             },
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = accentColor,

@@ -42,6 +42,11 @@ object InAppHeadlessWebScraper {
 
             val providerUrls = mutableListOf<Pair<String, String>>()
             if (isTv) {
+                // Priority 1: Sr-2 (vidsrc.sbs) & high-speed sub-hosts
+                providerUrls.add(Pair("https://vidsrc.sbs/embed/tv/$cleanId/$season/$episode", "https://vidsrc.sbs/"))
+                providerUrls.add(Pair("https://web.nxsha.app/embed/tv/$cleanId/$season/$episode", "https://vidsrc.sbs/"))
+                providerUrls.add(Pair("https://cinesrc.st/embed/tv/$cleanId/$season/$episode", "https://cinesrc.st/"))
+                providerUrls.add(Pair("https://vidsrc2.ru/embed/tv/$cleanId/$season/$episode", "https://vidsrc2.ru/"))
                 providerUrls.add(Pair("https://vidlink.pro/tv/$cleanId/$season/$episode", "https://vidlink.pro/"))
                 providerUrls.add(Pair("https://player.autoembed.cc/embed/tv/$cleanId/$season/$episode", "https://player.autoembed.cc/"))
                 providerUrls.add(Pair("https://vidsrc.me/embed/tv?${if (isNumeric) "tmdb" else "imdb"}=$cleanId&season=$season&episode=$episode", "https://vidsrc.me/"))
@@ -59,6 +64,11 @@ object InAppHeadlessWebScraper {
                 providerUrls.add(Pair("https://vidsrc.xyz/embed/tv/$cleanId/$season/$episode", "https://vidsrc.xyz/"))
                 providerUrls.add(Pair("https://vidnest.fun/tv/$cleanId/$season/$episode", "https://vidnest.fun/"))
             } else {
+                // Priority 1: Sr-2 (vidsrc.sbs) & high-speed sub-hosts
+                providerUrls.add(Pair("https://vidsrc.sbs/embed/movie/$cleanId", "https://vidsrc.sbs/"))
+                providerUrls.add(Pair("https://web.nxsha.app/embed/movie/$cleanId?server=AwsPly-[Multi-Lang]", "https://vidsrc.sbs/"))
+                providerUrls.add(Pair("https://cinesrc.st/embed/movie/$cleanId", "https://cinesrc.st/"))
+                providerUrls.add(Pair("https://vidsrc2.ru/embed/movie/$cleanId", "https://vidsrc2.ru/"))
                 providerUrls.add(Pair("https://vidlink.pro/movie/$cleanId", "https://vidlink.pro/"))
                 providerUrls.add(Pair("https://player.autoembed.cc/embed/movie/$cleanId", "https://player.autoembed.cc/"))
                 providerUrls.add(Pair("https://vidsrc.me/embed/movie?${if (isNumeric) "tmdb" else "imdb"}=$cleanId", "https://vidsrc.me/"))

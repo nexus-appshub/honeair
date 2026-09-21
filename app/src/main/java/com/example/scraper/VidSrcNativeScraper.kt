@@ -105,6 +105,28 @@ object VidSrcNativeScraper {
                                 return@launch
                             }
 
+                            // 1.5 Extract sub-servers from servers: [...] array in HTML (e.g. vidsrc.sbs)
+                            val unescapedHtml = html.replace("\\/", "/")
+                            val subServerMatch = Regex("""(?:movie_url|tv_url)["']?\s*:\s*["'](https?://[^"']+)["']""").findAll(unescapedHtml)
+                            for (m in subServerMatch) {
+                                val subUrl = m.groupValues[1]
+                                try {
+                                    val subReq = Request.Builder()
+                                        .url(subUrl)
+                                        .header("User-Agent", DEFAULT_UA)
+                                        .header("Referer", embedUrl)
+                                        .build()
+                                    val subResp = httpClient.newCall(subReq).execute()
+                                    val subHtml = subResp.body?.string() ?: ""
+                                    val subStream = extractDirectStreamFromHtml(subHtml, host)
+                                    if (subStream != null) {
+                                        Log.d(TAG, "VidSrc sub-server stream winner: ${subStream.streamUrl}")
+                                        resultChannel.trySend(subStream)
+                                        return@launch
+                                    }
+                                } catch (_: Exception) {}
+                            }
+
                             // 2. Extract rcp or iframe hash
                             val rcpUrl = extractRcpUrl(html, host)
                             if (!rcpUrl.isNullOrBlank()) {

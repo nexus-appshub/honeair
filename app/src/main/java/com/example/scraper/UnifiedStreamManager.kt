@@ -802,82 +802,79 @@ object UnifiedStreamManager {
                 })
             }
 
-            // Priority 1: Beta (Vidxyz)
+            // 1. Flixer
+            addScraper("filxer", "Flixer", "DIRECT", 0xFFFF4081) {
+                VidnestNativeScraper.extractStreamFromProvider("filxer", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // 2. Beta
             addScraper("beta", "Beta", "DIRECT", 0xFF00E5FF) {
                 VidnestNativeScraper.extractStreamFromProvider("beta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
             }
 
-            // Priority 2: Sigma (HollyMovieHD)
-            addScraper("sigma", "Sigma", "DIRECT", 0xFF3F51B5) {
-                VidnestNativeScraper.extractStreamFromProvider("sigma", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            // 3. delta
+            addScraper("delta", "delta", "DIRECT", 0xFF9C27B0) {
+                VidnestNativeScraper.extractStreamFromProvider("delta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
             }
 
-            // Priority 3: VidLink Direct
-            addScraper("vidlink_direct", "VidLink", "DIRECT", 0xFF6C5CE7) {
-                VidLinkNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            // 4. Zeta
+            addScraper("zeta", "Zeta", "DIRECT", 0xFFFF9800) {
+                VidnestNativeScraper.extractStreamFromProvider("zeta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
             }
 
-            // Priority 4: ZOZO Direct (Vidrock)
-            addScraper("vidrock_direct", "ZOZO", "DIRECT", 0xFF00E5FF) {
-                VidrockNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-            }
-
-            // Priority 5: Prime
-            addScraper("prime", "Prime", "DIRECT", 0xFF00E676) {
-                VidnestNativeScraper.extractStreamFromProvider("prime", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-            }
-
-            // Priority 6: Hexa Prime
-            addScraper("hexa", "Hexa Prime", "DIRECT", 0xFF009688) {
-                VidnestNativeScraper.extractStreamFromProvider("hexa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-            }
-
-            // Priority 7: Gama (Vidzee)
-            addScraper("gama", "Gamma", "DIRECT", 0xFFFF5722) {
-                VidnestNativeScraper.extractStreamFromProvider("gama", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-            }
-
-            // Priority 8: Alfa (Videasy)
-            addScraper("alfa", "Alfa", "DIRECT", 0xFF4CAF50) {
-                VidnestNativeScraper.extractStreamFromProvider("alfa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-            }
-
-            // Priority 9: VidSrc Multi-Host
-            addScraper("vidsrc_direct", "VidSrc", "MULTI", 0xFFFF5252) {
-                VidSrcNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-            }
-
-            // Priority 10: AutoEmbed Direct
-            addScraper("autoembed_direct", "AutoEmbed", "DIRECT", 0xFF00B894) {
-                AutoEmbedNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-            }
-
-            // Priority 11: Ophim
+            // 5. Ophim
             addScraper("ophim", "Ophim", "DIRECT", 0xFF00B0FF) {
                 VidnestNativeScraper.extractStreamFromProvider("ophim", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
             }
 
-            // Priority 12: Catflix
-            addScraper("catflix", "Catflix", "DIRECT", 0xFFFF4081) {
+            // 6. Alfa
+            addScraper("alfa", "Alfa", "DIRECT", 0xFF4CAF50) {
+                VidnestNativeScraper.extractStreamFromProvider("alfa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // 7. Gamma
+            addScraper("gama", "Gamma", "DIRECT", 0xFFFF5722) {
+                VidnestNativeScraper.extractStreamFromProvider("gama", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // 8. Catflix
+            addScraper("catflix", "Catflix", "DIRECT", 0xFFFFEB3B) {
                 VidnestNativeScraper.extractStreamFromProvider("catflix", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
             }
 
-            // Priority 13: Zeta
-            addScraper("zeta", "Zeta", "DIRECT", 0xFF9C27B0) {
-                VidnestNativeScraper.extractStreamFromProvider("zeta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            // 9. Sigma
+            addScraper("sigma", "Sigma", "DIRECT", 0xFF3F51B5) {
+                VidnestNativeScraper.extractStreamFromProvider("sigma", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
             }
 
-            // Movie-only routes
-            if (!effectiveIsTv) {
-                addScraper("filxer", "HM VIP", "DIRECT", 0xFFE91E63) {
-                    VidnestNativeScraper.extractStreamFromProvider("filxer", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-                }
-                addScraper("delta", "Hindi", "DIRECT", 0xFFFF9800) {
-                    VidnestNativeScraper.extractStreamFromProvider("delta", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-                }
-                addScraper("lamda", "Lamda", "DIRECT", 0xFF7C4DFF) {
-                    VidnestNativeScraper.extractStreamFromProvider("lamda", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
-                }
+            // 10. Hexa Prime
+            addScraper("hexa", "Hexa Prime", "DIRECT", 0xFF009688) {
+                VidnestNativeScraper.extractStreamFromProvider("hexa", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // 11. Lamda
+            addScraper("lamda", "Lamda", "DIRECT", 0xFFE91E63) {
+                VidnestNativeScraper.extractStreamFromProvider("lamda", finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // 12. ZOZO (Vidrock)
+            addScraper("vidrock_direct", "ZOZO", "DIRECT", 0xFF00E5FF) {
+                VidrockNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // Priority: Sr-2 / VidSrc Multi-Host
+            addScraper("vidsrc_direct", "VidSrc (Sr-2)", "MULTI", 0xFFFF5252) {
+                VidSrcNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // VidLink Direct
+            addScraper("vidlink_direct", "VidLink", "DIRECT", 0xFF6C5CE7) {
+                VidLinkNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
+            }
+
+            // AutoEmbed Direct
+            addScraper("autoembed_direct", "AutoEmbed", "DIRECT", 0xFF00B894) {
+                AutoEmbedNativeScraper.extractStream(finalTmdbId, effectiveIsTv, season, effectiveEpisode)
             }
 
             // Anime routes (Anikoto Sub/Dub)

@@ -571,31 +571,52 @@ fun MediaDetailSheet(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                val displayServers = buildList {
-                    add(Triple("fastest_auto", "⚡ Fastest Direct", NeonCyan))
-                    verifiedServers.forEach { srv ->
-                        add(Triple(srv.key, srv.name, Color(srv.accentColorHex)))
-                    }
-                }
+                val standardServers = listOf(
+                    Triple("parallel", "Parallel", NeonCyan),
+                    Triple("filxer", "Flixer", Color(0xFFFF4081)),
+                    Triple("beta", "Beta", Color(0xFF00E5FF)),
+                    Triple("delta", "delta", Color(0xFF9C27B0)),
+                    Triple("zeta", "Zeta", Color(0xFFFF9800)),
+                    Triple("ophim", "Ophim", Color(0xFF00B0FF)),
+                    Triple("alfa", "Alfa", Color(0xFF4CAF50)),
+                    Triple("gama", "Gamma", Color(0xFFFF5722)),
+                    Triple("catflix", "Catflix", Color(0xFFFFEB3B)),
+                    Triple("sigma", "Sigma", Color(0xFF3F51B5)),
+                    Triple("hexa", "Hexa Prime", Color(0xFF009688)),
+                    Triple("lamda", "Lamda", Color(0xFFE91E63)),
+                    Triple("vidrock_direct", "ZOZO", Color(0xFF00E5FF))
+                )
 
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(displayServers) { (key, label, accentColor) ->
-                        val isSelected = (selectedStreamServerKey == key) || (selectedStreamServerKey == null && key == "fastest_auto")
+                    items(standardServers) { (key, label, accentColor) ->
+                        val isSelected = (selectedStreamServerKey == key) ||
+                                (selectedStreamServerKey == null && key == "parallel") ||
+                                (selectedStreamServerKey == "fastest_auto" && key == "parallel")
+                        val hasVerifiedStream = verifiedServers.any { it.key == key && it.result.streamUrl.isNotBlank() }
+
                         FilterChip(
                             selected = isSelected,
                             onClick = {
-                                viewModel.selectStreamServerKey(key)
-                                viewModel.preScrapeMediaItem(item, selectedSeason, selectedEpisode, key)
+                                val effectiveKey = if (key == "parallel") "fastest_auto" else key
+                                viewModel.selectStreamServerKey(effectiveKey)
+                                viewModel.preScrapeMediaItem(item, selectedSeason, selectedEpisode, effectiveKey)
                             },
                             label = {
-                                Text(
-                                    text = label,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (key == "parallel") {
+                                        Text("⚡ ", fontSize = 11.sp)
+                                    } else if (hasVerifiedStream) {
+                                        Text("● ", color = Color(0xFF00E676), fontSize = 10.sp)
+                                    }
+                                    Text(
+                                        text = label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = accentColor,
