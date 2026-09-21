@@ -486,8 +486,29 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                     isScrapingDirectStream = false
                     directScrapeSecondsRemaining = 0
                     if (capturedVideoUrl.isNullOrBlank()) {
-                        // If direct native extraction has no stream for this episode, seamlessly switch to embed player
-                        useExoPlayer = false
+                        if (!isAnime) {
+                            // If direct native extraction has no stream for this episode, seamlessly switch to embed player
+                            useExoPlayer = false
+                        } else {
+                            // For anime, keep ExoPlayer active and extract from stable first anime server
+                            useExoPlayer = true
+                            scope.launch(Dispatchers.IO) {
+                                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
+                                val firstSrv = subServers.firstOrNull() ?: dubServers.firstOrNull()
+                                val extracted = if (firstSrv != null) {
+                                    com.example.scraper.AnikotoScraper.extractStreamFromServer(firstSrv, watchUrl, currentEpisode)
+                                } else {
+                                    com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
+                                }
+                                withContext(Dispatchers.Main) {
+                                    if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                        capturedVideoUrl = extracted.streamUrl
+                                        customScrapedHeaders = extracted.headers
+                                        if (extracted.subtitles.isNotEmpty()) activeSubtitles = extracted.subtitles
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1420,7 +1441,34 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         onPlaybackError = { _ ->
                             val failedUrl = capturedVideoUrl
                             com.example.scraper.UnifiedStreamManager.invalidateCache(imdbId, currentSeason, currentEpisode, failedUrl, context)
-                            if (directScrapeAttemptCount < 3) {
+                            if (isAnime) {
+                                // For Anime: NEVER fallback to English web embed (vidsrc2.ru)
+                                capturedVideoUrl = null
+                                useExoPlayer = true
+                                isScrapingDirectStream = true
+                                scope.launch(Dispatchers.IO) {
+                                    val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
+                                    val candidateSrv = (subServers + dubServers).find { it.streamUrl != failedUrl && it.streamUrl.isNotBlank() }
+                                        ?: subServers.firstOrNull() ?: dubServers.firstOrNull()
+                                    val extracted = if (candidateSrv != null) {
+                                        com.example.scraper.AnikotoScraper.extractStreamFromServer(candidateSrv, watchUrl, currentEpisode)
+                                    } else {
+                                        com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                                            capturedVideoUrl = extracted.streamUrl
+                                            customScrapedHeaders = extracted.headers
+                                            if (extracted.subtitles.isNotEmpty()) activeSubtitles = extracted.subtitles
+                                            useExoPlayer = true
+                                            isScrapingDirectStream = false
+                                        } else {
+                                            directScrapeAttemptCount++
+                                            isScrapingDirectStream = true
+                                        }
+                                    }
+                                }
+                            } else if (directScrapeAttemptCount < 3) {
                                 // Race all available servers dynamically instead of forcing a specific broken server
                                 selectedVidnestServerKey = null
                                 capturedVideoUrl = null

@@ -359,21 +359,36 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         exoPlayer = player
     }
 
-    // Safe Auto-play kicker: ensures video starts playing smoothly as soon as ExoPlayer is ready
+    // Safe Auto-play kicker & 0-length media playback state watchdog
     LaunchedEffect(exoPlayer, currentUrl) {
         val p = exoPlayer ?: return@LaunchedEffect
         p.playWhenReady = true
         p.play()
 
-        // Wait for player to be ready and verify playback starts without interrupting the network buffer
-        for (i in 0..20) {
-            delay(500)
+        // Wait up to 7 seconds to verify video playback actually starts and renders video frames
+        var secondsElapsed = 0
+        while (secondsElapsed < 7) {
+            delay(1000)
+            secondsElapsed++
             if (p.playbackState == Player.STATE_READY) {
                 if (!p.isPlaying || !p.playWhenReady) {
                     p.playWhenReady = true
                     p.play()
                 }
+            }
+            if (hasRenderedVideoFrame && p.currentPosition > 0L) {
+                // Successfully rendered frame and progressing
                 break
+            }
+        }
+
+        // Explicitly detect 0-length media playback states or stalled playback without rendered frames
+        if (!hasRenderedVideoFrame) {
+            val dur = p.duration.coerceAtLeast(0L)
+            val pos = p.currentPosition.coerceAtLeast(0L)
+            if (pos == 0L || dur == 0L || p.playbackState == Player.STATE_IDLE || p.playbackState == Player.STATE_ENDED) {
+                android.util.Log.w("MovieExoPlayerView", "0-length media playback state or stalled stream detected for $currentUrl (pos: ${pos}ms, dur: ${dur}ms, state: ${p.playbackState}). Re-triggering scraper for current server...")
+                onPlaybackError("0-length media playback state detected.")
             }
         }
     }

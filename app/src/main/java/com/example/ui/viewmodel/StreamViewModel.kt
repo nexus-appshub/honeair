@@ -2358,6 +2358,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     ?: group.dubServers.firstOrNull()
 
                 _selectedServer.value = matched
+                if (matched != null && _activeMediaItem.value?.id == item.id) {
+                    val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                        server = matched,
+                        watchUrl = group.watchUrl.ifBlank { targetTitleOrSlug },
+                        episode = episode
+                    )
+                    if (extracted != null && extracted.streamUrl.isNotBlank()) {
+                        _activeMediaStreamUrl.value = extracted.streamUrl
+                        _activeMediaStreamHeaders.value = extracted.headers
+                        _isPlayerPlaying.value = true
+                    }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
