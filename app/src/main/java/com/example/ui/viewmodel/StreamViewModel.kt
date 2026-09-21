@@ -2350,25 +2350,39 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 val current = _selectedServer.value
                 val isDub = current?.type?.lowercase() == "dub"
                 val targetServers = if (isDub) group.dubServers else group.subServers
-                val matched = targetServers.find { it.name.equals(current?.name, ignoreCase = true) && !it.name.contains("Mirror") && !it.id.contains("p") }
-                    ?: targetServers.firstOrNull { !it.name.contains("Mirror") && !it.id.contains("p") }
-                    ?: group.subServers.firstOrNull { !it.name.contains("Mirror") && !it.id.contains("p") }
-                    ?: group.dubServers.firstOrNull { !it.name.contains("Mirror") && !it.id.contains("p") }
-                    ?: group.subServers.firstOrNull()
-                    ?: group.dubServers.firstOrNull()
+                val candidateList = (targetServers + group.subServers + group.dubServers)
+                    .distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
 
-                _selectedServer.value = matched
-                if (matched != null && _activeMediaItem.value?.id == item.id) {
+                var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
+                var workingServer: com.example.scraper.AnikotoServer? = null
+
+                for (srv in candidateList) {
+                    val isMirror = srv.name.contains("Mirror") || srv.id.contains("p") || srv.streamUrl.contains("pahe")
+                    if (isMirror && candidateList.any { !it.name.contains("Mirror") && !it.id.contains("p") && !it.streamUrl.contains("pahe") }) {
+                        continue
+                    }
                     val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
-                        server = matched,
+                        server = srv,
                         watchUrl = group.watchUrl.ifBlank { targetTitleOrSlug },
                         episode = episode
                     )
                     if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                        _activeMediaStreamUrl.value = extracted.streamUrl
-                        _activeMediaStreamHeaders.value = extracted.headers
-                        _isPlayerPlaying.value = true
+                        workingExtracted = extracted
+                        workingServer = srv
+                        break
                     }
+                }
+
+                if (workingServer != null) {
+                    _selectedServer.value = workingServer
+                } else {
+                    _selectedServer.value = targetServers.firstOrNull() ?: group.subServers.firstOrNull() ?: group.dubServers.firstOrNull()
+                }
+
+                if (workingExtracted != null && _activeMediaItem.value?.id == item.id) {
+                    _activeMediaStreamUrl.value = workingExtracted.streamUrl
+                    _activeMediaStreamHeaders.value = workingExtracted.headers
+                    _isPlayerPlaying.value = true
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

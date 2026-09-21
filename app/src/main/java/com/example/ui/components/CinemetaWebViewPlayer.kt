@@ -263,6 +263,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     var directScrapeAttemptCount by remember(imdbId, currentSeason, currentEpisode) { androidx.compose.runtime.mutableIntStateOf(0) }
     var directScrapeStatusText by remember(imdbId, currentSeason, currentEpisode) { mutableStateOf("Scanning 12+ cloud streams in parallel...") }
     var useExoPlayer by remember(nativeStreamUrl) { mutableStateOf(true) }
+    val failedAnimeUrls = remember(imdbId, currentSeason, currentEpisode) { mutableStateListOf<String>() }
 
     val anikotoSeasons by viewModel.anikotoSeasons.collectAsState()
     val anikotoEpisodes by viewModel.anikotoEpisodes.collectAsState()
@@ -490,21 +491,31 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             // If direct native extraction has no stream for this episode, seamlessly switch to embed player
                             useExoPlayer = false
                         } else {
-                            // For anime, keep ExoPlayer active and extract from stable first anime server
+                            // For anime, keep ExoPlayer active and extract from working candidate anime servers
                             useExoPlayer = true
                             scope.launch(Dispatchers.IO) {
                                 val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
-                                val firstSrv = subServers.firstOrNull() ?: dubServers.firstOrNull()
-                                val extracted = if (firstSrv != null) {
-                                    com.example.scraper.AnikotoScraper.extractStreamFromServer(firstSrv, watchUrl, currentEpisode)
-                                } else {
-                                    com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
+                                var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
+                                var workingSrv: com.example.scraper.AnikotoServer? = null
+                                val srvList = (subServers + dubServers).distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
+                                for (srv in srvList) {
+                                    if (srv.streamUrl.isNotBlank() && failedAnimeUrls.contains(srv.streamUrl)) continue
+                                    val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(srv, watchUrl, currentEpisode)
+                                    if (extracted != null && extracted.streamUrl.isNotBlank() && !failedAnimeUrls.contains(extracted.streamUrl)) {
+                                        workingExtracted = extracted
+                                        workingSrv = srv
+                                        break
+                                    }
+                                }
+                                if (workingExtracted == null) {
+                                    workingExtracted = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
                                 }
                                 withContext(Dispatchers.Main) {
-                                    if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                        capturedVideoUrl = extracted.streamUrl
-                                        customScrapedHeaders = extracted.headers
-                                        if (extracted.subtitles.isNotEmpty()) activeSubtitles = extracted.subtitles
+                                    if (workingExtracted != null && workingExtracted.streamUrl.isNotBlank()) {
+                                        capturedVideoUrl = workingExtracted.streamUrl
+                                        customScrapedHeaders = workingExtracted.headers
+                                        if (workingExtracted.subtitles.isNotEmpty()) activeSubtitles = workingExtracted.subtitles
+                                        if (workingSrv != null) viewModel.selectAnikotoServer(workingSrv)
                                     }
                                 }
                             }
@@ -1440,6 +1451,9 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         onFullScreenToggle = { onFullScreenChange(!isFullScreen) },
                         onPlaybackError = { _ ->
                             val failedUrl = capturedVideoUrl
+                            if (!failedUrl.isNullOrBlank()) {
+                                failedAnimeUrls.add(failedUrl)
+                            }
                             com.example.scraper.UnifiedStreamManager.invalidateCache(imdbId, currentSeason, currentEpisode, failedUrl, context)
                             if (isAnime) {
                                 // For Anime: NEVER fallback to English web embed (vidsrc2.ru)
@@ -1448,23 +1462,47 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 isScrapingDirectStream = true
                                 scope.launch(Dispatchers.IO) {
                                     val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
-                                    val candidateSrv = (subServers + dubServers).find { it.streamUrl != failedUrl && it.streamUrl.isNotBlank() }
-                                        ?: subServers.firstOrNull() ?: dubServers.firstOrNull()
-                                    val extracted = if (candidateSrv != null) {
-                                        com.example.scraper.AnikotoScraper.extractStreamFromServer(candidateSrv, watchUrl, currentEpisode)
-                                    } else {
-                                        com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
+                                    val candidateServers = (subServers + dubServers).distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
+                                    var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
+                                    var workingSrv: com.example.scraper.AnikotoServer? = null
+
+                                    for (srv in candidateServers) {
+                                        if (srv.streamUrl.isNotBlank() && failedAnimeUrls.contains(srv.streamUrl)) continue
+                                        val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(srv, watchUrl, currentEpisode)
+                                        if (extracted != null && extracted.streamUrl.isNotBlank() && !failedAnimeUrls.contains(extracted.streamUrl)) {
+                                            workingExtracted = extracted
+                                            workingSrv = srv
+                                            break
+                                        }
                                     }
+
+                                    if (workingExtracted == null) {
+                                        val directSub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
+                                        if (directSub != null && directSub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directSub.streamUrl)) {
+                                            workingExtracted = directSub
+                                        }
+                                    }
+
+                                    if (workingExtracted == null) {
+                                        val directDub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, true)
+                                        if (directDub != null && directDub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directDub.streamUrl)) {
+                                            workingExtracted = directDub
+                                        }
+                                    }
+
                                     withContext(Dispatchers.Main) {
-                                        if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                            capturedVideoUrl = extracted.streamUrl
-                                            customScrapedHeaders = extracted.headers
-                                            if (extracted.subtitles.isNotEmpty()) activeSubtitles = extracted.subtitles
+                                        if (workingExtracted != null && workingExtracted.streamUrl.isNotBlank()) {
+                                            capturedVideoUrl = workingExtracted.streamUrl
+                                            customScrapedHeaders = workingExtracted.headers
+                                            if (workingExtracted.subtitles.isNotEmpty()) activeSubtitles = workingExtracted.subtitles
+                                            if (workingSrv != null) {
+                                                viewModel.selectAnikotoServer(workingSrv)
+                                            }
                                             useExoPlayer = true
                                             isScrapingDirectStream = false
                                         } else {
                                             directScrapeAttemptCount++
-                                            isScrapingDirectStream = true
+                                            isScrapingDirectStream = false
                                         }
                                     }
                                 }
@@ -1742,8 +1780,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 mediaPlaybackRequiresUserGesture = false
                                 allowFileAccess = false
                                 allowContentAccess = false
-                                javaScriptCanOpenWindowsAutomatically = false
-                                setSupportMultipleWindows(false)
+                                javaScriptCanOpenWindowsAutomatically = true
+                                setSupportMultipleWindows(true)
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
                                 cacheMode = WebSettings.LOAD_DEFAULT
@@ -1830,7 +1868,24 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 }
      
                                 override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
-                                    // Return true to consume the popup request and prevent it from breaking sandboxed frames
+                                    val targetWebView = view ?: return true
+                                    val popWebView = WebView(targetWebView.context)
+                                    popWebView.settings.javaScriptEnabled = true
+                                    popWebView.settings.domStorageEnabled = true
+                                    popWebView.webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(v: WebView?, request: WebResourceRequest?): Boolean {
+                                            val popUrl = request?.url?.toString()
+                                            if (!popUrl.isNullOrBlank() && !popUrl.contains("about:blank")) {
+                                                targetWebView.loadUrl(popUrl)
+                                            }
+                                            return true
+                                        }
+                                    }
+                                    val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                    if (transport != null) {
+                                        transport.webView = popWebView
+                                        resultMsg.sendToTarget()
+                                    }
                                     return true
                                 }
                             }

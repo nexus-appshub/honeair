@@ -148,6 +148,8 @@ fun MasterAnimeBrowserModal(
                                     builtInZoomControls = true
                                     displayZoomControls = false
                                     mediaPlaybackRequiresUserGesture = false
+                                    javaScriptCanOpenWindowsAutomatically = true
+                                    setSupportMultipleWindows(true)
                                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                     userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 AppEmbedded/1.0"
                                 }
@@ -159,7 +161,12 @@ fun MasterAnimeBrowserModal(
                                         view: WebView?,
                                         request: WebResourceRequest?
                                     ): Boolean {
-                                        return false // Keep navigation inside the embedded browser
+                                        val reqUrl = request?.url?.toString() ?: return false
+                                        if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
+                                            view?.loadUrl(reqUrl)
+                                            return true
+                                        }
+                                        return false
                                     }
 
                                     override fun onReceivedSslError(
@@ -184,6 +191,36 @@ fun MasterAnimeBrowserModal(
                                         customView = null
                                         customViewCallback?.onCustomViewHidden()
                                         customViewCallback = null
+                                    }
+
+                                    override fun onCreateWindow(
+                                        view: WebView?,
+                                        isDialog: Boolean,
+                                        isUserGesture: Boolean,
+                                        resultMsg: android.os.Message?
+                                    ): Boolean {
+                                        val targetWebView = view ?: return false
+                                        val popWebView = WebView(targetWebView.context)
+                                        popWebView.settings.javaScriptEnabled = true
+                                        popWebView.settings.domStorageEnabled = true
+                                        popWebView.webViewClient = object : WebViewClient() {
+                                            override fun shouldOverrideUrlLoading(
+                                                v: WebView?,
+                                                request: WebResourceRequest?
+                                            ): Boolean {
+                                                val popUrl = request?.url?.toString()
+                                                if (!popUrl.isNullOrBlank()) {
+                                                    targetWebView.loadUrl(popUrl)
+                                                }
+                                                return true
+                                            }
+                                        }
+                                        val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                        if (transport != null) {
+                                            transport.webView = popWebView
+                                            resultMsg.sendToTarget()
+                                        }
+                                        return true
                                     }
                                 }
 
@@ -301,6 +338,8 @@ fun MasterAnimeBrowserScreen(
                                 builtInZoomControls = true
                                 displayZoomControls = false
                                 mediaPlaybackRequiresUserGesture = false
+                                javaScriptCanOpenWindowsAutomatically = true
+                                setSupportMultipleWindows(true)
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 AppEmbedded/1.0"
                             }
@@ -311,7 +350,14 @@ fun MasterAnimeBrowserScreen(
                                 override fun shouldOverrideUrlLoading(
                                     view: WebView?,
                                     request: WebResourceRequest?
-                                ): Boolean = false
+                                ): Boolean {
+                                    val reqUrl = request?.url?.toString() ?: return false
+                                    if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
+                                        view?.loadUrl(reqUrl)
+                                        return true
+                                    }
+                                    return false
+                                }
 
                                 override fun onReceivedSslError(
                                     view: WebView?,
@@ -335,6 +381,36 @@ fun MasterAnimeBrowserScreen(
                                     customView = null
                                     customViewCallback?.onCustomViewHidden()
                                     customViewCallback = null
+                                }
+
+                                override fun onCreateWindow(
+                                    view: WebView?,
+                                    isDialog: Boolean,
+                                    isUserGesture: Boolean,
+                                    resultMsg: android.os.Message?
+                                ): Boolean {
+                                    val targetWebView = view ?: return false
+                                    val popWebView = WebView(targetWebView.context)
+                                    popWebView.settings.javaScriptEnabled = true
+                                    popWebView.settings.domStorageEnabled = true
+                                    popWebView.webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(
+                                            v: WebView?,
+                                            request: WebResourceRequest?
+                                        ): Boolean {
+                                            val popUrl = request?.url?.toString()
+                                            if (!popUrl.isNullOrBlank()) {
+                                                targetWebView.loadUrl(popUrl)
+                                            }
+                                            return true
+                                        }
+                                    }
+                                    val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                    if (transport != null) {
+                                        transport.webView = popWebView
+                                        resultMsg.sendToTarget()
+                                    }
+                                    return true
                                 }
                             }
 
