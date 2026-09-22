@@ -90,84 +90,23 @@ object SubscriptionManager {
     }
 
     /**
-     * Fetches live VIP pricing plans and payment gateways from the server API and Firebase RTDB
+     * Standalone VIP config provider: disconnected from website admin panel server
      */
     fun fetchLiveVipConfig() {
         scope.launch(Dispatchers.IO) {
-            // Priority 1: Fetch directly from Firebase Realtime Database (where admin panel saves changes immediately)
-            val firebaseUrls = listOf(
-                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/app_vip_config.json",
-                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/configs/vipConfig.json"
+            // Standalone mode: do not connect to remote admin panel server
+            val defaultVipConfig = VipConfigResponse(
+                success = true,
+                version = "2.0",
+                pricingPlans = emptyList(),
+                paymentGateways = null,
+                merchantConfig = null,
+                premiumUsers = emptyList()
             )
-
-            var loadedFromFirebase = false
-            val okHttpClient = OkHttpClient.Builder()
-                .connectTimeout(12, TimeUnit.SECONDS)
-                .readTimeout(12, TimeUnit.SECONDS)
-                .build()
-
-            for (fbUrl in firebaseUrls) {
-                if (loadedFromFirebase) break
-                try {
-                    val req = Request.Builder()
-                        .url(fbUrl)
-                        .header("Accept", "application/json")
-                        .build()
-                    okHttpClient.newCall(req).execute().use { response ->
-                        val body = response.body?.string()
-                        if (response.isSuccessful && !body.isNullOrBlank() && body.trim() != "null" && body.trim().startsWith("{")) {
-                            val parsed = parseVipConfigFromJson(body)
-                            if (parsed != null && (parsed.pricingPlans.isNotEmpty() || parsed.paymentGateways != null || parsed.merchantConfig != null)) {
-                                _vipConfig.value = parsed
-                                synchronized(remotePremiumEmails) {
-                                    remotePremiumEmails.clear()
-                                    if (parsed.premiumUsers.isNotEmpty()) {
-                                        remotePremiumEmails.addAll(parsed.premiumUsers.map { it.trim().lowercase() }.filter { it.isNotBlank() })
-                                    }
-                                }
-                                loadedFromFirebase = true
-                                Log.d(TAG, "Successfully loaded live VIP config & payment info from Firebase: $fbUrl")
-                                
-                                val auth = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
-                                val user = auth?.currentUser
-                                checkUserSubscription(user?.email, user?.uid)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Firebase VIP config fetch note for $fbUrl: ${e.message}")
-                }
-            }
-
-            // Priority 2: Query Render API as mirror or fallback
-            try {
-                val response = VipApiClient.apiService.getVipConfig()
-                if (response.success) {
-                    val current = _vipConfig.value
-                    if (!loadedFromFirebase || current == null || current.pricingPlans.isEmpty()) {
-                        _vipConfig.value = response
-                        synchronized(remotePremiumEmails) {
-                            remotePremiumEmails.clear()
-                            if (response.premiumUsers.isNotEmpty()) {
-                                remotePremiumEmails.addAll(response.premiumUsers.map { it.trim().lowercase() }.filter { it.isNotBlank() })
-                            }
-                        }
-                    } else {
-                        // Merge payment gateways and pricing plans if Firebase had partial info
-                        val mergedGateways = current.paymentGateways ?: response.paymentGateways
-                        val mergedPlans = if (current.pricingPlans.isNotEmpty()) current.pricingPlans else response.pricingPlans
-                        _vipConfig.value = current.copy(
-                            paymentGateways = mergedGateways,
-                            pricingPlans = mergedPlans
-                        )
-                    }
-                    val auth = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
-                    val user = auth?.currentUser
-                    checkUserSubscription(user?.email, user?.uid)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Render VIP API fetch note: ${e.message}")
-            }
+            _vipConfig.value = defaultVipConfig
+            val auth = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
+            val user = auth?.currentUser
+            checkUserSubscription(user?.email, user?.uid)
         }
     }
 

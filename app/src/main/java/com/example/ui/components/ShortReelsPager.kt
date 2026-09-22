@@ -200,7 +200,7 @@ private fun SingleReelPlayerItem(
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(20000)
             .setReadTimeoutMs(30000)
-            .setUserAgent("HomeAirTV-Android/4.7.1")
+            .setUserAgent("HomeAirTV-Android/4.7.2")
 
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)

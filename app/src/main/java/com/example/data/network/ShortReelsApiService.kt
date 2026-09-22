@@ -39,7 +39,7 @@ object ShortReelsApiClient {
         .writeTimeout(30, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val request = chain.request().newBuilder()
-                .header("User-Agent", "HomeAirTV-Android/4.7.1")
+                .header("User-Agent", "HomeAirTV-Android/4.7.2")
                 .header("Accept", "application/json")
                 .build()
             chain.proceed(request)
