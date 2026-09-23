@@ -318,10 +318,6 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
         )
 
         val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
-            setParameters(
-                buildUponParameters()
-                    .setMaxAudioChannelCount(2) // Restricts playback to Stereo (2 channels) to downmix Dolby/AC-3/5.1 Surround sound perfectly for mobile speakers
-            )
             if (batterySaverActive) {
                 setParameters(
                     buildUponParameters()
@@ -463,10 +459,10 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                 val state = player.playbackState
                 val isCurrentlyPlaying = player.isPlaying
 
-                // 1. Recover from actual stuck buffering (>6s) without interrupting healthy playing state
+                // 1. Recover from actual stuck buffering (>8s) without interrupting healthy playing state
                 if (state == Player.STATE_BUFFERING && !isCurrentlyPlaying) {
                     bufferingSeconds += 2
-                    if (bufferingSeconds >= 6) { // Reduced from 8s to 6s for lightning-fast detection
+                    if (bufferingSeconds >= 8) {
                         bufferingSeconds = 0
                         watchdogRestartCount++
                         
@@ -485,7 +481,7 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                             }
                         }
                         
-                        if (alternates.isNotEmpty() && watchdogRestartCount >= 1) { // Reduced from 2 to 1 to failover immediately on the first stall
+                        if (alternates.isNotEmpty() && watchdogRestartCount >= 2) {
                             val nextIndex = currentAlternateIndex % alternates.size
                             val targetUrl = alternates[nextIndex]
                             currentAlternateIndex++

@@ -28,7 +28,6 @@ fun MasterAnimeBrowserModal(
     url: String = "https://media.hmair.xyz",
     onDismiss: () -> Unit
 ) {
-    val viewModel: com.example.ui.viewmodel.StreamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var customView by remember { mutableStateOf<android.view.View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
@@ -158,95 +157,13 @@ fun MasterAnimeBrowserModal(
                                 setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
 
                                 webViewClient = object : WebViewClient() {
-                                    private fun handleAnimeUrlInterception(reqUrl: String, view: WebView): Boolean {
-                                        val urlLower = reqUrl.lowercase()
-                                        if (urlLower.contains("/watch/") || urlLower.contains("/watch") || urlLower.contains("/anime/") || urlLower.contains("?s=") || urlLower.contains("&s=")) {
-                                            try {
-                                                val uri = android.net.Uri.parse(reqUrl)
-                                                var slug = ""
-                                                var epNum = 1
-                                                
-                                                val sParam = uri.getQueryParameter("s") ?: ""
-                                                if (sParam.isNotBlank()) {
-                                                    val parts = sParam.split("/")
-                                                    for (part in parts) {
-                                                        val pLower = part.lowercase()
-                                                        if (pLower.startsWith("ep-") || pLower.startsWith("episode-")) {
-                                                            val epStr = pLower.replace("ep-", "").replace("episode-", "")
-                                                            epNum = epStr.toIntOrNull() ?: 1
-                                                        } else if (pLower != "a" && pLower != "s" && pLower != "watch" && pLower.isNotBlank() && !pLower.all { it.isDigit() }) {
-                                                            slug = part
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                if (slug.isBlank()) {
-                                                    val pathSegments = uri.pathSegments
-                                                    if (pathSegments.isNotEmpty()) {
-                                                        val watchIndex = pathSegments.indexOf("watch")
-                                                        val animeIndex = pathSegments.indexOf("anime")
-                                                        val index = if (watchIndex >= 0) watchIndex else animeIndex
-                                                        if (index >= 0 && index < pathSegments.size - 1) {
-                                                            slug = pathSegments[index + 1]
-                                                            for (i in (index + 2) until pathSegments.size) {
-                                                                val segment = pathSegments[i].lowercase()
-                                                                if (segment.startsWith("ep-") || segment.startsWith("episode-")) {
-                                                                    val epStr = segment.replace("ep-", "").replace("episode-", "")
-                                                                    epNum = epStr.toIntOrNull() ?: 1
-                                                                } else {
-                                                                    val epStr = segment.toIntOrNull()
-                                                                    if (epStr != null) epNum = epStr
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                if (slug.isBlank() && uri.getQueryParameter("id") != null) {
-                                                    slug = uri.getQueryParameter("id") ?: ""
-                                                }
-                                                if (slug.isNotBlank()) {
-                                                    var cleanTitle = slug
-                                                        .replace(Regex("-[a-z0-9]{5}$"), "")
-                                                        .replace("-", " ")
-                                                        .split(" ")
-                                                        .joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-                                                    cleanTitle = cleanTitle.trim()
-                                                    val mediaItem = com.example.data.model.MediaItem(
-                                                        id = "anikoto_$slug",
-                                                        title = cleanTitle,
-                                                        type = "series",
-                                                        category = "Anime",
-                                                        imageUrl = "https://anikoto.cz/images/posters/$slug.jpg",
-                                                        description = "Instant anime stream loaded from Master Anime Browser"
-                                                    )
-                                                    viewModel.playMediaItem(mediaItem, season = 1, episode = epNum)
-                                                    viewModel.setSelectedTabIndex(2)
-                                                    android.widget.Toast.makeText(
-                                                        view.context,
-                                                        "🚀 Loading \"$cleanTitle\" Ep $epNum instantly inside native AIR Player...",
-                                                        android.widget.Toast.LENGTH_SHORT
-                                                    ).show()
-                                                    onDismiss()
-                                                    return true
-                                                }
-                                            } catch (e: Exception) {
-                                                android.util.Log.e("MasterAnimeBrowser", "Error intercepting anime click: ${e.message}")
-                                            }
-                                        }
-                                        return false
-                                    }
-
                                     override fun shouldOverrideUrlLoading(
                                         view: WebView?,
                                         request: WebResourceRequest?
                                     ): Boolean {
                                         val reqUrl = request?.url?.toString() ?: return false
-                                        val wv = view ?: return false
-                                        if (handleAnimeUrlInterception(reqUrl, wv)) {
-                                            return true
-                                        }
                                         if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
-                                            view.loadUrl(reqUrl)
+                                            view?.loadUrl(reqUrl)
                                             return true
                                         }
                                         return false
@@ -327,7 +244,6 @@ fun MasterAnimeBrowserScreen(
     url: String = "https://media.hmair.xyz",
     onBack: () -> Unit = {}
 ) {
-    val viewModel: com.example.ui.viewmodel.StreamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var customView by remember { mutableStateOf<android.view.View?>(null) }
     var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
@@ -431,94 +347,13 @@ fun MasterAnimeBrowserScreen(
                             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
 
                             webViewClient = object : WebViewClient() {
-                                private fun handleAnimeUrlInterception(reqUrl: String, view: WebView): Boolean {
-                                    val urlLower = reqUrl.lowercase()
-                                    if (urlLower.contains("/watch/") || urlLower.contains("/watch") || urlLower.contains("/anime/") || urlLower.contains("?s=") || urlLower.contains("&s=")) {
-                                        try {
-                                            val uri = android.net.Uri.parse(reqUrl)
-                                            var slug = ""
-                                            var epNum = 1
-                                            
-                                            val sParam = uri.getQueryParameter("s") ?: ""
-                                            if (sParam.isNotBlank()) {
-                                                val parts = sParam.split("/")
-                                                for (part in parts) {
-                                                    val pLower = part.lowercase()
-                                                    if (pLower.startsWith("ep-") || pLower.startsWith("episode-")) {
-                                                        val epStr = pLower.replace("ep-", "").replace("episode-", "")
-                                                        epNum = epStr.toIntOrNull() ?: 1
-                                                    } else if (pLower != "a" && pLower != "s" && pLower != "watch" && pLower.isNotBlank() && !pLower.all { it.isDigit() }) {
-                                                        slug = part
-                                                    }
-                                                }
-                                            }
-                                            
-                                            if (slug.isBlank()) {
-                                                val pathSegments = uri.pathSegments
-                                                if (pathSegments.isNotEmpty()) {
-                                                    val watchIndex = pathSegments.indexOf("watch")
-                                                    val animeIndex = pathSegments.indexOf("anime")
-                                                    val index = if (watchIndex >= 0) watchIndex else animeIndex
-                                                    if (index >= 0 && index < pathSegments.size - 1) {
-                                                        slug = pathSegments[index + 1]
-                                                        for (i in (index + 2) until pathSegments.size) {
-                                                            val segment = pathSegments[i].lowercase()
-                                                            if (segment.startsWith("ep-") || segment.startsWith("episode-")) {
-                                                                val epStr = segment.replace("ep-", "").replace("episode-", "")
-                                                                epNum = epStr.toIntOrNull() ?: 1
-                                                            } else {
-                                                                val epStr = segment.toIntOrNull()
-                                                                if (epStr != null) epNum = epStr
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            if (slug.isBlank() && uri.getQueryParameter("id") != null) {
-                                                slug = uri.getQueryParameter("id") ?: ""
-                                            }
-                                            if (slug.isNotBlank()) {
-                                                var cleanTitle = slug
-                                                    .replace(Regex("-[a-z0-9]{5}$"), "")
-                                                    .replace("-", " ")
-                                                    .split(" ")
-                                                    .joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-                                                cleanTitle = cleanTitle.trim()
-                                                val mediaItem = com.example.data.model.MediaItem(
-                                                    id = "anikoto_$slug",
-                                                    title = cleanTitle,
-                                                    type = "series",
-                                                    category = "Anime",
-                                                    imageUrl = "https://anikoto.cz/images/posters/$slug.jpg",
-                                                    description = "Instant anime stream loaded from Master Anime Browser"
-                                                )
-                                                viewModel.playMediaItem(mediaItem, season = 1, episode = epNum)
-                                                viewModel.setSelectedTabIndex(2)
-                                                android.widget.Toast.makeText(
-                                                    view.context,
-                                                    "🚀 Loading \"$cleanTitle\" Ep $epNum instantly inside native AIR Player...",
-                                                    android.widget.Toast.LENGTH_SHORT
-                                                ).show()
-                                                return true
-                                            }
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("MasterAnimeBrowser", "Error intercepting anime click: ${e.message}")
-                                        }
-                                    }
-                                    return false
-                                }
-
                                 override fun shouldOverrideUrlLoading(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): Boolean {
                                     val reqUrl = request?.url?.toString() ?: return false
-                                    val wv = view ?: return false
-                                    if (handleAnimeUrlInterception(reqUrl, wv)) {
-                                        return true
-                                    }
                                     if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
-                                        view.loadUrl(reqUrl)
+                                        view?.loadUrl(reqUrl)
                                         return true
                                     }
                                     return false

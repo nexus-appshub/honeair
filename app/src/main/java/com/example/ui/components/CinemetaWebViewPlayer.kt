@@ -497,12 +497,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
                                 var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
                                 var workingSrv: com.example.scraper.AnikotoServer? = null
-                                val preferDub = selectedServer?.type?.lowercase() == "dub" || viewModel.preferredAnimeAudio == "dub"
-                                val srvList = if (preferDub) {
-                                    (dubServers + subServers)
-                                } else {
-                                    (subServers + dubServers)
-                                }.distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
+                                val srvList = (subServers + dubServers).distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
                                 for (srv in srvList) {
                                     if (srv.streamUrl.isNotBlank() && failedAnimeUrls.contains(srv.streamUrl)) continue
                                     val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(srv, watchUrl, currentEpisode)
@@ -1467,12 +1462,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 isScrapingDirectStream = true
                                 scope.launch(Dispatchers.IO) {
                                     val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
-                                    val preferDub = selectedServer?.type?.lowercase() == "dub" || viewModel.preferredAnimeAudio == "dub"
-                                    val candidateServers = if (preferDub) {
-                                        (dubServers + subServers)
-                                    } else {
-                                        (subServers + dubServers)
-                                    }.distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
+                                    val candidateServers = (subServers + dubServers).distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
                                     var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
                                     var workingSrv: com.example.scraper.AnikotoServer? = null
 

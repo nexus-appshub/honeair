@@ -177,15 +177,12 @@ object SmartNetworkBoosterEngine {
                     baseHeaders["sec-ch-ua-mobile"] = "?0"
                     baseHeaders["sec-ch-ua-platform"] = "\"Windows\""
                 }
-                urlLower.contains("kryntal.top") || urlLower.contains("megaplay") || urlLower.contains("anikoto") ||
-                urlLower.contains("iyzonime.top") || urlLower.contains("iron-nexus.site") || urlLower.contains("nekostream") ||
-                urlLower.contains("nekotvcs.top") || urlLower.contains("sbgkcdn.com") || urlLower.contains("kwik.cx") || urlLower.contains("woencalmy.cfd") -> {
-                    if (!baseHeaders.containsKey("Referer")) baseHeaders["Referer"] = "https://anikoto.cz/"
+                urlLower.contains("kryntal.top") || urlLower.contains("megaplay") || urlLower.contains("anikoto") -> {
+                    if (!baseHeaders.containsKey("Referer")) baseHeaders["Referer"] = "https://megaplay.buzz/"
                     if (!baseHeaders.containsKey("Origin")) baseHeaders["Origin"] = "https://megaplay.buzz"
-                    baseHeaders["sec-ch-ua"] = "\"Google Chrome\";v=\"124\", \"Chromium\";v=\"124\", \"Not?A_Brand\";v=\"24\""
+                    baseHeaders["sec-ch-ua"] = "\"Google Chrome\";v=\"120\", \"Chromium\";v=\"120\", \"Not?A_Brand\";v=\"24\""
                     baseHeaders["sec-ch-ua-mobile"] = "?0"
                     baseHeaders["sec-ch-ua-platform"] = "\"Windows\""
-                    baseHeaders["Accept"] = "*/*"
                 }
                 urlLower.contains("netrocdn") || urlLower.contains("moviesapi") || urlLower.contains("vidxyz") -> {
                     baseHeaders["Referer"] = "https://moviesapi.to/"

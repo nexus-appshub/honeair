@@ -1580,9 +1580,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?, episode: Int? = null) {
         _selectedServer.value = server
-        if (server != null) {
-            sharedPrefs.edit().putString("setting_anime_preferred_audio", server.type.lowercase()).apply()
-        }
         val activeItem = _activeMediaItem.value
         val curEp = episode ?: _activeMediaEpisode.value
         if (server != null && activeItem != null) {
@@ -1642,8 +1639,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
                 // Auto-select server while prioritizing direct playable streams (HD-1, HD-2, Vidstream, etc.)
                 val current = _selectedServer.value
-                val preferredAudio = sharedPrefs.getString("setting_anime_preferred_audio", "sub") ?: "sub"
-                val isDub = (current?.type?.lowercase() ?: preferredAudio) == "dub"
+                val isDub = current?.type?.lowercase() == "dub"
                 val targetServers = if (isDub) group.dubServers else group.subServers
                 val candidateList = (targetServers + group.subServers + group.dubServers)
                     .distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
@@ -1973,8 +1969,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     val updateInfoState: StateFlow<UpdateInfo?> = _updateInfoState.asStateFlow()
 
     private val sharedPrefs = application.getSharedPreferences("homeairtv_user_prefs", Context.MODE_PRIVATE)
-    val preferredAnimeAudio: String
-        get() = sharedPrefs.getString("setting_anime_preferred_audio", "sub") ?: "sub"
     private var firebaseAuth: FirebaseAuth? = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
     private val firebaseAnalytics: FirebaseAnalytics? = try { FirebaseAnalytics.getInstance(application) } catch (e: Throwable) { null }
 
@@ -2920,7 +2914,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isAnimeLoading.value = true
             try {
-                val watchUrl = if (item.streamUrl != null && item.streamUrl!!.isNotBlank() && (item.streamUrl!!.contains("anikoto.cz") || item.streamUrl!!.contains("media.hmair.xyz"))) {
+                val watchUrl = if (item.streamUrl != null && item.streamUrl!!.isNotBlank() && item.streamUrl!!.contains("anikoto.cz")) {
                     item.streamUrl!!
                 } else {
                     val resolved = com.example.scraper.AnikotoScraper.resolveAnikotoWatchUrl(item.title)

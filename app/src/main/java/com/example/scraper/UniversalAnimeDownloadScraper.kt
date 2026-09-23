@@ -7,7 +7,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
-import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -23,19 +22,18 @@ import javax.crypto.spec.SecretKeySpec
 data class DirectResolvedStream(
     val directUrl: String,
     val referer: String,
-    val tracks: List<SubtitleTrack> = emptyList(),
+    val tracks: List<AnikotoSubtitle> = emptyList(),
     val serverName: String = "Direct",
     val audioType: String = "SUB",
     val quality: String = "1080p",
-    val isDirectFile: Boolean = false,
-    val estimatedSize: String = "~180 MB"
+    val isDirectFile: Boolean = false
 )
 
 object UniversalAnimeDownloadScraper {
     private const val TAG = "UniversalAnimeDownloadScraper"
     private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-    val httpClient: OkHttpClient by lazy {
+    private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
@@ -75,7 +73,7 @@ object UniversalAnimeDownloadScraper {
                     }
                 }
 
-                val urlPattern = Pattern.compile("""https?://[^\s"'<>]+\.(?:m3u8|mp4|ts|png\?mod=\d+|webm)[^\s"'<>\\]*""", Pattern.CASE_INSENSITIVE)
+                val urlPattern = Pattern.compile("""https?://[^\s"'<>]+\.(?:m3u8|mp4|ts)[^\s"'<>\\]*""", Pattern.CASE_INSENSITIVE)
                 val urlMatcher = urlPattern.matcher(unp)
                 while (urlMatcher.find()) {
                     foundUrls.add(urlMatcher.group().replace("\\", ""))
@@ -155,7 +153,7 @@ object UniversalAnimeDownloadScraper {
     }
 
     // --------------------------------------------------------------------------------------------------------
-    // 4. DIRECT MEDIA STREAM RESOLVER FOR EMBEDS (MegaCloud, Megaplay, Vidstream, RabbitStream, etc.)
+    // 4. DIRECT MEDIA STREAM RESOLVER FOR EMBEDS (MegaCloud, Megaplay, VidPlay, RabbitStream, etc.)
     // --------------------------------------------------------------------------------------------------------
     suspend fun resolveDirectMediaStream(
         embedUrl: String,
@@ -172,22 +170,6 @@ object UniversalAnimeDownloadScraper {
         }
 
         try {
-            // Check if URL is Megaplay trustWatch handshake
-            if (clean.contains("megaplay.buzz")) {
-                val idMatch = Regex("""id=([^&]+)""").find(clean)?.groupValues?.get(1)
-                    ?: clean.substringAfterLast("/").substringBefore("?")
-                val res = AnikotoScraper.performMegaplayHandshake(idMatch)
-                if (res != null && res.streamUrl.isNotBlank()) {
-                    return@withContext DirectResolvedStream(
-                        directUrl = res.streamUrl,
-                        referer = res.referer,
-                        tracks = res.subtitles,
-                        serverName = "Megaplay Stream",
-                        isDirectFile = res.streamUrl.contains(".mp4")
-                    )
-                }
-            }
-
             val uri = URL(clean)
             val host = uri.host.lowercase()
 
@@ -216,32 +198,33 @@ object UniversalAnimeDownloadScraper {
                             val arr = data.optJSONArray("sources")
                             if (arr != null && arr.length() > 0) directFile = arr.getJSONObject(0).optString("file", "")
                         }
-
-                        if (directFile.isBlank() && data.has("encrypted") && data.optBoolean("encrypted")) {
-                            val encData = data.optString("sources", "")
-                            val dec = decryptMegaplayEnc(encData)
-                            if (dec != null) directFile = dec
+                        if (directFile.isBlank() && data.has("enc")) {
+                            directFile = decryptMegaplayEnc(data.optString("enc", "")) ?: ""
                         }
 
                         if (directFile.isNotBlank()) {
-                            val subTracks = mutableListOf<SubtitleTrack>()
+                            directFile = directFile.replace("fetch.nexabloom.top/anime/", "megap.norami.top/")
+                                .replace("fetch.nexabloom.top", "megap.norami.top")
+                                .replace("megap.akirax.buzz/", "megap.norami.top/")
+                                .replace("ncdn.imgnex.top/anime/", "megap.norami.top/")
+
+                            val tracksList = mutableListOf<AnikotoSubtitle>()
                             val tracksArr = data.optJSONArray("tracks")
                             if (tracksArr != null) {
-                                for (t in 0 until tracksArr.length()) {
-                                    val tObj = tracksArr.getJSONObject(t)
-                                    val f = tObj.optString("file")
-                                    val l = tObj.optString("label", "English")
-                                    val d = tObj.optBoolean("default", false)
-                                    if (f.isNotBlank() && f.contains(".vtt")) {
-                                        subTracks.add(SubtitleTrack(url = f, lang = l.take(2).lowercase(), label = l, default = d))
+                                for (tIdx in 0 until tracksArr.length()) {
+                                    val tObj = tracksArr.getJSONObject(tIdx)
+                                    val tFile = tObj.optString("file", "")
+                                    val tLang = tObj.optString("label", tObj.optString("lang", "en"))
+                                    if (tFile.isNotBlank()) {
+                                        tracksList.add(AnikotoSubtitle(url = tFile, lang = tLang, label = tLang, default = tObj.optBoolean("default", false)))
                                     }
                                 }
                             }
 
                             return@withContext DirectResolvedStream(
                                 directUrl = directFile,
-                                referer = clean,
-                                tracks = if (subTracks.isNotEmpty()) subTracks else AnikotoScraper.buildFullSubtitleTracks("178939"),
+                                referer = "${uri.protocol}://${uri.host}/",
+                                tracks = tracksList,
                                 serverName = "MegaCloud HD",
                                 isDirectFile = directFile.contains(".mp4")
                             )
@@ -250,38 +233,40 @@ object UniversalAnimeDownloadScraper {
                 }
             }
 
-            // Fallback: fetch HTML and search for m3u8 / mp4 or packed script
-            val req = Request.Builder()
+            // Fetch page HTML
+            val pageReq = Request.Builder()
                 .url(clean)
                 .header("User-Agent", DEFAULT_UA)
                 .header("Referer", fallbackReferer)
-                .header("Accept", "*/*")
                 .build()
 
-            val resp = httpClient.newCall(req).execute()
-            if (resp.isSuccessful) {
-                val html = resp.body?.string() ?: ""
+            val pageResp = httpClient.newCall(pageReq).execute()
+            if (!pageResp.isSuccessful) {
+                return@withContext DirectResolvedStream(directUrl = clean, referer = fallbackReferer)
+            }
+            val html = pageResp.body?.string() ?: ""
+
+            // Scan Dean Edwards packed scripts
+            if (html.contains("eval(function(p,a,c,k,e,")) {
+                val unpacked = unpackPackedScript(html)
+                if (unpacked.isNotEmpty()) {
+                    return@withContext DirectResolvedStream(directUrl = unpacked[0], referer = clean)
+                }
+            }
+
+            // Unescape Hex
+            if (html.contains("\\x68\\x74\\x74\\x70")) {
                 val unescaped = unescapeHex(html)
-
-                val m3u8Regex = Regex("""https?://[^\s"'<>]+\.(?:m3u8|mp4|ts|png\?mod=\d+)[^\s"'<>\\]*""")
-                val found = m3u8Regex.findAll(unescaped).map { it.value }.firstOrNull()
-
-                if (found != null) {
-                    return@withContext DirectResolvedStream(
-                        directUrl = found,
-                        referer = clean,
-                        isDirectFile = found.contains(".mp4")
-                    )
+                val hexM3u8 = Regex("""https?://[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>\\]*""").find(unescaped)
+                if (hexM3u8 != null) {
+                    return@withContext DirectResolvedStream(directUrl = hexM3u8.value, referer = clean)
                 }
+            }
 
-                val unpackedUrls = unpackPackedScript(html)
-                if (unpackedUrls.isNotEmpty()) {
-                    return@withContext DirectResolvedStream(
-                        directUrl = unpackedUrls.first(),
-                        referer = clean,
-                        isDirectFile = unpackedUrls.first().contains(".mp4")
-                    )
-                }
+            // Direct regex match for master.m3u8 or mp4
+            val directMatch = Regex("""https?://[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>\\]*""").find(html)
+            if (directMatch != null) {
+                return@withContext DirectResolvedStream(directUrl = directMatch.value, referer = clean)
             }
 
         } catch (e: Exception) {
@@ -292,120 +277,8 @@ object UniversalAnimeDownloadScraper {
     }
 
     // --------------------------------------------------------------------------------------------------------
-    // 5. REVERSE-ENGINEERED KIWI / PAHE / KWIK DIRECT DOWNLOAD RESOLVER
-    // Pipeline: https://pahe.nekostream.site/ -> https://woencalmy.cfd/ -> https://kwik.cx/f/{id}
-    // Extracts direct .mp4 video stream with anti-debugger loop bypass
+    // 5. NEKOSTREAM / MAPPER KIWI HIGH-SPEED DOWNLOAD RESOLVER
     // --------------------------------------------------------------------------------------------------------
-    suspend fun resolveKwikDirectDownload(portalOrKwikUrl: String): DirectResolvedStream? = withContext(Dispatchers.IO) {
-        try {
-            var currentUrl = portalOrKwikUrl.trim()
-            Log.d(TAG, "Resolving Kwik Direct Download for: $currentUrl")
-
-            // 1. Traverse intermediate redirects (Pahe -> Woencalmy -> Kwik)
-            var targetKwikUrl = currentUrl
-            if (currentUrl.contains("pahe.nekostream.site") || currentUrl.contains("woencalmy.cfd")) {
-                val stepReq = Request.Builder()
-                    .url(currentUrl)
-                    .header("User-Agent", DEFAULT_UA)
-                    .header("Referer", "https://anikoto.cz/")
-                    .build()
-
-                httpClient.newCall(stepReq).execute().use { resp ->
-                    val respUrl = resp.request.url.toString()
-                    val body = resp.body?.string() ?: ""
-                    if (respUrl.contains("kwik.cx")) {
-                        targetKwikUrl = respUrl
-                    } else {
-                        val kwikMatch = Regex("""https?://kwik\.cx/f/[a-zA-Z0-9]+""").find(body)
-                        if (kwikMatch != null) {
-                            targetKwikUrl = kwikMatch.value
-                        }
-                    }
-                }
-            }
-
-            if (!targetKwikUrl.contains("kwik.cx")) {
-                targetKwikUrl = currentUrl
-            }
-
-            // 2. Fetch Kwik.cx page and extract direct download form / script
-            val kwikReq = Request.Builder()
-                .url(targetKwikUrl)
-                .header("User-Agent", DEFAULT_UA)
-                .header("Referer", "https://pahe.nekostream.site/")
-                .build()
-
-            var directMp4Url = ""
-            var token = ""
-            var actionUrl = ""
-            var resolution = "720p"
-            var fileSize = "~180 MB"
-
-            httpClient.newCall(kwikReq).execute().use { kwikResp ->
-                val html = kwikResp.body?.string() ?: ""
-
-                val titleMatch = Regex("""(?i)AnimePahe_.*?_(\d+p)_""").find(html)
-                if (titleMatch != null) {
-                    resolution = titleMatch.groupValues[1]
-                }
-
-                val sizeMatch = Regex("""\((\d+(?:\.\d+)?\s*(?:MB|GB))\)""").find(html)
-                if (sizeMatch != null) {
-                    fileSize = sizeMatch.groupValues[1]
-                }
-
-                val formActionMatch = Regex("""<form\s+action=["']([^"']+)["']\s+method=["']POST["']""").find(html)
-                if (formActionMatch != null) {
-                    actionUrl = formActionMatch.groupValues[1]
-                }
-
-                val tokenMatch = Regex("""<input\s+type=["']hidden["']\s+name=["']_token["']\s+value=["']([^"']+)["']""").find(html)
-                if (tokenMatch != null) {
-                    token = tokenMatch.groupValues[1]
-                }
-
-                val unpacked = unpackPackedScript(html)
-                for (u in unpacked) {
-                    if (u.contains(".mp4")) {
-                        directMp4Url = u
-                        break
-                    }
-                }
-
-                if (directMp4Url.isBlank() && actionUrl.isNotBlank() && token.isNotBlank()) {
-                    val postReq = Request.Builder()
-                        .url(actionUrl)
-                        .post(FormBody.Builder().add("_token", token).build())
-                        .header("User-Agent", DEFAULT_UA)
-                        .header("Referer", targetKwikUrl)
-                        .build()
-
-                    httpClient.newCall(postReq).execute().use { postResp ->
-                        val loc = postResp.header("Location")
-                        if (!loc.isNullOrBlank()) {
-                            directMp4Url = loc
-                        }
-                    }
-                }
-            }
-
-            if (directMp4Url.isNotBlank()) {
-                Log.d(TAG, "Successfully extracted Kwik Direct MP4 ($resolution - $fileSize): $directMp4Url")
-                return@withContext DirectResolvedStream(
-                    directUrl = directMp4Url,
-                    referer = targetKwikUrl,
-                    serverName = "Kiwi Direct ($resolution)",
-                    quality = resolution,
-                    isDirectFile = true,
-                    estimatedSize = fileSize
-                )
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "resolveKwikDirectDownload error: ${e.message}")
-        }
-        null
-    }
-
     suspend fun fetchKiwiDownloadMirrors(malId: String, slug: String, timestamp: String): List<DirectResolvedStream> = withContext(Dispatchers.IO) {
         val mirrors = mutableListOf<DirectResolvedStream>()
         if (malId.isBlank() || slug.isBlank() || timestamp.isBlank()) return@withContext mirrors
@@ -433,20 +306,15 @@ object UniversalAnimeDownloadScraper {
                         val quality = keys.next()
                         val dlUrl = downloadObj.optString(quality, "")
                         if (dlUrl.isNotBlank() && dlUrl.startsWith("http")) {
-                            val kwikDirect = resolveKwikDirectDownload(dlUrl)
-                            if (kwikDirect != null) {
-                                mirrors.add(kwikDirect)
-                            } else {
-                                mirrors.add(
-                                    DirectResolvedStream(
-                                        directUrl = dlUrl,
-                                        referer = "https://anikoto.cz/",
-                                        serverName = "Kiwi Direct ($quality)",
-                                        quality = quality,
-                                        isDirectFile = true
-                                    )
+                            mirrors.add(
+                                DirectResolvedStream(
+                                    directUrl = dlUrl,
+                                    referer = "https://anikoto.cz/",
+                                    serverName = "Kiwi Direct ($quality)",
+                                    quality = quality,
+                                    isDirectFile = true
                                 )
-                            }
+                            )
                         }
                     }
                 }
@@ -458,7 +326,7 @@ object UniversalAnimeDownloadScraper {
     }
 
     // --------------------------------------------------------------------------------------------------------
-    // 6. NATIVE IN-APP ANIME STREAM EXTRACTION ENGINE
+    // 6. NATIVE IN-APP ANIME STREAM EXTRACTION ENGINE (Direct Embed Decryption & Playback)
     // --------------------------------------------------------------------------------------------------------
     suspend fun extractNativeAnimeStream(
         title: String,
@@ -467,59 +335,65 @@ object UniversalAnimeDownloadScraper {
         preferDub: Boolean = false
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
+            Log.d(TAG, "Starting Native Anime Stream Scraping for: $title (S$season Ep $episode, Dub: $preferDub)")
             val serverGroup = AnikotoScraper.fetchAvailableServers(title = title, season = season, episode = episode)
-            val preferredList = if (preferDub) serverGroup.dubServers.ifEmpty { serverGroup.subServers } else serverGroup.subServers.ifEmpty { serverGroup.dubServers }
+            val targetServers = if (preferDub && serverGroup.dubServers.isNotEmpty()) {
+                serverGroup.dubServers
+            } else if (serverGroup.subServers.isNotEmpty()) {
+                serverGroup.subServers
+            } else {
+                serverGroup.subServers + serverGroup.dubServers
+            }
 
-            for (srv in preferredList) {
-                if (srv.streamUrl.isNotBlank() && srv.streamUrl.contains(".m3u8")) {
-                    return@withContext ScrapedStreamResult(
-                        streamUrl = srv.streamUrl,
-                        headers = mapOf(
-                            "User-Agent" to DEFAULT_UA,
-                            "Referer" to srv.referer.ifBlank { "https://anikoto.cz/" },
-                            "Origin" to "https://anikoto.cz"
-                        ),
-                        referer = srv.referer.ifBlank { "https://anikoto.cz/" },
-                        subtitles = srv.tracks
-                    )
-                }
-
-                val embedUrl = AnikotoScraper.extractServerEmbedUrl(srv.linkId, serverGroup.watchUrl.ifBlank { "https://anikoto.cz/" })
-                if (!embedUrl.isNullOrBlank()) {
-                    val resolved = resolveDirectMediaStream(embedUrl, serverGroup.watchUrl)
-                    if (resolved.directUrl.isNotBlank()) {
-                        return@withContext ScrapedStreamResult(
-                            streamUrl = resolved.directUrl,
-                            headers = mapOf(
-                                "User-Agent" to DEFAULT_UA,
-                                "Referer" to resolved.referer,
-                                "Origin" to "https://anikoto.cz"
-                            ),
-                            referer = resolved.referer,
-                            subtitles = resolved.tracks
-                        )
+            val jobs = targetServers.take(5).map { srv ->
+                async {
+                    try {
+                        if (srv.streamUrl.isNotBlank() && (srv.streamUrl.endsWith(".m3u8") || srv.streamUrl.endsWith(".mp4") || srv.streamUrl.contains("/m3u8"))) {
+                            return@async ScrapedStreamResult(
+                                streamUrl = srv.streamUrl,
+                                headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to srv.referer.ifBlank { "https://anikoto.cz/" }),
+                                referer = srv.referer.ifBlank { "https://anikoto.cz/" },
+                                subtitles = emptyList()
+                            )
+                        }
+                        val embedUrl = AnikotoScraper.extractServerEmbedUrl(srv.linkId, serverGroup.watchUrl.ifBlank { "https://anikoto.cz/" })
+                        if (!embedUrl.isNullOrBlank()) {
+                            val resolved = resolveDirectMediaStream(embedUrl, serverGroup.watchUrl.ifBlank { "https://anikoto.cz/" })
+                            if (resolved.directUrl.isNotBlank()) {
+                                return@async ScrapedStreamResult(
+                                    streamUrl = resolved.directUrl,
+                                    headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to resolved.referer),
+                                    referer = resolved.referer,
+                                    subtitles = resolved.tracks.map {
+                                        SubtitleTrack(
+                                            url = it.url,
+                                            lang = it.lang,
+                                            label = it.label,
+                                            default = it.default
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Native server resolution failed for ${srv.name}: ${e.message}")
                     }
+                    null
                 }
             }
 
-            // Fallback direct title resolution
-            val fallbackStream = AnikotoScraper.getStreamByTitle(title, season, episode, preferDub)
-            if (fallbackStream != null && fallbackStream.streamUrl.isNotBlank()) {
-                return@withContext ScrapedStreamResult(
-                    streamUrl = fallbackStream.streamUrl,
-                    headers = fallbackStream.headers,
-                    referer = fallbackStream.referer,
-                    subtitles = fallbackStream.subtitles
-                )
+            val results = jobs.awaitAll().filterNotNull()
+            if (results.isNotEmpty()) {
+                return@withContext results.first()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "extractNativeAnimeStream error: ${e.message}")
+            Log.e(TAG, "extractNativeAnimeStream error: ${e.message}", e)
         }
         null
     }
 
     // --------------------------------------------------------------------------------------------------------
-    // 7. COMPREHENSIVE ALL-QUALITY DOWNLOAD RESOLVER
+    // 7. MULTI-SOURCE DOWNLOAD RESOLVER (Aggregates Anikoto, Kiwi, Aniwatch, MegaCloud, VidSrc, Vidnest, Vidrock)
     // --------------------------------------------------------------------------------------------------------
     suspend fun resolveAllDownloadableOptions(
         title: String,
@@ -527,61 +401,132 @@ object UniversalAnimeDownloadScraper {
         episode: Int = 1,
         preferDub: Boolean = false
     ): List<AnimeQualityOption> = withContext(Dispatchers.IO) {
-        val allQualities = mutableListOf<AnimeQualityOption>()
+        val options = mutableListOf<AnimeQualityOption>()
+        Log.d(TAG, "Initiating universal anime download scraping for: '$title' (S${season}E${episode}, Dub: $preferDub)")
 
-        // 1. Check Kiwi direct downloads first
-        try {
-            val serverGroup = AnikotoScraper.fetchAvailableServers(title = title, season = season, episode = episode)
-            val kiwiServers = (serverGroup.subServers + serverGroup.dubServers).filter { it.name.contains("Kiwi", ignoreCase = true) || it.linkId.contains("pahe") }
-
-            for (ks in kiwiServers) {
-                val direct = resolveKwikDirectDownload(ks.linkId)
-                if (direct != null && direct.directUrl.isNotBlank()) {
-                    allQualities.add(
-                        AnimeQualityOption(
-                            resolution = direct.quality,
-                            title = "${direct.quality} Ultra Direct",
-                            badge = "DIRECT MP4",
-                            estimatedSize = direct.estimatedSize,
-                            streamUrl = direct.directUrl,
-                            headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to direct.referer),
-                            referer = direct.referer,
-                            serverName = "Kiwi Direct",
-                            subtitles = ks.tracks.map { AnikotoSubtitle(it.url, it.lang, it.label, it.default) }
-                        )
-                    )
-                }
-            }
+        // 1. Fetch available servers from Anikoto API
+        val serverGroup = try {
+            AnikotoScraper.fetchAvailableServers(title = title, season = season, episode = episode)
         } catch (e: Exception) {
-            Log.w(TAG, "Kiwi download extraction error: ${e.message}")
+            null
         }
 
-        // 2. Stream playlist HLS variant parsing
-        if (allQualities.isEmpty()) {
-            val streamResult = extractNativeAnimeStream(title, season, episode, preferDub)
-            if (streamResult != null && streamResult.streamUrl.isNotBlank()) {
-                val parsedQualities = parseHlsMasterQualities(streamResult)
-                if (parsedQualities.isNotEmpty()) {
-                    allQualities.addAll(parsedQualities)
+        val targetServers = if (preferDub && serverGroup?.dubServers?.isNotEmpty() == true) {
+            serverGroup.dubServers
+        } else if (serverGroup?.subServers?.isNotEmpty() == true) {
+            serverGroup.subServers
+        } else {
+            emptyList()
+        }
+
+        val resolvedDirectStreams = mutableListOf<DirectResolvedStream>()
+
+        // Concurrently resolve embed servers
+        val serverJobs = targetServers.take(4).map { srv ->
+            async {
+                try {
+                    val embedUrl = AnikotoScraper.extractServerEmbedUrl(srv.linkId, serverGroup?.watchUrl ?: "https://anikoto.cz/")
+                    if (!embedUrl.isNullOrBlank()) {
+                        val resolved = resolveDirectMediaStream(embedUrl, serverGroup?.watchUrl ?: "https://anikoto.cz/")
+                        if (resolved.directUrl.isNotBlank()) {
+                            return@async resolved.copy(serverName = srv.name, audioType = srv.type.uppercase())
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Server resolution failure for ${srv.name}: ${e.message}")
+                }
+                null
+            }
+        }
+
+        val resolvedServers = serverJobs.awaitAll().filterNotNull()
+        resolvedDirectStreams.addAll(resolvedServers)
+
+        // 2. Extract variants / qualities from resolved streams
+        for (st in resolvedDirectStreams) {
+            if (st.isDirectFile || st.directUrl.endsWith(".mp4")) {
+                // Direct high-speed MP4 download file
+                options.add(
+                    AnimeQualityOption(
+                        resolution = if (st.quality.isNotBlank()) st.quality else "1080p",
+                        title = "${if (st.quality.isNotBlank()) st.quality else "1080p"} MP4 Direct",
+                        badge = "DIRECT FILE (ULTRA FAST)",
+                        estimatedSize = "~240 MB",
+                        streamUrl = st.directUrl,
+                        headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to st.referer),
+                        referer = st.referer,
+                        serverName = st.serverName,
+                        subtitles = st.tracks
+                    )
+                )
+            } else if (st.directUrl.contains(".m3u8")) {
+                val streamRes = AnikotoStreamResult(
+                    streamUrl = st.directUrl,
+                    headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to st.referer),
+                    referer = st.referer,
+                    subtitles = st.tracks,
+                    serverName = st.serverName
+                )
+                val parsed = parseHlsMasterQualities(streamRes)
+                if (parsed.isNotEmpty()) {
+                    options.addAll(parsed)
                 } else {
-                    allQualities.add(
+                    options.add(
                         AnimeQualityOption(
                             resolution = "720p",
                             title = "720p HD",
-                            badge = "RECOMMENDED",
+                            badge = "HIGH SPEED STREAM",
                             estimatedSize = "~180 MB",
-                            streamUrl = streamResult.streamUrl,
-                            headers = streamResult.headers,
-                            referer = streamResult.referer,
-                            serverName = "Fast Stream",
-                            subtitles = streamResult.subtitles.map { AnikotoSubtitle(it.url, it.lang, it.label, it.default) }
+                            streamUrl = st.directUrl,
+                            headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to st.referer),
+                            referer = st.referer,
+                            serverName = st.serverName,
+                            subtitles = st.tracks
                         )
                     )
                 }
             }
         }
 
-        allQualities.distinctBy { it.resolution }.sortedByDescending {
+        // 3. Fallback to standard Anikoto getStreamByTitle if still empty
+        if (options.isEmpty()) {
+            try {
+                val fallbackStream = AnikotoScraper.getStreamByTitle(title, season, episode, preferDub)
+                if (fallbackStream != null && fallbackStream.streamUrl.isNotBlank()) {
+                    val streamRes = AnikotoStreamResult(
+                        streamUrl = fallbackStream.streamUrl,
+                        headers = fallbackStream.headers,
+                        referer = fallbackStream.referer,
+                        subtitles = fallbackStream.subtitles.map {
+                            AnikotoSubtitle(it.url, it.lang, it.label, it.default)
+                        }
+                    )
+                    val parsed = parseHlsMasterQualities(streamRes)
+                    if (parsed.isNotEmpty()) {
+                        options.addAll(parsed)
+                    } else {
+                        options.add(
+                            AnimeQualityOption(
+                                resolution = "720p",
+                                title = "720p HD",
+                                badge = "STANDARD HD",
+                                estimatedSize = "~180 MB",
+                                streamUrl = fallbackStream.streamUrl,
+                                headers = fallbackStream.headers,
+                                referer = fallbackStream.referer,
+                                serverName = "Direct Stream",
+                                subtitles = streamRes.subtitles
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Fallback scraping error: ${e.message}")
+            }
+        }
+
+        // Sort qualities from highest resolution to lowest (1080p -> 720p -> 480p -> 360p)
+        options.distinctBy { it.resolution }.sortedByDescending {
             when {
                 it.resolution.contains("1080") -> 1080
                 it.resolution.contains("720") -> 720
@@ -592,25 +537,37 @@ object UniversalAnimeDownloadScraper {
         }
     }
 
-    private fun parseHlsMasterQualities(streamRes: ScrapedStreamResult): List<AnimeQualityOption> {
+    private fun parseHlsMasterQualities(streamRes: AnikotoStreamResult): List<AnimeQualityOption> {
         val masterUrl = streamRes.streamUrl
         val options = mutableListOf<AnimeQualityOption>()
         try {
-            val req = Request.Builder().url(masterUrl)
-            req.header("User-Agent", streamRes.headers["User-Agent"] ?: DEFAULT_UA)
-            req.header("Referer", streamRes.referer)
-            req.header("Origin", "https://anikoto.cz")
-            val resp = httpClient.newCall(req.build()).execute()
-            val content = resp.body?.string() ?: ""
-            if (content.isBlank()) return emptyList()
+            val req = Request.Builder()
+                .url(masterUrl)
+                .header("User-Agent", streamRes.headers["User-Agent"] ?: DEFAULT_UA)
+                .header("Referer", streamRes.referer)
+                .build()
+
+            val resp = httpClient.newCall(req).execute()
+            if (!resp.isSuccessful) return emptyList()
+            val content = resp.body?.string() ?: return emptyList()
 
             val lines = content.lines().map { it.trim() }.filter { it.isNotEmpty() }
             var currentRes = ""
+            var currentBw = 0L
 
             for (line in lines) {
                 if (line.startsWith("#EXT-X-STREAM-INF")) {
-                    val res = Regex("RESOLUTION=(\\d+x\\d+)").find(line)?.groupValues?.get(1) ?: "1280x720"
+                    val bw = Regex("BANDWIDTH=(\\d+)").find(line)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                    val res = Regex("RESOLUTION=(\\d+x\\d+)").find(line)?.groupValues?.get(1) ?: run {
+                        when {
+                            bw > 3500000 -> "1080p"
+                            bw > 1800000 -> "720p"
+                            bw > 800000 -> "480p"
+                            else -> "360p"
+                        }
+                    }
                     currentRes = res
+                    currentBw = bw
                 } else if (!line.startsWith("#") && currentRes.isNotEmpty()) {
                     val variantUrl = resolveAbsoluteUrl(masterUrl, line)
                     val label = when {
@@ -627,21 +584,29 @@ object UniversalAnimeDownloadScraper {
                         "360p" -> "~50 MB"
                         else -> "~150 MB"
                     }
+                    val badge = when (label) {
+                        "1080p" -> "BEST QUALITY"
+                        "720p" -> "RECOMMENDED"
+                        "480p" -> "DATA SAVER"
+                        "360p" -> "SMALLEST SIZE"
+                        else -> "STANDARD"
+                    }
 
                     options.add(
                         AnimeQualityOption(
                             resolution = label,
                             title = "$label HD",
-                            badge = if (label == "1080p") "BEST QUALITY" else "RECOMMENDED",
+                            badge = badge,
                             estimatedSize = estSize,
                             streamUrl = variantUrl,
                             headers = streamRes.headers,
                             referer = streamRes.referer,
-                            serverName = "Fast Stream",
-                            subtitles = streamRes.subtitles.map { AnikotoSubtitle(it.url, it.lang, it.label, it.default) }
+                            serverName = streamRes.serverName.ifEmpty { "Fast Server" },
+                            subtitles = streamRes.subtitles
                         )
                     )
                     currentRes = ""
+                    currentBw = 0L
                 }
             }
         } catch (e: Exception) {
@@ -651,13 +616,15 @@ object UniversalAnimeDownloadScraper {
     }
 
     private fun resolveAbsoluteUrl(baseUrl: String, relativeUrl: String): String {
-        return if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
+        return try {
+            if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
+                relativeUrl
+            } else {
+                val base = URL(baseUrl)
+                URL(base, relativeUrl).toString()
+            }
+        } catch (e: Exception) {
             relativeUrl
-        } else {
-            val baseWithoutQuery = baseUrl.substringBefore("?")
-            val lastSlash = baseWithoutQuery.lastIndexOf('/')
-            val parentPath = if (lastSlash > 0) baseWithoutQuery.substring(0, lastSlash + 1) else "$baseWithoutQuery/"
-            parentPath + relativeUrl
         }
     }
 }
