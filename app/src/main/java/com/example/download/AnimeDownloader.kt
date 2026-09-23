@@ -390,6 +390,7 @@ object AnimeDownloader {
         val effectiveHeaders = (customHeaders ?: emptyMap()).toMutableMap()
         if (!effectiveHeaders.containsKey("User-Agent")) effectiveHeaders["User-Agent"] = DEFAULT_UA
         if (!effectiveHeaders.containsKey("Accept")) effectiveHeaders["Accept"] = "*/*"
+        if (!effectiveHeaders.containsKey("Origin")) effectiveHeaders["Origin"] = "https://megaplay.buzz"
         val effectiveReferer = referer ?: "https://anikoto.cz/"
 
         // 1. Fetch Playlist Content

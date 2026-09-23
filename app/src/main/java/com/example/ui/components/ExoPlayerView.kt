@@ -318,6 +318,10 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
         )
 
         val trackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
+            setParameters(
+                buildUponParameters()
+                    .setMaxAudioChannelCount(2) // Restricts playback to Stereo (2 channels) to downmix Dolby/AC-3/5.1 Surround sound perfectly for mobile speakers
+            )
             if (batterySaverActive) {
                 setParameters(
                     buildUponParameters()
@@ -327,8 +331,13 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
             }
         }
 
+        val bandwidthMeter = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(context)
+            .setInitialBitrateEstimate(300_000L) // Crucial for low-latency areas: starts with 300kbps estimate to avoid HD buffer stalling on start
+            .build()
+
         val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setBandwidthMeter(bandwidthMeter)
             .setLoadControl(loadControl)
             .setTrackSelector(trackSelector)
             .setWakeMode(C.WAKE_MODE_NETWORK) // Keep network sockets alive
@@ -454,10 +463,10 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                 val state = player.playbackState
                 val isCurrentlyPlaying = player.isPlaying
 
-                // 1. Recover from actual stuck buffering (>8s) without interrupting healthy playing state
+                // 1. Recover from actual stuck buffering (>6s) without interrupting healthy playing state
                 if (state == Player.STATE_BUFFERING && !isCurrentlyPlaying) {
                     bufferingSeconds += 2
-                    if (bufferingSeconds >= 8) {
+                    if (bufferingSeconds >= 6) { // Reduced from 8s to 6s for lightning-fast detection
                         bufferingSeconds = 0
                         watchdogRestartCount++
                         
@@ -476,7 +485,7 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                             }
                         }
                         
-                        if (alternates.isNotEmpty() && watchdogRestartCount >= 2) {
+                        if (alternates.isNotEmpty() && watchdogRestartCount >= 1) { // Reduced from 2 to 1 to failover immediately on the first stall
                             val nextIndex = currentAlternateIndex % alternates.size
                             val targetUrl = alternates[nextIndex]
                             currentAlternateIndex++
