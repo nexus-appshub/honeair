@@ -139,7 +139,10 @@ object SmartNetworkBoosterEngine {
         val baseHeaders = mutableMapOf(
             "User-Agent" to selectedUserAgent,
             "Accept" to "*/*",
-            "Connection" to "keep-alive"
+            "Connection" to "keep-alive",
+            "Cache-Control" to "no-cache, no-store, must-revalidate",
+            "Pragma" to "no-cache",
+            "Expires" to "0"
         )
 
         if (isToffeeStream) {
@@ -165,7 +168,7 @@ object SmartNetworkBoosterEngine {
         // Ensure critical anti-hotlinking headers (Referer, Origin, Sec-CH-UA) are present based on target URL
         if (url != null && !isToffeeStream) {
             when {
-                urlLower.contains("media.hmair.xyz") -> {
+                urlLower.contains("media.hmair.xyz") && !urlLower.contains("/api/stream") -> {
                     if (!baseHeaders.containsKey("Referer") || baseHeaders["Referer"]?.contains("toffee") == true) {
                         baseHeaders["Referer"] = "https://anikoto.cz/"
                     }
@@ -257,19 +260,19 @@ object SmartNetworkBoosterEngine {
         val backBufferDuration: Int
 
         when (bufferIndex) {
-            0 -> { // Ultra Low Latency (2s) - Fast start
-                minBuffer = if (isLiveStream) 8000 else 15000
-                maxBuffer = if (isLiveStream) 25000 else 40000
-                bufferForPlayback = if (isLiveStream) 800 else 1200
-                bufferAfterRebuffer = if (isLiveStream) 1500 else 2500
-                backBufferDuration = 10000
+            0 -> { // Ultra Low Latency (2s) - Fast start with anti-starvation cushion
+                minBuffer = if (isLiveStream) 12000 else 15000
+                maxBuffer = if (isLiveStream) 30000 else 40000
+                bufferForPlayback = if (isLiveStream) 1800 else 1200 // Increased from 800 to 1800ms to eliminate instant starvation
+                bufferAfterRebuffer = if (isLiveStream) 2500 else 2500 // Increased from 1500 to 2500ms
+                backBufferDuration = 15000
             }
             1 -> { // Medium (Recommended for VOD Movies & Live TV - Super Smooth)
-                minBuffer = if (isLiveStream) 15000 else 25000
-                maxBuffer = if (isLiveStream) 50000 else 60000
-                bufferForPlayback = if (isLiveStream) 800 else 1000  // 1s start cushion for instant playback
-                bufferAfterRebuffer = if (isLiveStream) 1500 else 2000 // 2s after rebuffer
-                backBufferDuration = 20000
+                minBuffer = if (isLiveStream) 20000 else 25000
+                maxBuffer = if (isLiveStream) 60000 else 60000
+                bufferForPlayback = if (isLiveStream) 2200 else 1000  // Increased from 800 to 2200ms to avoid the 30s-40s stutter cycle
+                bufferAfterRebuffer = if (isLiveStream) 3000 else 2000 // Increased from 1500 to 3000ms
+                backBufferDuration = 25000
             }
             2 -> { // Large (10 sec) - Anti-Freeze & Heavy Traffic Stability
                 minBuffer = if (isLiveStream) 35000 else 50000

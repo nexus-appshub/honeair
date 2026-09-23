@@ -106,6 +106,41 @@ fun FluidIconButton(
     }
 }
 
+private val BuiltInFailSafeStreams = mapOf(
+    "disney" to listOf(
+        "https://fl5.moveonjoy.com/DISNEY/tracks-v1a1/mono.ts.m3u8",
+        "http://fl3.moveonjoy.com/DISNEY_CHANNEL/index.m3u8",
+        "http://103.182.170.32:8888/play/a01y",
+        "http://66.102.120.18:8000/play/a078/index.m3u8"
+    ),
+    "geographic" to listOf(
+        "http://66.102.120.18:8000/play/a01f/index.m3u8",
+        "http://149.71.34.166:8002/play/a013/index.m3u8",
+        "http://stream02.vnet.am/NatGeoWild/tracks-v1a2/mono.m3u8",
+        "http://40.160.24.53/NAT_GEO/index.m3u8"
+    ),
+    "nat geo" to listOf(
+        "http://66.102.120.18:8000/play/a01f/index.m3u8",
+        "http://149.71.34.166:8002/play/a013/index.m3u8",
+        "http://stream02.vnet.am/NatGeoWild/tracks-v1a2/mono.m3u8",
+        "http://40.160.24.53/NAT_GEO/index.m3u8"
+    ),
+    "discovery" to listOf(
+        "http://66.102.120.18:8000/play/a01e/index.m3u8",
+        "http://149.71.34.166:8002/play/a011/index.m3u8"
+    ),
+    "hbo" to listOf(
+        "http://66.102.120.18:8000/play/a076/index.m3u8",
+        "http://149.71.34.166:8002/play/a01c/index.m3u8"
+    ),
+    "star sports" to listOf(
+        "http://103.204.145.242:8000/starsports1/index.m3u8"
+    ),
+    "sony sports" to listOf(
+        "http://103.204.145.242:8000/sonysports1/index.m3u8"
+    )
+)
+
 @OptIn(UnstableApi::class)
 @Composable
 fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit = {}, 
@@ -132,6 +167,7 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
     val scope = rememberCoroutineScope()
     var currentUrl by remember(streamUrl) { mutableStateOf(streamUrl) }
     var retryCount by remember(currentUrl) { mutableIntStateOf(0) }
+    var currentAlternateIndex by remember(streamUrl) { mutableIntStateOf(0) }
 
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var isPlaying by remember(currentUrl) { mutableStateOf(externalIsPlaying) }
@@ -314,11 +350,11 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                 // Configure resilient Live Target Offset only for live streams
                 if (isLiveStream) {
                     val liveConfig = MediaItem.LiveConfiguration.Builder()
-                        .setMaxPlaybackSpeed(1.03f)
-                        .setMinPlaybackSpeed(0.97f)
-                        .setTargetOffsetMs(6000)
+                        .setMaxPlaybackSpeed(1.15f) // Automatically speeds up up to 15% to catch up to live edge if delayed by jitter
+                        .setMinPlaybackSpeed(0.85f) // Automatically slows down to 85% to recover buffer smoothly rather than freezing
+                        .setTargetOffsetMs(6000)    // 6 seconds targets a robust buffer cushion
                         .setMinOffsetMs(2000)
-                        .setMaxOffsetMs(30000)
+                        .setMaxOffsetMs(40000)
                         .build()
                     mediaItemBuilder.setLiveConfiguration(liveConfig)
                 }
@@ -370,7 +406,30 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                         player.prepare()
                         player.play()
                     } catch (_: Exception) {
-                        if (!fallbackUrl.isNullOrBlank() && fallbackUrl != currentUrl && retryCount > 5) {
+                        // Dynamic multi-source alternate fallback recovery on error
+                        val alternates = mutableListOf<String>()
+                        if (!fallbackUrl.isNullOrBlank() && fallbackUrl != streamUrl) {
+                            alternates.add(fallbackUrl)
+                        }
+                        val nameLower = channelName.lowercase()
+                        for ((key, urls) in BuiltInFailSafeStreams) {
+                            if (nameLower.contains(key)) {
+                                urls.forEach { u ->
+                                    if (u != streamUrl && !alternates.contains(u)) {
+                                        alternates.add(u)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (alternates.isNotEmpty() && retryCount > 2) {
+                            val nextIndex = currentAlternateIndex % alternates.size
+                            currentUrl = alternates[nextIndex]
+                            currentAlternateIndex++
+                            retryCount = 0
+                            gestureNotification = "Error Recovery: Backup Server Active"
+                            Toast.makeText(context, "Recovering stream using Backup Server...", Toast.LENGTH_SHORT).show()
+                        } else if (!fallbackUrl.isNullOrBlank() && fallbackUrl != currentUrl && retryCount > 5) {
                             currentUrl = fallbackUrl
                             retryCount = 0
                             gestureNotification = "Switched to Backup Stream"
@@ -387,6 +446,7 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
     LaunchedEffect(exoPlayer, currentUrl, isPlaying) {
         val player = exoPlayer ?: return@LaunchedEffect
         var bufferingSeconds = 0
+        var watchdogRestartCount = 0
 
         while (true) {
             delay(2000)
@@ -394,16 +454,45 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
                 val state = player.playbackState
                 val isCurrentlyPlaying = player.isPlaying
 
-                // 1. Recover from actual stuck buffering (>14s) without interrupting healthy playing state
+                // 1. Recover from actual stuck buffering (>8s) without interrupting healthy playing state
                 if (state == Player.STATE_BUFFERING && !isCurrentlyPlaying) {
                     bufferingSeconds += 2
-                    if (bufferingSeconds >= 14) {
+                    if (bufferingSeconds >= 8) {
                         bufferingSeconds = 0
-                        try {
-                            player.seekToDefaultPosition()
-                            player.prepare()
-                            player.play()
-                        } catch (_: Exception) {}
+                        watchdogRestartCount++
+                        
+                        val alternates = mutableListOf<String>()
+                        if (!fallbackUrl.isNullOrBlank() && fallbackUrl != streamUrl) {
+                            alternates.add(fallbackUrl)
+                        }
+                        val nameLower = channelName.lowercase()
+                        for ((key, urls) in BuiltInFailSafeStreams) {
+                            if (nameLower.contains(key)) {
+                                urls.forEach { u ->
+                                    if (u != streamUrl && !alternates.contains(u)) {
+                                        alternates.add(u)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (alternates.isNotEmpty() && watchdogRestartCount >= 2) {
+                            val nextIndex = currentAlternateIndex % alternates.size
+                            val targetUrl = alternates[nextIndex]
+                            currentAlternateIndex++
+                            watchdogRestartCount = 0
+                            withContext(Dispatchers.Main) {
+                                currentUrl = targetUrl
+                                gestureNotification = "Auto-switched to Live Backup Server"
+                                Toast.makeText(context, "Buffering too long, switching to Backup Server...", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            try {
+                                player.seekToDefaultPosition()
+                                player.prepare()
+                                player.play()
+                            } catch (_: Exception) {}
+                        }
                     }
                 } else {
                     bufferingSeconds = 0

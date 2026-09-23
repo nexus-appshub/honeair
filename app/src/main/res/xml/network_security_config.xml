@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Base security config: Enforce HTTPS for standard app network requests -->
-    <base-config cleartextTrafficPermitted="false">
+    <!-- Base security config: Permit HTTP for arbitrary IPTV media streams -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
