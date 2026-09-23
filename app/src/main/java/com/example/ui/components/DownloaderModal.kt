@@ -1177,7 +1177,7 @@ fun DownloaderModal(
 
     if (activeQualityForChoice != null) {
         val quality = activeQualityForChoice!!
-        val directUrl = com.example.download.AnimeDownloader.getDirectDownloadUrl(quality.streamUrl, quality.resolution)
+        val directUrl: String? = com.example.download.AnimeDownloader.getDirectDownloadUrl(quality.streamUrl, quality.resolution)
         val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
 
         AlertDialog(
@@ -1270,7 +1270,7 @@ fun DownloaderModal(
                         OutlinedButton(
                             onClick = {
                                 try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(directUrl))
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(directUrl.toString()))
                                     context.startActivity(intent)
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "Cannot open browser: ${e.message}", Toast.LENGTH_SHORT).show()
