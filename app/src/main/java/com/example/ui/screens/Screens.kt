@@ -8168,15 +8168,6 @@ fun SettingsScreen(
 
             item {
                 SecretSettingRow(
-                    title = "Cinestream",
-                    subtitle = "Stream movies & cinema collection",
-                    icon = Icons.Default.Movie,
-                    onClick = { showCineStreamBrowser = true }
-                )
-            }
-
-            item {
-                SecretSettingRow(
                     title = "Watch History",
                     subtitle = "View recently watched movies, shows & live TV",
                     icon = Icons.Outlined.History,
