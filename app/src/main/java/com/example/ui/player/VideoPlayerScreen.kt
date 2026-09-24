@@ -123,25 +123,10 @@ fun VideoPlayerScreen(
                 url = url
             )
 
-            val mediaItemBuilder = MediaItem.Builder()
+            val mediaItem = MediaItem.Builder()
                 .setUri(Uri.parse(url))
                 .setMimeType(if (url.contains(".m3u8", ignoreCase = true) || url.contains(".txt", ignoreCase = true)) MimeTypes.APPLICATION_M3U8 else MimeTypes.APPLICATION_MP4)
-
-            val nativeSubtitles = streamResult?.subtitles.orEmpty()
-            if (nativeSubtitles.isNotEmpty()) {
-                mediaItemBuilder.setSubtitleConfigurations(
-                    nativeSubtitles.map { subtitle ->
-                        MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle.url))
-                            .setMimeType(MimeTypes.TEXT_VTT)
-                            .setLanguage(subtitle.lang)
-                            .setLabel(subtitle.label)
-                            .setSelectionFlags(if (subtitle.default) C.SELECTION_FLAG_DEFAULT else 0)
-                            .build()
-                    }
-                )
-            }
-
-            val mediaItem = mediaItemBuilder.build()
+                .build()
 
             val mediaSource = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpFactory).createMediaSource(mediaItem)
             exoPlayer.setMediaSource(mediaSource)

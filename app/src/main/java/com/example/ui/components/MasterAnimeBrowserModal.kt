@@ -219,8 +219,7 @@ fun MasterAnimeBrowserModal(
                                                         imageUrl = "https://anikoto.cz/images/posters/$slug.jpg",
                                                         description = "Instant anime stream loaded from Master Anime Browser"
                                                     )
-                                                    val extractedSeason = viewModel.extractSeasonFromTitle(cleanTitle) ?: 1
-                                                    viewModel.playMediaItem(mediaItem, season = extractedSeason, episode = epNum)
+                                                    viewModel.playMediaItem(mediaItem, season = 1, episode = epNum)
                                                     viewModel.setSelectedTabIndex(2)
                                                     android.widget.Toast.makeText(
                                                         view.context,
@@ -493,8 +492,7 @@ fun MasterAnimeBrowserScreen(
                                                     imageUrl = "https://anikoto.cz/images/posters/$slug.jpg",
                                                     description = "Instant anime stream loaded from Master Anime Browser"
                                                 )
-                                                val extractedSeason = viewModel.extractSeasonFromTitle(cleanTitle) ?: 1
-                                                viewModel.playMediaItem(mediaItem, season = extractedSeason, episode = epNum)
+                                                viewModel.playMediaItem(mediaItem, season = 1, episode = epNum)
                                                 viewModel.setSelectedTabIndex(2)
                                                 android.widget.Toast.makeText(
                                                     view.context,

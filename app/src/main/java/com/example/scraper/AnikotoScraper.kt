@@ -1214,8 +1214,7 @@ object AnikotoScraper {
     suspend fun extractStreamFromServer(
         server: AnikotoServer,
         watchUrl: String = "",
-        episode: Int = 1,
-        season: Int = 1
+        episode: Int = 1
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
             val isDub = server.type.lowercase() == "dub"
@@ -1281,7 +1280,7 @@ object AnikotoScraper {
             // Fallback 4: Query direct stream by title
             val fallbackDirect = getStreamByTitle(
                 title = if (cleanKw.isNotBlank()) cleanKw else watchUrl,
-                season = season,
+                season = 1,
                 episode = effectiveEp,
                 preferDub = isDub
             )
@@ -1329,8 +1328,7 @@ object AnikotoScraper {
         title: String,
         season: Int = 1,
         episode: Int = 1,
-        preferDub: Boolean = false,
-        requestedServerKey: String? = null
+        preferDub: Boolean = false
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
             val effectiveEp = if (episode <= 0) 1 else episode

@@ -98,7 +98,7 @@ data class AppControlConfig(
     val fancodeCode: String = "",
     val fancodeBannerUrl: String = "",
     val isFanCodeLocked: Boolean = false,
-    val isFanCodeSplashLocked: Boolean = true,
+    val isFanCodeSplashLocked: Boolean = false,
     val isFanCodeTabLocked: Boolean = false,
     val isFanCodeGetCodeEnabled: Boolean = true,
     val fancodeTelegramUrl: String = "",
@@ -114,7 +114,7 @@ data class AppControlConfig(
     val premiumCategories: List<String> = emptyList(),
     val premiumMediaIds: List<String> = emptyList(),
     val premiumEmails: List<String> = emptyList(),
-    val freeEpisodeLimit: Int = 1,
+    val freeEpisodeLimit: Int = 1000,
     val isPremiumRequired: Boolean = false,
     val premiumPaywallTitle: String = "VIP Premium Subscription Required",
     val premiumPaywallMessage: String = "This content or tab is reserved for Premium Subscribers. Please purchase a subscription to continue.",
@@ -317,67 +317,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private val _appControlConfig = MutableStateFlow<AppControlConfig?>(
-        if (application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE).contains("isAppSuspended")) {
-            val p = application.getSharedPreferences("app_remote_control", Context.MODE_PRIVATE)
-            val cachedLiveTvIds = p.getString("premiumLiveTvIds", "")?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
-            val cachedLiveTvCats = p.getString("premiumLiveTvCategories", "")?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
-            val cachedLaunchAdJson = p.getString("launch_ad_overlay_json", "") ?: ""
-            val cachedLaunchAd: LaunchAdOverlayConfig? = if (cachedLaunchAdJson.isNotBlank()) {
-                try {
-                    val j = org.json.JSONObject(cachedLaunchAdJson)
-                    LaunchAdOverlayConfig(
-                        enabled = j.optBoolean("enabled", false),
-                        mediaType = j.optString("mediaType", "auto"),
-                        mediaUrl = j.optString("mediaUrl", ""),
-                        targetUrl = j.optString("targetUrl", ""),
-                        title = j.optString("title", ""),
-                        description = j.optString("description", ""),
-                        buttonText = j.optString("buttonText", "Learn More"),
-                        skipDurationSeconds = j.optInt("skipDurationSeconds", 5),
-                        displayFrequency = j.optString("displayFrequency", "ONCE_AFTER_INSTALL"),
-                        adId = j.optString("adId", "")
-                    )
-                } catch (e: Throwable) { null }
-            } else null
-
-            AppControlConfig(
-                isAppSuspended = p.getBoolean("isAppSuspended", false),
-                suspensionTitle = p.getString("suspensionTitle", "App Under Maintenance") ?: "App Under Maintenance",
-                suspensionMessage = p.getString("suspensionMessage", "App access is temporarily suspended by administrator. Please check back later.") ?: "App access is temporarily suspended by administrator. Please check back later.",
-                launchAdOverlay = cachedLaunchAd,
-                isSportsTabLocked = p.getBoolean("isSportsTabLocked", false),
-                sportsTabStatusText = p.getString("sportsTabStatusText", "Live") ?: "Live",
-                sportsLockReason = p.getString("sportsLockReason", "Sports hub is currently locked by administrator.") ?: "Sports hub is currently locked by administrator.",
-                fancodeCode = p.getString("fancodeCode", "") ?: "",
-                fancodeBannerUrl = p.getString("fancodeBannerUrl", "") ?: "",
-                isFanCodeLocked = p.getBoolean("isFanCodeLocked", false),
-                isFanCodeSplashLocked = p.getBoolean("isFanCodeSplashLocked", true),
-                isFanCodeTabLocked = p.getBoolean("isFanCodeTabLocked", false),
-                isFanCodeGetCodeEnabled = p.getBoolean("isFanCodeGetCodeEnabled", true),
-                fancodeTelegramUrl = p.getString("fancodeTelegramUrl", "") ?: "",
-                fancodeWebUrl = p.getString("fancodeWebUrl", "") ?: "",
-                fancodeOverlayBuyUrl = p.getString("fancodeOverlayBuyUrl", "") ?: "",
-                fancodeOverlayBuyText = p.getString("fancodeOverlayBuyText", "") ?: "",
-                fancodeHeroTitle = p.getString("fancodeHeroTitle", "PREMIUM") ?: "PREMIUM",
-                fancodeHeroSubtitle = p.getString("fancodeHeroSubtitle", "More Sports. More Action.") ?: "More Sports. More Action.",
-                fancodeHeroDescription = p.getString("fancodeHeroDescription", "Get access to live sports, exclusive content, and premium features with FanCode.") ?: "Get access to live sports, exclusive content, and premium features with FanCode.",
-                fancodeHeroSlides = p.getString("fancodeHeroSlides", "")?.split("|")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList(),
-                fancodeHideBannerText = p.getBoolean("fancodeHideBannerText", false),
-                redeemCode = p.getString("redeemCode", "") ?: "",
-                redeemValidityHours = p.getInt("redeemValidityHours", 24),
-                redeemExpiryTimestamp = p.getLong("redeemExpiryTimestamp", 0L),
-                fancodeValidityHours = p.getInt("fancodeValidityHours", 168),
-                isLiveTvLockEnabled = p.getBoolean("isLiveTvLockEnabled", false),
-                premiumLiveTvIds = cachedLiveTvIds,
-                premiumLiveTvCategories = cachedLiveTvCats,
-                isPreSplashAdEnabled = p.getBoolean("isPreSplashAdEnabled", false),
-                preSplashMediaType = p.getString("preSplashMediaType", "image") ?: "image",
-                preSplashMediaUrl = p.getString("preSplashMediaUrl", "") ?: "",
-                preSplashSkipSeconds = p.getInt("preSplashSkipSeconds", 5),
-                preSplashCtaText = p.getString("preSplashCtaText", "Learn More") ?: "Learn More",
-                preSplashCtaUrl = p.getString("preSplashCtaUrl", "") ?: ""
-            )
-        } else null
+        AppControlConfig(
+            isAppSuspended = false,
+            isSportsTabLocked = false,
+            isFanCodeLocked = false,
+            isFanCodeSplashLocked = false,
+            isFanCodeTabLocked = false,
+            isAdsEnabled = false,
+            launchAdOverlay = null,
+            notice = null,
+            lockedTabs = emptyList(),
+            premiumCategories = emptyList(),
+            premiumMediaIds = emptyList(),
+            isLiveTvLockEnabled = false,
+            isPreSplashAdEnabled = false
+        )
     )
     val appControlConfig: StateFlow<AppControlConfig?> = _appControlConfig.asStateFlow()
 
@@ -1292,23 +1246,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     _appControlConfig.value = AppControlConfig(launchAdOverlay = config)
                 }
 
-                // Sync to Firebase Realtime Database
-                try {
-                    val client = okhttp3.OkHttpClient.Builder()
-                        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                        .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                        .build()
-                    val mediaType = "application/json; charset=utf-8".toMediaType()
-                    val body = adObj.toString().toRequestBody(mediaType)
-                    val patchReq = okhttp3.Request.Builder()
-                        .url("https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl/launchAdOverlay.json")
-                        .put(body)
-                        .build()
-                    client.newCall(patchReq).execute().close()
-                } catch (e: Exception) {
-                    Log.w("StreamViewModel", "Firebase launchAd sync deferred: ${e.message}")
-                }
-
                 withContext(Dispatchers.Main) {
                     onResult?.invoke(true, "Launch Ad saved and updated successfully!")
                 }
@@ -1323,680 +1260,34 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     fun fetchAppControlConfig(onComplete: (() -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
-            _isCheckingSuspension.value = true
-            val client = okhttp3.OkHttpClient.Builder()
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
-
-            val controlUrls = listOf(
-                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/appControl.json",
-                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/configs/globalConfig.json",
-                "https://homeairtv-server.onrender.com/api/appControl"
-            )
-            var configLoaded = false
-            for (urlStr in controlUrls) {
-                if (configLoaded) break
-                try {
-                    val req = okhttp3.Request.Builder()
-                        .url(urlStr)
-                        .header("Accept", "application/json")
-                        .build()
-                    client.newCall(req).execute().use { response ->
-                        val body = response.body?.string()
-                        if (response.isSuccessful && body != null && body.trim() != "null" && body.trim().startsWith("{")) {
-                            val json = org.json.JSONObject(body)
-                            val isSuspended = json.optBoolean("isAppSuspended", false)
-                            val suspensionTitle = json.optString("suspensionTitle", "App Under Maintenance")
-                            val suspensionMessage = json.optString("suspensionMessage", "App access is temporarily suspended by administrator. Please check back later.")
-                            val isSportsLocked = json.optBoolean("isSportsTabLocked", false)
-                            val sportsStatus = json.optString("sportsTabStatusText", "Live")
-                            val sportsReason = json.optString("sportsLockReason", "Sports hub is currently locked by administrator.")
-                            val fancodeCode = json.optString("fancodeCode", "")
-                                .ifBlank { json.optString("fanCode", "") }
-                                .ifBlank { json.optString("fancode", "") }
-                                .ifBlank { json.optString("fan_code", "") }
-                            val fancodeBannerUrl = json.optString("fancodeBannerUrl", "")
-                                .ifBlank { json.optString("fancode_banner_url", "") }
-                                .ifBlank { json.optString("fancodeBanner", "") }
-                                .ifBlank { json.optString("fancode_banner", "") }
-                            val isFanCodeLocked = json.optBoolean("isFanCodeLocked", false) || json.optBoolean("isFanCodeRequired", false)
-                            val isFanCodeSplashLocked = if (json.has("isFanCodeSplashLocked")) {
-                                json.optBoolean("isFanCodeSplashLocked", true)
-                            } else if (json.has("fancodeSplashLock")) {
-                                json.optBoolean("fancodeSplashLock", true)
-                            } else if (json.has("is_fancode_splash_locked")) {
-                                json.optBoolean("is_fancode_splash_locked", true)
-                            } else true
-
-                            val isFanCodeTabLocked = if (json.has("isFanCodeTabLocked")) {
-                                json.optBoolean("isFanCodeTabLocked", false)
-                            } else if (json.has("fancodeTabLock")) {
-                                json.optBoolean("fancodeTabLock", false)
-                            } else if (json.has("is_fancode_tab_locked")) {
-                                json.optBoolean("is_fancode_tab_locked", false)
-                            } else false
-                            val isFanCodeGetCodeEnabled = if (json.has("isFanCodeGetCodeEnabled")) {
-                                json.optBoolean("isFanCodeGetCodeEnabled", true)
-                            } else if (json.has("fancodeGetCodeEnabled")) {
-                                json.optBoolean("fancodeGetCodeEnabled", true)
-                            } else if (json.has("isGetCodeEnabled")) {
-                                json.optBoolean("isGetCodeEnabled", true)
-                            } else if (json.has("getCodeEnabled")) {
-                                json.optBoolean("getCodeEnabled", true)
-                            } else if (json.has("fancode_get_code_enabled")) {
-                                json.optBoolean("fancode_get_code_enabled", true)
-                            } else true
-
-                            val fancodeTelegramUrl = json.optString("fancodeTelegramUrl", "")
-                                .ifBlank { json.optString("fancodeTelegramLink", "") }
-                                .ifBlank { json.optString("fancode_telegram_url", "") }
-                                .ifBlank { json.optString("fancodeTelegram", "") }
-                                .ifBlank { json.optString("telegramUrl", "") }
-                                .ifBlank { json.optString("telegramLink", "") }
-                                .ifBlank { json.optString("fancode_telegram", "") }
-
-                            val fancodeWebUrl = json.optString("fancodeWebUrl", "")
-                                .ifBlank { json.optString("fancodeWebLink", "") }
-                                .ifBlank { json.optString("fancode_web_url", "") }
-                                .ifBlank { json.optString("fancodeWeb", "") }
-                                .ifBlank { json.optString("webUrl", "") }
-                                .ifBlank { json.optString("websiteUrl", "") }
-                                .ifBlank { json.optString("fancode_web", "") }
-
-                            val fancodeOverlayBuyUrl = json.optString("fancodeOverlayBuyUrl", "")
-                                .ifBlank { json.optString("fancode_overlay_buy_url", "") }
-                                .ifBlank { json.optString("fancodeOverlayBuyLink", "") }
-                                .ifBlank { json.optString("fancodeBuyUrl", "") }
-                                .ifBlank { json.optString("fancode_buy_url", "") }
-
-                            val fancodeOverlayBuyText = json.optString("fancodeOverlayBuyText", "")
-                                .ifBlank { json.optString("fancode_overlay_buy_text", "") }
-                                .ifBlank { json.optString("fancodeBuyText", "") }
-
-                            val fancodeHeroTitle = json.optString("fancodeHeroTitle", "")
-                                .ifBlank { json.optString("fancode_hero_title", "") }
-                                .ifBlank { json.optString("fancodeBannerTitle", "") }
-                                .ifBlank { json.optString("fancode_banner_title", "") }
-                                .ifBlank { "PREMIUM" }
-
-                            val fancodeHeroSubtitle = json.optString("fancodeHeroSubtitle", "")
-                                .ifBlank { json.optString("fancode_hero_subtitle", "") }
-                                .ifBlank { json.optString("fancodeBannerSubtitle", "") }
-                                .ifBlank { "More Sports. More Action." }
-
-                            val fancodeHeroDescription = json.optString("fancodeHeroDescription", "")
-                                .ifBlank { json.optString("fancode_hero_description", "") }
-                                .ifBlank { json.optString("fancodeBannerDesc", "") }
-                                .ifBlank { "Get access to live sports, exclusive content, and premium features with FanCode." }
-
-                            val fancodeHideBannerText = json.optBoolean("fancodeHideBannerText", false) ||
-                                json.optBoolean("fancode_hide_banner_text", false) ||
-                                json.optBoolean("fancodeHideHeroText", false) ||
-                                json.optBoolean("fancode_hide_hero_text", false)
-
-                            val fancodeHeroSlides = mutableListOf<String>()
-                            val rawHeroSlides = json.opt("fancodeHeroSlides")
-                                ?: json.opt("fancode_hero_slides")
-                                ?: json.opt("fancodeTickerSlides")
-                                ?: json.opt("fancode_ticker_slides")
-                            when (rawHeroSlides) {
-                                is org.json.JSONArray -> {
-                                    for (i in 0 until rawHeroSlides.length()) {
-                                        val item = rawHeroSlides.optString(i, "").trim()
-                                        if (item.isNotBlank() && item != "null") fancodeHeroSlides.add(item)
-                                    }
-                                }
-                                is String -> {
-                                    if (rawHeroSlides.isNotBlank() && rawHeroSlides != "null") {
-                                        rawHeroSlides.split(",", "|", ";", "\n").forEach {
-                                            val s = it.trim()
-                                            if (s.isNotBlank()) fancodeHeroSlides.add(s)
-                                        }
-                                    }
-                                }
-                            }
-
-                            val isLiveTvLockEnabled = json.optBoolean("isLiveTvLockEnabled", false)
-
-                            val lockedTabs = mutableListOf<String>()
-                            val jsonLockedTabs = json.optJSONArray("lockedTabs")
-                            if (jsonLockedTabs != null) {
-                                for (i in 0 until jsonLockedTabs.length()) {
-                                    lockedTabs.add(jsonLockedTabs.optString(i))
-                                }
-                            }
-
-                            val premiumCategories = mutableListOf<String>()
-                            val jsonPremCats = json.optJSONArray("premiumCategories")
-                            if (jsonPremCats != null) {
-                                for (i in 0 until jsonPremCats.length()) {
-                                    premiumCategories.add(jsonPremCats.optString(i))
-                                }
-                            }
-
-                            val premiumMediaIds = mutableListOf<String>()
-                            val jsonPremIds = json.optJSONArray("premiumMediaIds")
-                            if (jsonPremIds != null) {
-                                for (i in 0 until jsonPremIds.length()) {
-                                    premiumMediaIds.add(jsonPremIds.optString(i))
-                                }
-                            }
-
-                            val premiumEmails = mutableListOf<String>()
-                            val jsonPremEmails = json.optJSONArray("premiumEmails")
-                            if (jsonPremEmails != null) {
-                                for (i in 0 until jsonPremEmails.length()) {
-                                    premiumEmails.add(jsonPremEmails.optString(i).trim().lowercase())
-                                }
-                            }
-
-                            val freeEpisodeLimit = json.optInt("freeEpisodeLimit", 1)
-                            val isPremiumRequired = json.optBoolean("isPremiumRequired", false)
-                            val premiumPaywallTitle = json.optString("premiumPaywallTitle", "VIP Premium Subscription Required")
-                            val premiumPaywallMessage = json.optString("premiumPaywallMessage", "This content or episode is reserved for Premium Subscribers. Please purchase a subscription to continue.")
-                            val premiumPaywallButtonText = json.optString("premiumPaywallButtonText", "Buy Subscription Now")
-                            val premiumPaywallButtonUrl = json.optString("premiumPaywallButtonUrl", "")
-
-                            val isAdsEnabled = json.optBoolean("isAdsEnabled", false)
-                            val adBannerUrl = json.optString("adBannerUrl", "")
-                            val adClickUrl = json.optString("adClickUrl", "")
-                            val adTitle = json.optString("adTitle", "Sponsored: Upgrade to VIP to Remove Ads")
-
-                            val isPreSplashAdEnabled = json.optBoolean("isPreSplashAdEnabled", false) ||
-                                json.optBoolean("preSplashAdEnabled", false) ||
-                                json.optBoolean("is_pre_splash_ad_enabled", false)
-                            val preSplashMediaType = json.optString("preSplashMediaType", "image")
-                                .ifBlank { json.optString("pre_splash_media_type", "image") }
-                            val preSplashMediaUrl = json.optString("preSplashMediaUrl", "")
-                                .ifBlank { json.optString("pre_splash_media_url", "") }
-                            var preSplashSkipSeconds = if (json.has("preSplashSkipSeconds")) {
-                                json.optInt("preSplashSkipSeconds", 5)
-                            } else if (json.has("pre_splash_skip_seconds")) {
-                                json.optInt("pre_splash_skip_seconds", 5)
-                            } else 5
-                            if (preSplashSkipSeconds <= 0) {
-                                preSplashSkipSeconds = 5
-                            }
-                            val preSplashCtaText = json.optString("preSplashCtaText", "Learn More")
-                                .ifBlank { json.optString("pre_splash_cta_text", "Learn More") }
-                            val preSplashCtaUrl = json.optString("preSplashCtaUrl", "")
-                                .ifBlank { json.optString("pre_splash_cta_url", "") }
-
-                            val redeemCode = json.optString("redeemCode", "").ifBlank { json.optString("redeem_code", "") }
-                            val redeemValidityHours = json.optInt("redeemValidityHours", 24)
-                            val redeemExpiryTimestamp = json.optLong("redeemExpiryTimestamp", 0L)
-                            val fancodeValidityHours = json.optInt("fancodeValidityHours", json.optInt("fancode_validity_hours", 168))
-
-                            val premiumLiveTvIds = mutableListOf<String>()
-                            val rawLiveTvIds = json.opt("premiumLiveTvIds")
-                                ?: json.opt("premium_live_tv_ids")
-                                ?: json.opt("lockedLiveTvChannels")
-                                ?: json.opt("premiumLiveTv")
-                            when (rawLiveTvIds) {
-                                is org.json.JSONArray -> {
-                                    for (i in 0 until rawLiveTvIds.length()) {
-                                        val item = rawLiveTvIds.optString(i, "").trim()
-                                        if (item.isNotBlank() && item != "null") premiumLiveTvIds.add(item)
-                                    }
-                                }
-                                is org.json.JSONObject -> {
-                                    val keys = rawLiveTvIds.keys()
-                                    while (keys.hasNext()) {
-                                        val key = keys.next()
-                                        val value = rawLiveTvIds.opt(key)
-                                        if (value is Boolean && value) {
-                                            premiumLiveTvIds.add(key.trim())
-                                        } else if (value is String && value.isNotBlank() && value != "null") {
-                                            premiumLiveTvIds.add(value.trim())
-                                        } else {
-                                            premiumLiveTvIds.add(key.trim())
-                                        }
-                                    }
-                                }
-                                is String -> {
-                                    if (rawLiveTvIds.isNotBlank() && rawLiveTvIds != "null") {
-                                        rawLiveTvIds.split(",", ";", "\n").forEach {
-                                            val s = it.trim()
-                                            if (s.isNotBlank()) premiumLiveTvIds.add(s)
-                                        }
-                                    }
-                                }
-                            }
-
-                            val premiumLiveTvCategories = mutableListOf<String>()
-                            val rawLiveTvCats = json.opt("premiumLiveTvCategories")
-                                ?: json.opt("premium_live_tv_categories")
-                                ?: json.opt("lockedLiveTvCategories")
-                            when (rawLiveTvCats) {
-                                is org.json.JSONArray -> {
-                                    for (i in 0 until rawLiveTvCats.length()) {
-                                        val item = rawLiveTvCats.optString(i, "").trim()
-                                        if (item.isNotBlank() && item != "null") premiumLiveTvCategories.add(item)
-                                    }
-                                }
-                                is org.json.JSONObject -> {
-                                    val keys = rawLiveTvCats.keys()
-                                    while (keys.hasNext()) {
-                                        val key = keys.next()
-                                        val value = rawLiveTvCats.opt(key)
-                                        if (value is Boolean && value) {
-                                            premiumLiveTvCategories.add(key.trim())
-                                        } else if (value is String && value.isNotBlank() && value != "null") {
-                                            premiumLiveTvCategories.add(value.trim())
-                                        } else {
-                                            premiumLiveTvCategories.add(key.trim())
-                                        }
-                                    }
-                                }
-                                is String -> {
-                                    if (rawLiveTvCats.isNotBlank() && rawLiveTvCats != "null") {
-                                        rawLiveTvCats.split(",", ";", "\n").forEach {
-                                            val s = it.trim()
-                                            if (s.isNotBlank()) premiumLiveTvCategories.add(s)
-                                        }
-                                    }
-                                }
-                            }
-
-                            val noticeRaw = json.opt("notice")
-                                ?: json.opt("specialAnnouncement")
-                                ?: json.opt("special_announcement")
-                                ?: json.opt("announcement")
-                                ?: json.opt("modalNotice")
-                                ?: json.opt("adminNotice")
-
-                            val parsedNotice: AppNotice? = when (noticeRaw) {
-                                is org.json.JSONObject -> {
-                                    val isEnabled = noticeRaw.optBoolean("enabled", true)
-                                    if (isEnabled) {
-                                        val title = noticeRaw.optString("title", "").ifBlank {
-                                            noticeRaw.optString("header", "Special Announcement")
-                                        }
-                                        val message = noticeRaw.optString("message", "").ifBlank {
-                                            noticeRaw.optString("text", "").ifBlank {
-                                                noticeRaw.optString("body", "").ifBlank {
-                                                    noticeRaw.optString("description", "")
-                                                }
-                                            }
-                                        }
-                                        val rawImg = noticeRaw.optString("imageUrl", "").ifBlank {
-                                            noticeRaw.optString("image", "").ifBlank {
-                                                noticeRaw.optString("bannerUrl", "")
-                                            }
-                                        }
-                                        val imgUrl = if (rawImg.isBlank() || rawImg == "null") null else rawImg
-
-                                        val rawBtnText = noticeRaw.optString("buttonText", "").ifBlank {
-                                            noticeRaw.optString("btnText", "").ifBlank {
-                                                noticeRaw.optString("actionText", "")
-                                            }
-                                        }
-                                        val btnText = if (rawBtnText.isBlank() || rawBtnText == "null") null else rawBtnText
-
-                                        val rawBtnUrl = noticeRaw.optString("buttonUrl", "").ifBlank {
-                                            noticeRaw.optString("btnUrl", "").ifBlank {
-                                                noticeRaw.optString("actionUrl", "").ifBlank {
-                                                    noticeRaw.optString("link", "")
-                                                }
-                                            }
-                                        }
-                                        val btnUrl = if (rawBtnUrl.isBlank() || rawBtnUrl == "null") null else rawBtnUrl
-                                        val isDismissible = noticeRaw.optBoolean("isDismissible", noticeRaw.optBoolean("dismissible", true))
-
-                                        if (title.isNotBlank() || message.isNotBlank()) {
-                                            AppNotice(
-                                                title = title,
-                                                message = message,
-                                                imageUrl = imgUrl,
-                                                buttonText = btnText,
-                                                buttonUrl = btnUrl,
-                                                isDismissible = isDismissible
-                                            )
-                                        } else null
-                                    } else null
-                                }
-                                is String -> {
-                                    if (noticeRaw.isNotBlank() && noticeRaw != "null") {
-                                        AppNotice(
-                                            title = "Special Announcement",
-                                            message = noticeRaw,
-                                            imageUrl = null,
-                                            buttonText = null,
-                                            buttonUrl = null,
-                                            isDismissible = true
-                                        )
-                                    } else null
-                                }
-                                else -> null
-                            }
-
-                            val noticeKey = if (parsedNotice != null) "${parsedNotice.title}_${parsedNotice.message}" else ""
-                            val isDismissed = noticeKey.isNotBlank() && noticeKey == lastDismissedNoticeKey
-                            val notice = if (isDismissed) null else parsedNotice
-
-                            // Parse Launch Ad Overlay
-                            val launchAdRaw = json.opt("launchAdOverlay")
-                                ?: json.opt("launchAd")
-                                ?: json.opt("launch_ad_overlay")
-                                ?: json.opt("fullscreenAd")
-                                ?: json.opt("splashAd")
-                                ?: json.opt("adOverlay")
-                                ?: json.opt("appLaunchAd")
-
-                            val parsedLaunchAd: LaunchAdOverlayConfig? = when (launchAdRaw) {
-                                is org.json.JSONObject -> {
-                                    val enabled = launchAdRaw.optBoolean("enabled", true)
-                                    val mediaUrl = launchAdRaw.optString("mediaUrl", "").ifBlank {
-                                        launchAdRaw.optString("videoUrl", "").ifBlank {
-                                            launchAdRaw.optString("imageUrl", "").ifBlank {
-                                                launchAdRaw.optString("posterUrl", "").ifBlank {
-                                                    launchAdRaw.optString("url", "")
-                                                }
-                                            }
-                                        }
-                                    }
-                                    val mediaType = launchAdRaw.optString("mediaType", "").ifBlank {
-                                        launchAdRaw.optString("type", "auto")
-                                    }
-                                    val targetUrl = launchAdRaw.optString("targetUrl", "").ifBlank {
-                                        launchAdRaw.optString("actionUrl", "").ifBlank {
-                                            launchAdRaw.optString("linkUrl", "").ifBlank {
-                                                launchAdRaw.optString("clickUrl", "").ifBlank {
-                                                    launchAdRaw.optString("link", "")
-                                                }
-                                            }
-                                        }
-                                    }
-                                    val title = launchAdRaw.optString("title", "")
-                                    val description = launchAdRaw.optString("description", "").ifBlank {
-                                        launchAdRaw.optString("subtitle", "").ifBlank {
-                                            launchAdRaw.optString("message", "")
-                                        }
-                                    }
-                                    val buttonText = launchAdRaw.optString("buttonText", "").ifBlank {
-                                        launchAdRaw.optString("btnText", "").ifBlank {
-                                            launchAdRaw.optString("actionText", "Learn More")
-                                        }
-                                    }
-                                    var skipDuration = if (launchAdRaw.has("skipDurationSeconds")) {
-                                        launchAdRaw.optInt("skipDurationSeconds", 5)
-                                    } else if (launchAdRaw.has("skip_duration_seconds")) {
-                                        launchAdRaw.optInt("skip_duration_seconds", 5)
-                                    } else if (launchAdRaw.has("skipSeconds")) {
-                                        launchAdRaw.optInt("skipSeconds", 5)
-                                    } else if (launchAdRaw.has("skip_seconds")) {
-                                        launchAdRaw.optInt("skip_seconds", 5)
-                                    } else if (launchAdRaw.has("skipDelay")) {
-                                        launchAdRaw.optInt("skipDelay", 5)
-                                    } else if (launchAdRaw.has("skip_delay")) {
-                                        launchAdRaw.optInt("skip_delay", 5)
-                                    } else if (launchAdRaw.has("countdown")) {
-                                        launchAdRaw.optInt("countdown", 5)
-                                    } else if (launchAdRaw.has("countdown_seconds")) {
-                                        launchAdRaw.optInt("countdown_seconds", 5)
-                                    } else if (launchAdRaw.has("countdownSeconds")) {
-                                        launchAdRaw.optInt("countdownSeconds", 5)
-                                    } else {
-                                        val optStr = launchAdRaw.optString("skipDurationSeconds", "").ifBlank {
-                                            launchAdRaw.optString("skip_duration_seconds", "").ifBlank {
-                                                launchAdRaw.optString("skipSeconds", "").ifBlank {
-                                                    launchAdRaw.optString("skip_seconds", "")
-                                                }
-                                            }
-                                        }
-                                        optStr.toIntOrNull() ?: 5
-                                    }
-                                    if (skipDuration <= 0) {
-                                        skipDuration = 5
-                                    }
-
-                                    val displayFrequency = launchAdRaw.optString("displayFrequency", "").ifBlank {
-                                        launchAdRaw.optString("showMode", "").ifBlank {
-                                            launchAdRaw.optString("frequency", "").ifBlank {
-                                                launchAdRaw.optString("displayMode", "ONCE_AFTER_INSTALL")
-                                            }
-                                        }
-                                    }
-                                    val adId = launchAdRaw.optString("adId", "").ifBlank {
-                                        launchAdRaw.optString("id", "")
-                                    }
-
-                                    LaunchAdOverlayConfig(
-                                        enabled = enabled,
-                                        mediaType = mediaType,
-                                        mediaUrl = mediaUrl,
-                                        targetUrl = targetUrl,
-                                        title = title,
-                                        description = description,
-                                        buttonText = buttonText,
-                                        skipDurationSeconds = skipDuration,
-                                        displayFrequency = displayFrequency,
-                                        adId = adId
-                                    )
-                                }
-                                else -> {
-                                    val isLaunchAdEnabled = json.optBoolean("isLaunchAdEnabled", false) ||
-                                            json.optBoolean("launchAdEnabled", false) ||
-                                            json.optBoolean("isSplashAdEnabled", false) ||
-                                            json.optBoolean("splashAdEnabled", false) ||
-                                            json.optBoolean("splash_ad_enabled", false) ||
-                                            json.optBoolean("showSplashAd", false) ||
-                                            (json.has("splashAd") && json.optJSONObject("splashAd") == null && json.optBoolean("splashAd", false))
-
-                                    val rawMediaUrl = json.optString("launchAdMediaUrl", "").ifBlank {
-                                        json.optString("launchAdVideoUrl", "").ifBlank {
-                                            json.optString("launchAdImageUrl", "").ifBlank {
-                                                json.optString("launchAdPosterUrl", "").ifBlank {
-                                                    json.optString("splashAdMediaUrl", "").ifBlank {
-                                                        json.optString("splashAdImageUrl", "").ifBlank {
-                                                            json.optString("splash_ad_media_url", "").ifBlank {
-                                                                json.optString("splashImageUrl", "").ifBlank {
-                                                                    json.optString("splash_image_url", "")
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if (isLaunchAdEnabled && rawMediaUrl.isNotBlank()) {
-                                        LaunchAdOverlayConfig(
-                                            enabled = true,
-                                            mediaType = json.optString("launchAdMediaType", "auto"),
-                                            mediaUrl = rawMediaUrl,
-                                            targetUrl = json.optString("launchAdTargetUrl", "").ifBlank {
-                                                json.optString("splashAdTargetUrl", "").ifBlank {
-                                                    json.optString("splash_ad_target_url", "").ifBlank {
-                                                        json.optString("splashClickUrl", "").ifBlank {
-                                                            json.optString("splash_click_url", "").ifBlank {
-                                                                json.optString("splashTargetUrl", "")
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            title = json.optString("launchAdTitle", ""),
-                                            description = json.optString("launchAdDescription", ""),
-                                            buttonText = json.optString("launchAdButtonText", "Learn More"),
-                                            skipDurationSeconds = let {
-                                                val s = json.optInt("launchAdSkipSeconds", json.optInt("splashAdSkipSeconds", 5))
-                                                if (s <= 0) 5 else s
-                                            },
-                                            displayFrequency = json.optString("launchAdDisplayFrequency", "").ifBlank {
-                                                json.optString("splashAdDisplayFrequency", "").ifBlank {
-                                                    json.optString("displayFrequency", "EVERY_LAUNCH")
-                                                }
-                                            },
-                                            adId = json.optString("launchAdId", "")
-                                        )
-                                    } else null
-                                }
-                            }
-
-                            // Cache to SharedPreferences for instant cold-boot enforcement
-                            try {
-                                val edit = controlPrefs.edit()
-
-                                val lastFancodeCode = controlPrefs.getString("last_fancode_code", "") ?: ""
-                                if (fancodeCode.isNotBlank() && lastFancodeCode != fancodeCode) {
-                                    edit.putString("last_fancode_code", fancodeCode)
-                                    edit.putInt("fancode_use_count", 0)
-                                }
-
-                                val lastRedeemCode = controlPrefs.getString("last_redeem_code", "") ?: ""
-                                if (redeemCode.isNotBlank() && lastRedeemCode != redeemCode) {
-                                    edit.putString("last_redeem_code", redeemCode)
-                                    edit.putInt("redeem_use_count", 0)
-                                }
-
-                                edit.putBoolean("isAppSuspended", isSuspended)
-                                    .putString("suspensionTitle", suspensionTitle)
-                                    .putString("suspensionMessage", suspensionMessage)
-                                    .putBoolean("isSportsTabLocked", isSportsLocked)
-                                    .putString("sportsTabStatusText", sportsStatus)
-                                    .putString("sportsLockReason", sportsReason)
-                                    .putString("fancodeCode", fancodeCode)
-                                    .putString("fancodeBannerUrl", fancodeBannerUrl)
-                                    .putBoolean("isFanCodeLocked", isFanCodeLocked)
-                                    .putBoolean("isFanCodeSplashLocked", isFanCodeSplashLocked)
-                                    .putBoolean("isFanCodeTabLocked", isFanCodeTabLocked)
-                                    .putBoolean("isFanCodeGetCodeEnabled", isFanCodeGetCodeEnabled)
-                                    .putString("fancodeTelegramUrl", fancodeTelegramUrl)
-                                    .putString("fancodeWebUrl", fancodeWebUrl)
-                                    .putString("fancodeOverlayBuyUrl", fancodeOverlayBuyUrl)
-                                    .putString("fancodeOverlayBuyText", fancodeOverlayBuyText)
-                                    .putString("redeemCode", redeemCode)
-                                    .putInt("redeemValidityHours", redeemValidityHours)
-                                    .putLong("redeemExpiryTimestamp", redeemExpiryTimestamp)
-                                    .putInt("fancodeValidityHours", fancodeValidityHours)
-                                    .putBoolean("isLiveTvLockEnabled", isLiveTvLockEnabled)
-                                    .putString("premiumLiveTvIds", premiumLiveTvIds.joinToString(","))
-                                    .putString("premiumLiveTvCategories", premiumLiveTvCategories.joinToString(","))
-                                    .putBoolean("isPreSplashAdEnabled", isPreSplashAdEnabled)
-                                    .putString("preSplashMediaType", preSplashMediaType)
-                                    .putString("preSplashMediaUrl", preSplashMediaUrl)
-                                    .putInt("preSplashSkipSeconds", preSplashSkipSeconds)
-                                    .putString("preSplashCtaText", preSplashCtaText)
-                                    .putString("preSplashCtaUrl", preSplashCtaUrl)
-
-                                if (parsedLaunchAd != null) {
-                                    val adJsonObj = org.json.JSONObject().apply {
-                                        put("enabled", parsedLaunchAd.enabled)
-                                        put("mediaType", parsedLaunchAd.mediaType)
-                                        put("mediaUrl", parsedLaunchAd.mediaUrl)
-                                        put("targetUrl", parsedLaunchAd.targetUrl)
-                                        put("title", parsedLaunchAd.title)
-                                        put("description", parsedLaunchAd.description)
-                                        put("buttonText", parsedLaunchAd.buttonText)
-                                        put("skipDurationSeconds", parsedLaunchAd.skipDurationSeconds)
-                                        put("displayFrequency", parsedLaunchAd.displayFrequency)
-                                        put("adId", parsedLaunchAd.adId)
-                                    }
-                                    edit.putString("launch_ad_overlay_json", adJsonObj.toString())
-                                }
-                                edit.apply()
-                            } catch (e: Throwable) {
-                                Log.e("StreamViewModel", "Error saving control preferences", e)
-                            }
-
-                            val savedUnlockCode = controlPrefs.getString("fancode_unlocked_code", "") ?: ""
-                            val savedUnlockUntil = controlPrefs.getLong("fancode_unlocked_until", 0L)
-                            val isAlreadyUnlocked = savedUnlockCode.isNotBlank() && savedUnlockCode == fancodeCode && (savedUnlockUntil == 0L || System.currentTimeMillis() < savedUnlockUntil)
-                            _isAppUnlockedWithFanCode.value = isAlreadyUnlocked
-
-                            _appControlConfig.value = AppControlConfig(
-                                isAppSuspended = isSuspended,
-                                suspensionTitle = suspensionTitle,
-                                suspensionMessage = suspensionMessage,
-                                notice = notice,
-                                launchAdOverlay = parsedLaunchAd,
-                                isSportsTabLocked = isSportsLocked,
-                                sportsTabStatusText = sportsStatus,
-                                sportsLockReason = sportsReason,
-                                fancodeCode = fancodeCode,
-                                fancodeBannerUrl = fancodeBannerUrl,
-                                isFanCodeLocked = isFanCodeLocked,
-                                isFanCodeSplashLocked = isFanCodeSplashLocked,
-                                isFanCodeTabLocked = isFanCodeTabLocked,
-                                isFanCodeGetCodeEnabled = isFanCodeGetCodeEnabled,
-                                fancodeTelegramUrl = fancodeTelegramUrl,
-                                fancodeWebUrl = fancodeWebUrl,
-                                fancodeOverlayBuyUrl = fancodeOverlayBuyUrl,
-                                fancodeOverlayBuyText = fancodeOverlayBuyText,
-                                fancodeHeroTitle = fancodeHeroTitle,
-                                fancodeHeroSubtitle = fancodeHeroSubtitle,
-                                fancodeHeroDescription = fancodeHeroDescription,
-                                fancodeHeroSlides = fancodeHeroSlides,
-                                fancodeHideBannerText = fancodeHideBannerText,
-                                lockedTabs = lockedTabs,
-                                premiumCategories = premiumCategories,
-                                premiumMediaIds = premiumMediaIds,
-                                premiumEmails = premiumEmails,
-                                freeEpisodeLimit = freeEpisodeLimit,
-                                isPremiumRequired = isPremiumRequired,
-                                premiumPaywallTitle = premiumPaywallTitle,
-                                premiumPaywallMessage = premiumPaywallMessage,
-                                premiumPaywallButtonText = premiumPaywallButtonText,
-                                premiumPaywallButtonUrl = premiumPaywallButtonUrl,
-                                isAdsEnabled = isAdsEnabled,
-                                adBannerUrl = adBannerUrl,
-                                adClickUrl = adClickUrl,
-                                adTitle = adTitle,
-                                redeemCode = redeemCode,
-                                redeemValidityHours = redeemValidityHours,
-                                redeemExpiryTimestamp = redeemExpiryTimestamp,
-                                fancodeValidityHours = fancodeValidityHours,
-                                premiumLiveTvIds = premiumLiveTvIds,
-                                premiumLiveTvCategories = premiumLiveTvCategories,
-                                isLiveTvLockEnabled = isLiveTvLockEnabled,
-                                isPreSplashAdEnabled = isPreSplashAdEnabled,
-                                preSplashMediaType = preSplashMediaType,
-                                preSplashMediaUrl = preSplashMediaUrl,
-                                preSplashSkipSeconds = preSplashSkipSeconds,
-                                preSplashCtaText = preSplashCtaText,
-                                preSplashCtaUrl = preSplashCtaUrl
-                            )
-
-                            if (parsedLaunchAd != null && parsedLaunchAd.enabled && parsedLaunchAd.mediaUrl.isNotBlank()) {
-                                withContext(Dispatchers.Main) {
-                                    checkAndTriggerLaunchAd(parsedLaunchAd)
-                                }
-                            }
-
-                            // Synchronize SubscriptionManager with remote config
-                            com.example.subscription.SubscriptionManager.syncWithRemoteConfig(
-                                emails = premiumEmails,
-                                episodeLimit = freeEpisodeLimit
-                            )
-
-                            // If app was suspended while user is streaming or watching, immediately kill playback
-                            if (isSuspended) {
-                                withContext(Dispatchers.Main) {
-                                    setMediaPlaying(false)
-                                    setPlayerPlaying(false)
-                                    _activeChannel.value = null
-                                    _activeMediaItem.value = null
-                                }
-                            }
-
-                            configLoaded = true
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("StreamViewModel", "Error fetching app control config from $urlStr", e)
-                }
-            }
             _isCheckingSuspension.value = false
             _isInitialControlChecked.value = true
+            _appControlConfig.value = AppControlConfig(
+                isAppSuspended = false,
+                isSportsTabLocked = false,
+                isFanCodeLocked = false,
+                isFanCodeSplashLocked = false,
+                isFanCodeTabLocked = false,
+                isAdsEnabled = false,
+                launchAdOverlay = null,
+                notice = null,
+                lockedTabs = emptyList(),
+                premiumCategories = emptyList(),
+                premiumMediaIds = emptyList(),
+                isLiveTvLockEnabled = false,
+                isPreSplashAdEnabled = false
+            )
+            com.example.subscription.SubscriptionManager.syncWithRemoteConfig(
+                emails = emptyList(),
+                episodeLimit = 1000
+            )
             withContext(Dispatchers.Main) {
                 onComplete?.invoke()
             }
         }
     }
 
-    private val _sportsEventsState = MutableStateFlow<UiState<List<com.example.data.model.LiveMatch>>>(UiState.Loading)
+        private val _sportsEventsState = MutableStateFlow<UiState<List<com.example.data.model.LiveMatch>>>(UiState.Loading)
     val sportsEventsState: StateFlow<UiState<List<com.example.data.model.LiveMatch>>> = _sportsEventsState.asStateFlow()
 
     private val _sportsChannelsState = MutableStateFlow<UiState<List<com.example.data.model.SportChannel>>>(UiState.Loading)
@@ -2233,9 +1524,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _isDeepScrapingServers = MutableStateFlow(false)
     val isDeepScrapingServers: StateFlow<Boolean> = _isDeepScrapingServers.asStateFlow()
 
-    private val currentPlaybackGeneration = java.util.concurrent.atomic.AtomicLong(0L)
-    private var activePlaybackJob: kotlinx.coroutines.Job? = null
-
     fun selectStreamServerKey(key: String?) {
         _selectedStreamServerKey.value = key
         val item = _activeMediaItem.value
@@ -2292,43 +1580,23 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?, episode: Int? = null) {
         _selectedServer.value = server
+        if (server != null) {
+            sharedPrefs.edit().putString("setting_anime_preferred_audio", server.type.lowercase()).apply()
+        }
         val activeItem = _activeMediaItem.value
         val curEp = episode ?: _activeMediaEpisode.value
-        val curSeason = _activeMediaSeason.value
-        val generation = currentPlaybackGeneration.incrementAndGet()
         if (server != null && activeItem != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    val streamRes = if (server.streamUrl.isNotBlank()) {
-                        com.example.scraper.ScrapedStreamResult(
-                            streamUrl = server.streamUrl,
-                            headers = mapOf(
-                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                "Referer" to if (server.referer.isNotBlank()) server.referer else "https://anikoto.cz/",
-                                "Origin" to "https://anikoto.cz"
-                            ),
-                            referer = if (server.referer.isNotBlank()) server.referer else "https://anikoto.cz/",
-                            subtitles = server.tracks
-                        )
-                    } else {
-                        com.example.scraper.UnifiedStreamManager.getStream(
-                            context = getApplication(),
-                            title = activeItem.title,
-                            tmdbId = activeItem.id,
-                            isTv = activeItem.type.equals("series", ignoreCase = true) || activeItem.type.equals("tv", ignoreCase = true),
-                            season = curSeason,
-                            episode = curEp,
-                            isAnime = true,
-                            audioType = server.type.lowercase(),
-                            requestedServerKey = server.id
-                        )
-                    }
+                    val streamRes = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                        server = server,
+                        watchUrl = currentServerWatchUrl.ifBlank { activeItem.title },
+                        episode = curEp
+                    )
                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
-                        if (generation == currentPlaybackGeneration.get()) {
-                            _activeMediaStreamUrl.value = streamRes.streamUrl
-                            _activeMediaStreamHeaders.value = streamRes.headers
-                            _isPlayerPlaying.value = true
-                        }
+                        _activeMediaStreamUrl.value = streamRes.streamUrl
+                        _activeMediaStreamHeaders.value = streamRes.headers
+                        _isPlayerPlaying.value = true
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -2344,11 +1612,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             type = item.type,
             id = item.id
         )
-        _availableSubServers.value = emptyList()
-        _availableDubServers.value = emptyList()
-        _selectedServer.value = null
-
         if (!isAnime) {
+            _availableSubServers.value = emptyList()
+            _availableDubServers.value = emptyList()
             _isFetchingServers.value = false
             return
         }
@@ -2376,7 +1642,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
                 // Auto-select server while prioritizing direct playable streams (HD-1, HD-2, Vidstream, etc.)
                 val current = _selectedServer.value
-                val isDub = current?.type?.lowercase() == "dub"
+                val preferredAudio = sharedPrefs.getString("setting_anime_preferred_audio", "sub") ?: "sub"
+                val isDub = (current?.type?.lowercase() ?: preferredAudio) == "dub"
                 val targetServers = if (isDub) group.dubServers else group.subServers
                 val candidateList = (targetServers + group.subServers + group.dubServers)
                     .distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
@@ -2389,16 +1656,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     if (isMirror && candidateList.any { !it.name.contains("Mirror") && !it.id.contains("p") && !it.streamUrl.contains("pahe") }) {
                         continue
                     }
-                    val extracted = com.example.scraper.UnifiedStreamManager.getStream(
-                        context = getApplication(),
-                        title = item.title,
-                        tmdbId = item.id,
-                        isTv = item.type.equals("series", ignoreCase = true) || item.type.equals("tv", ignoreCase = true),
-                        season = season,
-                        episode = episode,
-                        isAnime = true,
-                        audioType = srv.type.lowercase(),
-                        requestedServerKey = srv.id
+                    val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                        server = srv,
+                        watchUrl = group.watchUrl.ifBlank { targetTitleOrSlug },
+                        episode = episode
                     )
                     if (extracted != null && extracted.streamUrl.isNotBlank()) {
                         workingExtracted = extracted
@@ -2712,6 +1973,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     val updateInfoState: StateFlow<UpdateInfo?> = _updateInfoState.asStateFlow()
 
     private val sharedPrefs = application.getSharedPreferences("homeairtv_user_prefs", Context.MODE_PRIVATE)
+    val preferredAnimeAudio: String
+        get() = sharedPrefs.getString("setting_anime_preferred_audio", "sub") ?: "sub"
     private var firebaseAuth: FirebaseAuth? = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
     private val firebaseAnalytics: FirebaseAnalytics? = try { FirebaseAnalytics.getInstance(application) } catch (e: Throwable) { null }
 
@@ -3657,7 +2920,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isAnimeLoading.value = true
             try {
-                val watchUrl = if (item.streamUrl != null && item.streamUrl!!.isNotBlank() && item.streamUrl!!.contains("anikoto.cz")) {
+                val watchUrl = if (item.streamUrl != null && item.streamUrl!!.isNotBlank() && (item.streamUrl!!.contains("anikoto.cz") || item.streamUrl!!.contains("media.hmair.xyz"))) {
                     item.streamUrl!!
                 } else {
                     val resolved = com.example.scraper.AnikotoScraper.resolveAnikotoWatchUrl(item.title)
@@ -3763,10 +3026,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        activePlaybackJob?.cancel()
-        val generation = currentPlaybackGeneration.incrementAndGet()
-
-        val detectedSeason = if (season > 1) season else (extractSeasonFromTitle(item.title) ?: season)
+        val detectedSeason = extractSeasonFromTitle(item.title) ?: season
 
         val currentEmail = _userProfile.value?.email
         if (!checkContentAccess(
@@ -3810,79 +3070,51 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             _selectedServer.value = null
         }
 
-        activePlaybackJob = viewModelScope.launch {
-            if (generation != currentPlaybackGeneration.get()) return@launch
-
+        viewModelScope.launch {
             // Check if selected verified server is already ready
             val prefKey = _selectedStreamServerKey.value
             if (!prefKey.isNullOrBlank() && prefKey != "fastest_auto") {
                 val directVerified = com.example.scraper.UnifiedStreamManager.getVerifiedServerStream(tmdbId, detectedSeason, episode, prefKey)
                 if (directVerified != null && directVerified.streamUrl.isNotBlank()) {
-                    if (generation == currentPlaybackGeneration.get()) {
-                        _activeMediaStreamUrl.value = directVerified.streamUrl
-                        _activeMediaStreamHeaders.value = directVerified.headers
-                        _isPlayerPlaying.value = true
-                    }
+                    _activeMediaStreamUrl.value = directVerified.streamUrl
+                    _activeMediaStreamHeaders.value = directVerified.headers
+                    _isPlayerPlaying.value = true
                     return@launch
                 }
             }
 
             // Check if stream is already pre-scraped / cached in background for instant launch!
-            val cachedStream = if (isAnime) {
-                com.example.scraper.UnifiedStreamManager.getCachedStream(
-                    tmdbId = tmdbId,
-                    season = detectedSeason,
-                    episode = episode,
-                    audioType = if (_selectedServer.value?.type?.lowercase() == "dub") "dub" else "sub",
-                    requestedServerKey = _selectedServer.value?.id
-                )
-            } else {
-                com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode)
-            }
+            val cachedStream = com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode)
             if (cachedStream != null && cachedStream.streamUrl.isNotBlank()) {
-                if (generation == currentPlaybackGeneration.get()) {
-                    _activeMediaStreamUrl.value = cachedStream.streamUrl
-                    _activeMediaStreamHeaders.value = cachedStream.headers
-                    _isPlayerPlaying.value = true
-                }
+                _activeMediaStreamUrl.value = cachedStream.streamUrl
+                _activeMediaStreamHeaders.value = cachedStream.headers
+                _isPlayerPlaying.value = true
                 return@launch
             }
-
-            val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
-                               effectiveItem.type.equals("tv", ignoreCase = true) ||
-                               effectiveItem.category.lowercase().contains("series") ||
-                               effectiveItem.category.lowercase().contains("tv show") ||
-                               (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie")) ||
-                               season > 1 || episode > 1 ||
-                               (effectiveItem.episodes?.isNotBlank() == true)
 
             // Check if user selected a specific Anikoto server (SUB or DUB) for anime
             val pickedServer = _selectedServer.value
             if (isAnime && pickedServer != null) {
                 try {
-                    val serverStream = com.example.scraper.UnifiedStreamManager.getStream(
-                        context = getApplication(),
-                        title = effectiveItem.title,
-                        tmdbId = tmdbId,
-                        isTv = isSeriesItem,
-                        season = detectedSeason,
-                        episode = episode,
-                        isAnime = true,
-                        audioType = pickedServer.type.lowercase(),
-                        requestedServerKey = pickedServer.id
+                    val serverStream = com.example.scraper.AnikotoScraper.extractStreamFromServer(
+                        server = pickedServer,
+                        watchUrl = currentServerWatchUrl.ifEmpty { effectiveItem.title },
+                        episode = episode
                     )
                     if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
-                        if (generation == currentPlaybackGeneration.get()) {
-                            _activeMediaStreamUrl.value = serverStream.streamUrl
-                            _activeMediaStreamHeaders.value = serverStream.headers
-                            _isPlayerPlaying.value = true
-                        }
+                        _activeMediaStreamUrl.value = serverStream.streamUrl
+                        _activeMediaStreamHeaders.value = serverStream.headers
+                        _isPlayerPlaying.value = true
                         return@launch
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
             }
+
+            val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
+                               effectiveItem.type.equals("tv", ignoreCase = true) ||
+                               (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
 
             // Launch background parallel scraper (racing fastest servers Hindi, VidRock, Flixer, Prime, Hexa...)
             launch(Dispatchers.IO) {
@@ -3905,23 +3137,19 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             isTv = isSeriesItem,
                             season = detectedSeason,
                             episode = episode,
-                            isAnime = true,
-                            audioType = if (_selectedServer.value?.type?.lowercase() == "dub") "dub" else "sub",
-                            requestedServerKey = _selectedServer.value?.id
+                            isAnime = true
                         )
                     }
 
                     if (winnerResult != null && winnerResult.streamUrl.isNotBlank()) {
-                        if (generation == currentPlaybackGeneration.get()) {
-                            _activeMediaStreamUrl.value = winnerResult.streamUrl
-                            _activeMediaStreamHeaders.value = winnerResult.headers
-                            _isPlayerPlaying.value = true
-                            repository.addLog(
-                                type = "INFO",
-                                title = "Direct Stream Scraped",
-                                message = "Fastest Server extracted direct video link for '" + effectiveItem.title + "'"
-                            )
-                        }
+                        _activeMediaStreamUrl.value = winnerResult.streamUrl
+                        _activeMediaStreamHeaders.value = winnerResult.headers
+                        _isPlayerPlaying.value = true
+                        repository.addLog(
+                            type = "INFO",
+                            title = "Direct Stream Scraped",
+                            message = "Fastest Server extracted direct video link for '" + effectiveItem.title + "'"
+                        )
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
