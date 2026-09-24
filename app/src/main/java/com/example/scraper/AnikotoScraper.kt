@@ -869,87 +869,50 @@ object AnikotoScraper {
         if (episodeId.isBlank()) return@withContext servers
 
         try {
-            val mapperUrl = "https://mapper.nekostream.online/ep/${URLEncoder.encode(episodeId, "UTF-8")}"
-            val request = Request.Builder()
-                .url(mapperUrl)
-                .header("User-Agent", DEFAULT_UA)
-                .header("Referer", "https://anikoto.cz/")
-                .header("Accept", "application/json, */*")
-                .build()
+            val mapperUrl = "https://mapper.nekostream.site/ep/ep/$episodeId"
+            val headers = mapOf(
+                "User-Agent" to DEFAULT_UA,
+                "Referer" to "https://anikoto.cz/",
+                "Origin" to "https://anikoto.cz"
+            )
+            val json = fetchJson(mapperUrl, headers)
+            if (json != null) {
+                val srvObj = json.optJSONObject("servers") ?: json
+                val keys = srvObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val sData = srvObj.optJSONObject(k)
+                    val sUrl = sData?.optString("url") ?: srvObj.optString(k, "")
+                    val sType = if (k.contains("dub", ignoreCase = true)) "dub" else "sub"
+                    val displayName = when {
+                        k.contains("vidstream-2", ignoreCase = true) -> "Vidstream-2"
+                        k.contains("vidstream", ignoreCase = true) -> "Vidstream 1 BETA"
+                        k.contains("hd-2", ignoreCase = true) -> "HD-2"
+                        k.contains("hd-1", ignoreCase = true) || k.contains("hd1", ignoreCase = true) -> "HD-1"
+                        k.contains("kiwi", ignoreCase = true) -> "Kiwi Sub"
+                        else -> k
+                    }
 
-            val body = httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
-                response.body?.string().orEmpty()
-            }.trim()
-
-            fun addMapperServer(obj: JSONObject) {
-                val key = obj.optString("server").ifBlank { obj.optString("name") }.trim()
-                val id = obj.optString("id").trim()
-                val token = obj.optString("token").trim()
-                if (key.isBlank() || id.isBlank() || token.isBlank()) return
-                val type = if (key.contains("dub", ignoreCase = true)) "dub" else "sub"
-                if (servers.none { it.id.equals(key, ignoreCase = true) && it.type == type }) {
-                    servers.add(AnikotoServer(
-                        id = key,
-                        linkId = "",
-                        name = key,
-                        type = type,
-                        streamUrl = "",
-                        rawUrl = "",
-                        referer = "https://anikoto.cz/",
-                        tracks = buildFullSubtitleTracks(episodeId)
-                    ))
-                }
-            }
-
-            if (body.startsWith("[")) {
-                val array = JSONArray(body)
-                for (i in 0 until array.length()) array.optJSONObject(i)?.let(::addMapperServer)
-            } else if (body.startsWith("{")) {
-                val root = JSONObject(body)
-                val array = root.optJSONArray("servers")
-                if (array != null) {
-                    for (i in 0 until array.length()) array.optJSONObject(i)?.let(::addMapperServer)
-                } else {
-                    val obj = root.optJSONObject("servers")
-                    if (obj != null) {
-                        val keys = obj.keys()
-                        while (keys.hasNext()) {
-                            val key = keys.next()
-                            val value = obj.optJSONObject(key) ?: continue
-                            val enriched = JSONObject(value.toString())
-                            if (!enriched.has("server")) enriched.put("server", key)
-                            addMapperServer(enriched)
-                        }
+                    if (sUrl.isNotBlank()) {
+                        servers.add(
+                            AnikotoServer(
+                                id = displayName,
+                                linkId = sUrl,
+                                name = displayName,
+                                type = sType,
+                                streamUrl = if (sUrl.contains(".m3u8") || sUrl.contains("/stream/")) sUrl else "",
+                                rawUrl = sUrl,
+                                referer = "https://anikoto.cz/",
+                                tracks = buildFullSubtitleTracks(episodeId)
+                            )
+                        )
                     }
                 }
             }
-
-            Log.d(TAG, "Nekostream mapper resolved ${servers.size} server identities for episodeId=$episodeId")
         } catch (e: Exception) {
             Log.w(TAG, "resolveNekostreamMapping error for ep $episodeId: ${e.message}")
         }
-        return@withContext servers
-    }
-
-    private fun extractEpisodeDataIdFromWatchPage(html: String): String? {
-        val doc = org.jsoup.Jsoup.parse(html)
-        val selectors = listOf(
-            "[data-episode-id]",
-            "[data-video-id]",
-            "#video-player-container[data-id]",
-            ".video-player[data-id]",
-            "[data-id]"
-        )
-        for (selector in selectors) {
-            val value = doc.select(selector).asSequence().map { element ->
-                element.attr("data-episode-id")
-                    .ifBlank { element.attr("data-video-id") }
-                    .ifBlank { element.attr("data-id") }
-            }.firstOrNull { it.isNotBlank() }
-            if (!value.isNullOrBlank()) return value
-        }
-        return null
+        servers
     }
 
     /**
@@ -976,37 +939,9 @@ object AnikotoScraper {
                 resolvedWatchUrl = directOrResolvedUrl
             }
 
-            // Resolve the real episode data-id from the exact season/episode watch page.
-            var exactEpisodeDataId = ""
-            if (resolvedWatchUrl.isNotBlank()) {
-                try {
-                    val exactWatchUrl = if (resolvedWatchUrl.contains("/ep-")) {
-                        resolvedWatchUrl.replace(Regex("/ep-\\d+/?$"), "/ep-$effectiveEp")
-                    } else {
-                        "$resolvedWatchUrl/ep-$effectiveEp"
-                    }
-                    val html = httpClient.newCall(
-                        Request.Builder()
-                            .url(exactWatchUrl)
-                            .header("User-Agent", DEFAULT_UA)
-                            .header("Referer", "$ANIKOTO_ORIGIN/")
-                            .header("Accept", "text/html,application/xhtml+xml")
-                            .build()
-                    ).execute().use { response ->
-                        if (response.isSuccessful) response.body?.string().orEmpty() else ""
-                    }
-                    exactEpisodeDataId = extractEpisodeDataIdFromWatchPage(html).orEmpty()
-                    Log.d(TAG, "Exact episode identity S$season E$effectiveEp -> data-id=$exactEpisodeDataId")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed extracting exact episode data-id for S$season E$effectiveEp: ${e.message}")
-                }
-            }
-
-            val nekostreamServers = if (exactEpisodeDataId.isNotBlank()) {
-                resolveNekostreamMapping(exactEpisodeDataId)
-            } else {
-                emptyList()
-            }
+            // Check Nekostream mapping if episode ID is extractable
+            val epNumToken = "$effectiveEp"
+            val nekostreamServers = resolveNekostreamMapping(epNumToken)
             for (nsSrv in nekostreamServers) {
                 if (nsSrv.type == "dub") dubServers.add(nsSrv) else subServers.add(nsSrv)
             }
@@ -1325,19 +1260,7 @@ object AnikotoScraper {
             Log.d(TAG, "extractStreamFromServer querying: $queryUrl for Ep $effectiveEp")
             val json = fetchJson(queryUrl)
             val selected = json?.optJSONObject("selectedStream")
-            val requestedKey = normalizeServerSelectionKey(server.id.ifBlank { server.name })
-
-            fun streamBelongsToRequestedServer(obj: JSONObject): Boolean {
-                if (requestedKey.isBlank()) return true
-                val returnedKeys = listOf(
-                    obj.optString("server"),
-                    obj.optString("name"),
-                    obj.optString("provider")
-                ).filter { it.isNotBlank() }
-                return returnedKeys.any { normalizeServerSelectionKey(it) == requestedKey }
-            }
-
-            if (selected != null && streamBelongsToRequestedServer(selected)) {
+            if (selected != null) {
                 val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
                 if (sUrl.isNotBlank()) {
                     val referer = selected.optString("referer", "https://anikoto.cz/")
@@ -1355,43 +1278,12 @@ object AnikotoScraper {
                 }
             }
 
-            // If the API returned a server list, search for the explicitly requested
-            // server instead of accepting selectedStream from another provider.
-            if (json != null && !requestedKey.isBlank()) {
-                val available = json.optJSONArray("availableServers")
-                if (available != null) {
-                    for (i in 0 until available.length()) {
-                        val candidate = available.optJSONObject(i) ?: continue
-                        if (!streamBelongsToRequestedServer(candidate)) continue
-                        val candidateUrl = makeAbsoluteUrl(
-                            candidate.optString("streamUrl", "").ifBlank {
-                                candidate.optString("rawUrl", "")
-                            }
-                        )
-                        if (candidateUrl.isBlank()) continue
-                        val referer = candidate.optString("referer", "https://anikoto.cz/")
-                        val tracks = parseSubtitles(candidate.optJSONArray("tracks")).ifEmpty { server.tracks }
-                        return@withContext ScrapedStreamResult(
-                            streamUrl = candidateUrl,
-                            headers = mapOf(
-                                "User-Agent" to DEFAULT_UA,
-                                "Referer" to referer,
-                                "Origin" to "https://anikoto.cz"
-                            ),
-                            referer = referer,
-                            subtitles = tracks
-                        )
-                    }
-                }
-            }
-
             // Fallback 4: Query direct stream by title
             val fallbackDirect = getStreamByTitle(
                 title = if (cleanKw.isNotBlank()) cleanKw else watchUrl,
                 season = season,
                 episode = effectiveEp,
-                preferDub = isDub,
-                requestedServerKey = server.id
+                preferDub = isDub
             )
             if (fallbackDirect != null && fallbackDirect.streamUrl.isNotBlank()) {
                 return@withContext fallbackDirect
@@ -1482,20 +1374,8 @@ object AnikotoScraper {
             }
 
             if (json != null && json.optBoolean("success") == true) {
-                val requestedKey = requestedServerKey?.let(::normalizeServerSelectionKey).orEmpty()
                 val selectedStream = json.optJSONObject("selectedStream")
-
-                fun belongsToRequestedServer(obj: JSONObject): Boolean {
-                    if (requestedKey.isBlank()) return true
-                    return listOf(
-                        obj.optString("server"),
-                        obj.optString("name"),
-                        obj.optString("provider")
-                    ).filter { it.isNotBlank() }
-                        .any { normalizeServerSelectionKey(it) == requestedKey }
-                }
-
-                if (selectedStream != null && belongsToRequestedServer(selectedStream)) {
+                if (selectedStream != null) {
                     val rawStreamUrl = selectedStream.optString("streamUrl", "")
                     if (rawStreamUrl.isNotBlank()) {
                         val finalStreamUrl = makeAbsoluteUrl(rawStreamUrl)
@@ -1504,7 +1384,7 @@ object AnikotoScraper {
                             buildFullSubtitleTracks(title)
                         }
 
-                        Log.d(TAG, "Anime Stream API resolved requested server=$requestedKey: $finalStreamUrl with ${subtitles.size} subtitles")
+                        Log.d(TAG, "Anime Stream API resolved: $finalStreamUrl with ${subtitles.size} subtitles")
                         return@withContext ScrapedStreamResult(
                             streamUrl = finalStreamUrl,
                             headers = mapOf(
@@ -1522,51 +1402,41 @@ object AnikotoScraper {
                 if (availableServers != null && availableServers.length() > 0) {
                     for (i in 0 until availableServers.length()) {
                         val sObj = availableServers.optJSONObject(i) ?: continue
-                        if (!belongsToRequestedServer(sObj)) continue
                         val rawStream = sObj.optString("streamUrl", "").ifBlank { sObj.optString("rawUrl", "") }
                         if (rawStream.isNotBlank()) {
                             val resolvedUrl = makeAbsoluteUrl(rawStream)
                             val referer = sObj.optString("referer", "$API_BASE_URL/")
-                            Log.d(TAG, "Anime Stream resolved requested server=$requestedKey via availableServers: $resolvedUrl")
+                            Log.d(TAG, "Anime Stream resolved via availableServers array: $resolvedUrl")
                             return@withContext ScrapedStreamResult(
                                 streamUrl = resolvedUrl,
                                 headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer, "Origin" to "https://anikoto.cz"),
                                 referer = referer,
-                                subtitles = parseSubtitles(sObj.optJSONArray("tracks")).ifEmpty { buildFullSubtitleTracks(title) }
+                                subtitles = buildFullSubtitleTracks(title)
                             )
                         }
                     }
                 }
             }
 
-            // Fallback: extract via fetchAvailableServers.
-            // In explicit-server mode only the requested server may be attempted.
+            // Fallback: extract via fetchAvailableServers
             try {
                 val serverGroup = fetchAvailableServers(title = cleanTitle, season = season, episode = effectiveEp)
-                val allServers = (serverGroup.subServers + serverGroup.dubServers)
-                    .distinctBy { it.id.ifBlank { it.streamUrl } }
-                    .let { servers ->
-                        if (requestedServerKey.isNullOrBlank()) {
-                            servers
-                        } else {
-                            servers.filter { normalizeServerSelectionKey(it.id.ifBlank { it.name }) == normalizeServerSelectionKey(requestedServerKey) }
-                        }
-                    }
-
+                val allServers = (serverGroup.subServers + serverGroup.dubServers).distinctBy { it.id.ifBlank { it.streamUrl } }
                 for (srv in allServers) {
                     val serverStream = extractStreamFromServer(
                         server = srv,
                         watchUrl = directOrResolvedUrl ?: cleanTitle,
-                        episode = effectiveEp,
-                        season = season
+                        episode = effectiveEp
                     )
                     if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
-                        return@withContext serverStream
+                        return@withContext ScrapedStreamResult(
+                            streamUrl = serverStream.streamUrl,
+                            headers = serverStream.headers,
+                            referer = serverStream.referer,
+                            subtitles = serverStream.subtitles
+                        )
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Available servers extraction error: ${e.message}")
-            }
             } catch (e: Exception) {
                 Log.w(TAG, "Available servers extraction error: ${e.message}")
             }
@@ -1706,14 +1576,6 @@ object AnikotoScraper {
             queryParams.add("server=${URLEncoder.encode(server.trim(), "UTF-8")}")
         }
         return "$API_BASE_URL/api/stream/get?${queryParams.joinToString("&")}"
-    }
-
-    private fun normalizeServerSelectionKey(raw: String): String {
-        var value = raw.trim().lowercase()
-        value = value.removePrefix("anikoto_sub_").removePrefix("anikoto_dub_")
-        value = value.replace(Regex("""[\\s_]+"""), "-")
-        value = value.replace(Regex("""[- ]+(?:sub|dub)$"""), "")
-        return value.trim('-')
     }
 
     private fun sanitizeSearchTitle(title: String): String {
