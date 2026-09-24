@@ -1445,53 +1445,13 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                         dubServers = dubServers,
                         selectedAnikotoServer = selectedServer,
                         onSelectAnikotoServer = { srv ->
+                            // Server selection is authoritative in the ViewModel. Do not
+                            // launch a second scraper coroutine from the UI.
                             selectedVidnestServerKey = null
+                            isMainSelected = false
+                            isLoading = true
+                            hasError = false
                             viewModel.selectAnikotoServer(srv, currentEpisode)
-                            scope.launch(Dispatchers.IO) {
-                                withContext(Dispatchers.Main) {
-                                    isLoading = true
-                                    hasError = false
-                                }
-                                val extracted = if (srv.streamUrl.isNotBlank()) {
-                                    com.example.scraper.ScrapedStreamResult(
-                                        streamUrl = srv.streamUrl,
-                                        headers = mapOf(
-                                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                            "Referer" to if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
-                                            "Origin" to "https://anikoto.cz"
-                                        ),
-                                        referer = if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
-                                        subtitles = srv.tracks
-                                    )
-                                } else {
-                                    com.example.scraper.UnifiedStreamManager.getStream(
-                                        context = context,
-                                        title = title,
-                                        tmdbId = imdbId,
-                                        isTv = isSeries,
-                                        season = currentSeason,
-                                        episode = currentEpisode,
-                                        isAnime = true,
-                                        audioType = srv.type.lowercase(),
-                                        requestedServerKey = srv.id
-                                    )
-                                }
-                                withContext(Dispatchers.Main) {
-                                    if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                                        capturedVideoUrl = extracted.streamUrl
-                                        customScrapedHeaders = extracted.headers
-                                        if (extracted.subtitles.isNotEmpty()) {
-                                            activeSubtitles = extracted.subtitles
-                                        }
-                                        useExoPlayer = true
-                                        isLoading = false
-                                        hasError = false
-                                    } else {
-                                        isLoading = false
-                                        hasError = true
-                                    }
-                                }
-                            }
                         },
                         embedServers = embedServers,
                         currentEmbedServerIndex = currentServerIndex,
