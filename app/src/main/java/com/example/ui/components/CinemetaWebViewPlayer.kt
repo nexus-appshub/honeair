@@ -278,7 +278,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             ?: allMediaItems.find { it.title == title }
     }
 
-    val isSeries = remember(imdbId, type, currentMediaItem, mediaDetailState, currentSeason, currentEpisode) {
+    val isSeries = remember(imdbId, type, currentMediaItem, mediaDetailState, currentSeason, currentEpisode, season, episode) {
         val rawId = imdbId.lowercase()
         val itemId = currentMediaItem?.id?.lowercase() ?: ""
         val t = type.lowercase()
@@ -286,13 +286,13 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
         val itemType = currentMediaItem?.type?.lowercase() ?: ""
         val hasSeasonsInDetail = (mediaDetailState?.number_of_seasons != null && (mediaDetailState?.number_of_seasons ?: 0) > 0)
         val isExplicitMovieInDetail = (mediaDetailState?.runtime != null && (mediaDetailState?.number_of_seasons ?: 0) == 0)
-        val isEpisodic = (currentMediaItem?.episodes?.isNotBlank() == true && currentMediaItem?.episodes?.contains("Season", ignoreCase = true) == true)
-        val hasMultipleEpisodes = currentEpisode > 1 || currentSeason > 1
-        val isSeriesCategory = cat.contains("series") || cat.contains("tv show") || cat.contains("natok") || cat.contains("drama") || cat.contains("k-drama")
-        val isSeriesType = t == "series" || t == "tv" || itemType == "series" || itemType == "tv"
-        val isSeriesId = rawId.startsWith("series_") || itemId.startsWith("series_")
+        val isEpisodic = (currentMediaItem?.episodes?.isNotBlank() == true)
+        val hasMultipleEpisodes = currentEpisode > 1 || currentSeason > 1 || episode > 1 || season > 1
+        val isSeriesCategory = cat.contains("series") || cat.contains("tv show") || cat.contains("natok") || cat.contains("drama") || cat.contains("k-drama") || cat.contains("show")
+        val isSeriesType = t == "series" || t == "tv" || itemType == "series" || itemType == "tv" || t == "anime" || itemType == "anime"
+        val isSeriesId = rawId.startsWith("series_") || itemId.startsWith("series_") || rawId.startsWith("anikoto_") || itemId.startsWith("anikoto_")
 
-        if (hasSeasonsInDetail || hasMultipleEpisodes || isSeriesCategory || isSeriesType || isEpisodic || isSeriesId) {
+        if (isSeriesType || isSeriesCategory || isSeriesId || hasSeasonsInDetail || isEpisodic || hasMultipleEpisodes) {
             true
         } else if (isExplicitMovieInDetail || t == "movie" || itemType == "movie" || rawId.startsWith("movie_") || itemId.startsWith("movie_")) {
             false

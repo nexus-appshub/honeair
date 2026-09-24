@@ -2233,6 +2233,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _isDeepScrapingServers = MutableStateFlow(false)
     val isDeepScrapingServers: StateFlow<Boolean> = _isDeepScrapingServers.asStateFlow()
 
+    private val currentPlaybackGeneration = java.util.concurrent.atomic.AtomicLong(0L)
+    private var activePlaybackJob: kotlinx.coroutines.Job? = null
+
     fun selectStreamServerKey(key: String?) {
         _selectedStreamServerKey.value = key
         val item = _activeMediaItem.value
@@ -2292,6 +2295,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val activeItem = _activeMediaItem.value
         val curEp = episode ?: _activeMediaEpisode.value
         val curSeason = _activeMediaSeason.value
+        val generation = currentPlaybackGeneration.incrementAndGet()
         if (server != null && activeItem != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
@@ -2320,9 +2324,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
-                        _activeMediaStreamUrl.value = streamRes.streamUrl
-                        _activeMediaStreamHeaders.value = streamRes.headers
-                        _isPlayerPlaying.value = true
+                        if (generation == currentPlaybackGeneration.get()) {
+                            _activeMediaStreamUrl.value = streamRes.streamUrl
+                            _activeMediaStreamHeaders.value = streamRes.headers
+                            _isPlayerPlaying.value = true
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -3757,7 +3763,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        val detectedSeason = extractSeasonFromTitle(item.title) ?: season
+        activePlaybackJob?.cancel()
+        val generation = currentPlaybackGeneration.incrementAndGet()
+
+        val detectedSeason = if (season > 1) season else (extractSeasonFromTitle(item.title) ?: season)
 
         val currentEmail = _userProfile.value?.email
         if (!checkContentAccess(
@@ -3801,15 +3810,19 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             _selectedServer.value = null
         }
 
-        viewModelScope.launch {
+        activePlaybackJob = viewModelScope.launch {
+            if (generation != currentPlaybackGeneration.get()) return@launch
+
             // Check if selected verified server is already ready
             val prefKey = _selectedStreamServerKey.value
             if (!prefKey.isNullOrBlank() && prefKey != "fastest_auto") {
                 val directVerified = com.example.scraper.UnifiedStreamManager.getVerifiedServerStream(tmdbId, detectedSeason, episode, prefKey)
                 if (directVerified != null && directVerified.streamUrl.isNotBlank()) {
-                    _activeMediaStreamUrl.value = directVerified.streamUrl
-                    _activeMediaStreamHeaders.value = directVerified.headers
-                    _isPlayerPlaying.value = true
+                    if (generation == currentPlaybackGeneration.get()) {
+                        _activeMediaStreamUrl.value = directVerified.streamUrl
+                        _activeMediaStreamHeaders.value = directVerified.headers
+                        _isPlayerPlaying.value = true
+                    }
                     return@launch
                 }
             }
@@ -3827,15 +3840,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 com.example.scraper.UnifiedStreamManager.getCachedStream(tmdbId, detectedSeason, episode)
             }
             if (cachedStream != null && cachedStream.streamUrl.isNotBlank()) {
-                _activeMediaStreamUrl.value = cachedStream.streamUrl
-                _activeMediaStreamHeaders.value = cachedStream.headers
-                _isPlayerPlaying.value = true
+                if (generation == currentPlaybackGeneration.get()) {
+                    _activeMediaStreamUrl.value = cachedStream.streamUrl
+                    _activeMediaStreamHeaders.value = cachedStream.headers
+                    _isPlayerPlaying.value = true
+                }
                 return@launch
             }
 
             val isSeriesItem = effectiveItem.type.equals("series", ignoreCase = true) ||
                                effectiveItem.type.equals("tv", ignoreCase = true) ||
-                               (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie"))
+                               effectiveItem.category.lowercase().contains("series") ||
+                               effectiveItem.category.lowercase().contains("tv show") ||
+                               (effectiveItem.type.equals("anime", ignoreCase = true) && !effectiveItem.category.lowercase().contains("movie")) ||
+                               season > 1 || episode > 1 ||
+                               (effectiveItem.episodes?.isNotBlank() == true)
 
             // Check if user selected a specific Anikoto server (SUB or DUB) for anime
             val pickedServer = _selectedServer.value
@@ -3853,9 +3872,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         requestedServerKey = pickedServer.id
                     )
                     if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
-                        _activeMediaStreamUrl.value = serverStream.streamUrl
-                        _activeMediaStreamHeaders.value = serverStream.headers
-                        _isPlayerPlaying.value = true
+                        if (generation == currentPlaybackGeneration.get()) {
+                            _activeMediaStreamUrl.value = serverStream.streamUrl
+                            _activeMediaStreamHeaders.value = serverStream.headers
+                            _isPlayerPlaying.value = true
+                        }
                         return@launch
                     }
                 } catch (e: Exception) {
@@ -3891,14 +3912,16 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
 
                     if (winnerResult != null && winnerResult.streamUrl.isNotBlank()) {
-                        _activeMediaStreamUrl.value = winnerResult.streamUrl
-                        _activeMediaStreamHeaders.value = winnerResult.headers
-                        _isPlayerPlaying.value = true
-                        repository.addLog(
-                            type = "INFO",
-                            title = "Direct Stream Scraped",
-                            message = "Fastest Server extracted direct video link for '" + effectiveItem.title + "'"
-                        )
+                        if (generation == currentPlaybackGeneration.get()) {
+                            _activeMediaStreamUrl.value = winnerResult.streamUrl
+                            _activeMediaStreamHeaders.value = winnerResult.headers
+                            _isPlayerPlaying.value = true
+                            repository.addLog(
+                                type = "INFO",
+                                title = "Direct Stream Scraped",
+                                message = "Fastest Server extracted direct video link for '" + effectiveItem.title + "'"
+                            )
+                        }
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()

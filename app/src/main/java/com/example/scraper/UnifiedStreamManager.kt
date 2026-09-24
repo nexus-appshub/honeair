@@ -148,7 +148,7 @@ object UnifiedStreamManager {
     fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1, audioType: String = "sub", requestedServerKey: String? = null): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
         val key = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
-        val entry = streamCache[key] ?: streamCache["$tmdbId-$season-$episode"]
+        val entry = streamCache[key] ?: if (requestedServerKey.isNullOrBlank()) streamCache["$tmdbId-$season-$effectiveEpisode"] else null
         if (entry != null && (System.currentTimeMillis() - entry.timestamp < 15 * 60 * 1000L) && !blacklistedUrls.contains(entry.result.streamUrl)) {
             return entry.result
         }
@@ -240,8 +240,31 @@ object UnifiedStreamManager {
                 Log.w(TAG, "Native anime engine error: ${e.message}")
             }
 
-            // Strict native-only anime mode:
-            // do not continue into media.hmair.xyz or Railway fallback routes.
+            // Tier 0.1: Fallback to AnikotoScraper web API (media.hmair.xyz)
+            try {
+                Log.d(TAG, "Tier 0.1: Fallback to AnikotoScraper web API for $title S$season Ep$effectiveEpisode (audio: $audioType, server: $requestedServerKey)...")
+                val fallbackStream = AnikotoScraper.getStreamByTitle(
+                    title = title.ifBlank { tmdbId },
+                    season = season,
+                    episode = effectiveEpisode,
+                    preferDub = audioType.equals("dub", ignoreCase = true),
+                    requestedServerKey = requestedServerKey
+                )
+                if (fallbackStream != null && fallbackStream.streamUrl.isNotBlank()) {
+                    streamCache[cacheKey] = TimestampedStream(fallbackStream)
+                    saveToRoomCache(context, cacheKey, fallbackStream)
+                    Log.d(TAG, "AnikotoScraper web API resolved stream successfully: ${fallbackStream.streamUrl}")
+                    return fallbackStream
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "AnikotoScraper fallback error: ${e.message}")
+            }
+
+            // Mode B: If an explicit server was requested and unavailable, do NOT silently play wrong server or 360p
+            if (!requestedServerKey.isNullOrBlank()) {
+                Log.w(TAG, "Explicitly requested anime server $requestedServerKey failed to resolve for $title S$season Ep$effectiveEpisode.")
+                return null
+            }
             return null
         }
 
@@ -709,7 +732,7 @@ object UnifiedStreamManager {
         verifiedServersMap[cacheKey] = serverList
 
         // 1. Resolve TMDB ID and TV flag
-        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1))
+        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || tmdbId.startsWith("anikoto_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || title.contains("Series", true) || title.contains("Episode", true) || season > 1 || episode > 1))
         var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, effectiveIsTv)
         if (finalTmdbId.startsWith("movie_")) {
             finalTmdbId = finalTmdbId.removePrefix("movie_")
@@ -926,7 +949,7 @@ object UnifiedStreamManager {
         }
 
         // 2. Resolve numeric TMDB ID & clean title once upfront
-        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1 || episode > 1))
+        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || tmdbId.startsWith("anikoto_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || title.contains("Series", true) || title.contains("Episode", true) || season > 1 || episode > 1))
         var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, effectiveIsTv)
         if (finalTmdbId.startsWith("movie_")) {
             finalTmdbId = finalTmdbId.removePrefix("movie_")
