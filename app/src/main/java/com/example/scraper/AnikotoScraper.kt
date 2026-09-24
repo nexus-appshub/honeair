@@ -1375,7 +1375,8 @@ object AnikotoScraper {
         title: String,
         season: Int = 1,
         episode: Int = 1,
-        preferDub: Boolean = false
+        preferDub: Boolean = false,
+        requestedServerKey: String? = null
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         try {
             val effectiveEp = if (episode <= 0) 1 else episode
