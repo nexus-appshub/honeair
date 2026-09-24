@@ -365,11 +365,9 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         p.playWhenReady = true
         p.play()
 
-        // Give the first stream enough time to buffer/render. Episode 1 is often a cold
-        // request, so a 7-second "position == 0" check could incorrectly tear down a
-        // healthy player before its first frame arrives.
+        // Wait up to 7 seconds to verify video playback actually starts and renders video frames
         var secondsElapsed = 0
-        while (secondsElapsed < 15) {
+        while (secondsElapsed < 7) {
             delay(1000)
             secondsElapsed++
             if (p.playbackState == Player.STATE_READY) {
@@ -379,22 +377,18 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
                 }
             }
             if (hasRenderedVideoFrame && p.currentPosition > 0L) {
+                // Successfully rendered frame and progressing
                 break
             }
         }
 
-        // Only report a stall when the player is genuinely unable to proceed. Do not
-        // treat a normal BUFFERING state or a temporary position of 0 as an error.
+        // Explicitly detect 0-length media playback states or stalled playback without rendered frames
         if (!hasRenderedVideoFrame) {
-            val state = p.playbackState
             val dur = p.duration.coerceAtLeast(0L)
             val pos = p.currentPosition.coerceAtLeast(0L)
-            val genuinelyStalled = state == Player.STATE_IDLE ||
-                state == Player.STATE_ENDED ||
-                (state == Player.STATE_READY && p.playWhenReady && !p.isPlaying && dur > 0L)
-            if (genuinelyStalled) {
-                android.util.Log.w("MovieExoPlayerView", "Playback did not start after grace period for $currentUrl (pos: ${pos}ms, dur: ${dur}ms, state: $state, playWhenReady: ${p.playWhenReady}).")
-                onPlaybackError("Playback did not start after the initial buffer window.")
+            if (pos == 0L || dur == 0L || p.playbackState == Player.STATE_IDLE || p.playbackState == Player.STATE_ENDED) {
+                android.util.Log.w("MovieExoPlayerView", "0-length media playback state or stalled stream detected for $currentUrl (pos: ${pos}ms, dur: ${dur}ms, state: ${p.playbackState}). Re-triggering scraper for current server...")
+                onPlaybackError("0-length media playback state detected.")
             }
         }
     }

@@ -2284,9 +2284,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedServer = MutableStateFlow<com.example.scraper.AnikotoServer?>(null)
     val selectedServer: StateFlow<com.example.scraper.AnikotoServer?> = _selectedServer.asStateFlow()
 
-    private val _selectedServerError = MutableStateFlow<String?>(null)
-    val selectedServerError: StateFlow<String?> = _selectedServerError.asStateFlow()
-
     private val _isFetchingServers = MutableStateFlow(false)
     val isFetchingServers: StateFlow<Boolean> = _isFetchingServers.asStateFlow()
 
@@ -2294,16 +2291,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         private set
 
     fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?, episode: Int? = null) {
-        activePlaybackJob?.cancel()
-        _selectedServerError.value = null
         _selectedServer.value = server
         val activeItem = _activeMediaItem.value
         val curEp = episode ?: _activeMediaEpisode.value
         val curSeason = _activeMediaSeason.value
         val generation = currentPlaybackGeneration.incrementAndGet()
-        _activeMediaStreamUrl.value = null
-        _activeMediaStreamHeaders.value = emptyMap()
-        _isPlayerPlaying.value = false
         if (server != null && activeItem != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
@@ -2321,8 +2313,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         com.example.scraper.UnifiedStreamManager.getStream(
                             context = getApplication(),
-                            title = currentServerWatchUrl.ifBlank { activeItem.title },
-                            tmdbId = activeItem.imdbId ?: activeItem.id,
+                            title = activeItem.title,
+                            tmdbId = activeItem.id,
                             isTv = activeItem.type.equals("series", ignoreCase = true) || activeItem.type.equals("tv", ignoreCase = true),
                             season = curSeason,
                             episode = curEp,
@@ -2333,25 +2325,19 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
                         if (generation == currentPlaybackGeneration.get()) {
-                            _selectedServerError.value = null
                             _activeMediaStreamUrl.value = streamRes.streamUrl
                             _activeMediaStreamHeaders.value = streamRes.headers
                             _isPlayerPlaying.value = true
                         }
-                    } else if (generation == currentPlaybackGeneration.get()) {
-                        _selectedServerError.value = "${server.name.ifBlank { server.id }} unavailable for S${curSeason}E${curEp}"
                     }
                 } catch (e: Exception) {
-                    if (generation == currentPlaybackGeneration.get()) {
-                        _selectedServerError.value = "${server.name.ifBlank { server.id }} unavailable: ${e.message ?: "stream resolution failed"}"
-                    }
+                    e.printStackTrace()
                 }
             }
         }
     }
 
     fun fetchAnikotoServers(item: MediaItem, season: Int = 1, episode: Int = 1) {
-        val requestGeneration = currentPlaybackGeneration.get()
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
             title = item.title,
             category = item.category,
@@ -2384,8 +2370,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     season = season,
                     episode = episode
                 )
-                if (requestGeneration != currentPlaybackGeneration.get()) return@launch
-
                 _availableSubServers.value = group.subServers
                 _availableDubServers.value = group.dubServers
                 currentServerWatchUrl = group.watchUrl
@@ -2407,8 +2391,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val extracted = com.example.scraper.UnifiedStreamManager.getStream(
                         context = getApplication(),
-                        title = group.watchUrl.ifBlank { item.title },
-                        tmdbId = item.imdbId ?: item.id,
+                        title = item.title,
+                        tmdbId = item.id,
                         isTv = item.type.equals("series", ignoreCase = true) || item.type.equals("tv", ignoreCase = true),
                         season = season,
                         episode = episode,
@@ -2423,12 +2407,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
 
-                if (requestGeneration != currentPlaybackGeneration.get()) return@launch
-
                 if (workingServer != null) {
                     _selectedServer.value = workingServer
                 } else {
-                    _selectedServer.value = null
+                    _selectedServer.value = targetServers.firstOrNull() ?: group.subServers.firstOrNull() ?: group.dubServers.firstOrNull()
                 }
 
                 if (workingExtracted != null && _activeMediaItem.value?.id == item.id) {
@@ -3716,9 +3698,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
         val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
 
-        // New content starts in automatic mode; do not inherit a previous manual server.
-        _selectedStreamServerKey.value = null
-
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
             title = effectiveItem.title,
             category = effectiveItem.category,
@@ -3819,7 +3798,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _activeMediaEpisode.value = episode
         _activeMediaStreamUrl.value = null
         _activeMediaStreamHeaders.value = emptyMap()
-        _isPlayerPlaying.value = false
         addMediaToHistory(effectiveItem)
 
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
