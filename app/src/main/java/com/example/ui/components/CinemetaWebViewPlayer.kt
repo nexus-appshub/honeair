@@ -597,38 +597,6 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     var showTrailerDialog by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<com.example.data.model.MediaItem?>(null) }
 
-    // Auto-extract stream when user or server group sets the selected Anikoto server (preserves SUB / DUB)
-    LaunchedEffect(selectedServer) {
-        val srv = selectedServer
-        if (isAnime && srv != null) {
-            withContext(Dispatchers.IO) {
-                val extracted = com.example.scraper.UnifiedStreamManager.getStream(
-                    context = context,
-                    title = title,
-                    tmdbId = imdbId,
-                    isTv = isSeries,
-                    season = currentSeason,
-                    episode = currentEpisode,
-                    isAnime = true,
-                    audioType = srv.type.lowercase(),
-                    requestedServerKey = srv.id
-                )
-                if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                    withContext(Dispatchers.Main) {
-                        capturedVideoUrl = extracted.streamUrl
-                        customScrapedHeaders = extracted.headers
-                        if (extracted.subtitles.isNotEmpty()) {
-                            activeSubtitles = extracted.subtitles
-                        }
-                        useExoPlayer = true
-                        isLoading = false
-                        hasError = false
-                    }
-                }
-            }
-        }
-    }
-
     LaunchedEffect(currentMediaItem) {
         viewModel.clearYouTubeTrailerId()
         currentMediaItem?.let {
