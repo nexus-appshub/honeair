@@ -215,6 +215,7 @@ object UnifiedStreamManager {
                 Log.d(TAG, "Tier 0: Querying NativeAnimeScraper for $title / TMDB ID: $tmdbId (S$season Ep$effectiveEpisode, audio: $audioType, server: $requestedServerKey)...")
                 val native = NativeAnimeScraper.extractStream(
                     titleOrSlug = when {
+                        title.contains("/watch/", ignoreCase = true) -> title
                         tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
                         title.isNotBlank() -> title
                         else -> tmdbId
@@ -882,7 +883,12 @@ object UnifiedStreamManager {
                         group.subServers.forEach { srv ->
                             launch(Dispatchers.IO) {
                                 try {
-                                    val res = AnikotoScraper.extractStreamFromServer(srv, watchUrl, effectiveEpisode)
+                                    val res = AnikotoScraper.extractStreamFromServer(
+                                        server = srv,
+                                        watchUrl = watchUrl,
+                                        episode = effectiveEpisode,
+                                        season = season
+                                    )
                                     if (res != null && res.streamUrl.isNotBlank()) {
                                         registerVerified("anikoto_sub_${srv.linkId}", "SUB: ${srv.name}", "SUB", 0xFF00E5FF, res)
                                     }
