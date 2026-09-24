@@ -12,11 +12,5 @@ data class ScrapedStreamResult(
     val cookie: String = "",
     val headers: Map<String, String> = emptyMap(),
     val referer: String = "",
-    val subtitles: List<SubtitleTrack> = emptyList(),
-    val resolvedServerKey: String? = null,
-    val resolvedServerName: String? = null,
-    val audioType: String? = null,
-    val season: Int? = null,
-    val episode: Int? = null,
-    val mediaId: String? = null
+    val subtitles: List<SubtitleTrack> = emptyList()
 )

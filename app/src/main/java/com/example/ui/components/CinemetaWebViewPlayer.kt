@@ -278,7 +278,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             ?: allMediaItems.find { it.title == title }
     }
 
-    val isSeries = remember(imdbId, type, currentMediaItem, mediaDetailState, currentSeason, currentEpisode) {
+    val isSeries = remember(imdbId, type, currentMediaItem, mediaDetailState, currentSeason, currentEpisode, season, episode) {
         val rawId = imdbId.lowercase()
         val itemId = currentMediaItem?.id?.lowercase() ?: ""
         val t = type.lowercase()
@@ -286,13 +286,13 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
         val itemType = currentMediaItem?.type?.lowercase() ?: ""
         val hasSeasonsInDetail = (mediaDetailState?.number_of_seasons != null && (mediaDetailState?.number_of_seasons ?: 0) > 0)
         val isExplicitMovieInDetail = (mediaDetailState?.runtime != null && (mediaDetailState?.number_of_seasons ?: 0) == 0)
-        val isEpisodic = (currentMediaItem?.episodes?.isNotBlank() == true && currentMediaItem?.episodes?.contains("Season", ignoreCase = true) == true)
-        val hasMultipleEpisodes = currentEpisode > 1 || currentSeason > 1
-        val isSeriesCategory = cat.contains("series") || cat.contains("tv show") || cat.contains("natok") || cat.contains("drama") || cat.contains("k-drama")
-        val isSeriesType = t == "series" || t == "tv" || itemType == "series" || itemType == "tv"
-        val isSeriesId = rawId.startsWith("series_") || itemId.startsWith("series_")
+        val isEpisodic = (currentMediaItem?.episodes?.isNotBlank() == true)
+        val hasMultipleEpisodes = currentEpisode > 1 || currentSeason > 1 || episode > 1 || season > 1
+        val isSeriesCategory = cat.contains("series") || cat.contains("tv show") || cat.contains("natok") || cat.contains("drama") || cat.contains("k-drama") || cat.contains("show")
+        val isSeriesType = t == "series" || t == "tv" || itemType == "series" || itemType == "tv" || t == "anime" || itemType == "anime"
+        val isSeriesId = rawId.startsWith("series_") || itemId.startsWith("series_") || rawId.startsWith("anikoto_") || itemId.startsWith("anikoto_")
 
-        if (hasSeasonsInDetail || hasMultipleEpisodes || isSeriesCategory || isSeriesType || isEpisodic || isSeriesId) {
+        if (isSeriesType || isSeriesCategory || isSeriesId || hasSeasonsInDetail || isEpisodic || hasMultipleEpisodes) {
             true
         } else if (isExplicitMovieInDetail || t == "movie" || itemType == "movie" || rawId.startsWith("movie_") || itemId.startsWith("movie_")) {
             false
@@ -431,7 +431,9 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 isTv = isSeries,
                                 season = currentSeason,
                                 episode = currentEpisode,
-                                isAnime = isAnime
+                                isAnime = isAnime,
+                                audioType = if (selectedServer?.type?.lowercase() == "dub") "dub" else "sub",
+                                requestedServerKey = selectedServer?.id
                             )
                         }
                         if (result != null && result.streamUrl.isNotBlank()) {
@@ -450,11 +452,15 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
 
                         // For anime, also directly probe high-speed Anikoto / universal endpoints
                         if (isAnime) {
-                            val animeRes = com.example.scraper.AnikotoScraper.getStreamByTitle(
+                            val animeRes = com.example.scraper.UnifiedStreamManager.getStream(
+                                context = context,
                                 title = title,
+                                tmdbId = imdbId,
+                                isTv = isSeries,
                                 season = currentSeason,
                                 episode = currentEpisode,
-                                preferDub = false
+                                isAnime = isAnime,
+                                audioType = if (selectedServer?.type?.lowercase() == "dub") "dub" else "sub"
                             )
                             if (animeRes != null && animeRes.streamUrl.isNotBlank()) {
                                 withContext(Dispatchers.Main) {
@@ -497,15 +503,20 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
                                 var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
                                 var workingSrv: com.example.scraper.AnikotoServer? = null
-                                val preferDub = selectedServer?.type?.lowercase() == "dub" || viewModel.preferredAnimeAudio == "dub"
-                                val srvList = if (preferDub) {
-                                    (dubServers + subServers)
-                                } else {
-                                    (subServers + dubServers)
-                                }.distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
+                                val srvList = (subServers + dubServers).distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
                                 for (srv in srvList) {
                                     if (srv.streamUrl.isNotBlank() && failedAnimeUrls.contains(srv.streamUrl)) continue
-                                    val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(srv, watchUrl, currentEpisode)
+                                    val extracted = com.example.scraper.UnifiedStreamManager.getStream(
+                                        context = context,
+                                        title = title,
+                                        tmdbId = imdbId,
+                                        isTv = isSeries,
+                                        season = currentSeason,
+                                        episode = currentEpisode,
+                                        isAnime = true,
+                                        audioType = srv.type.lowercase(),
+                                        requestedServerKey = srv.id
+                                    )
                                     if (extracted != null && extracted.streamUrl.isNotBlank() && !failedAnimeUrls.contains(extracted.streamUrl)) {
                                         workingExtracted = extracted
                                         workingSrv = srv
@@ -513,7 +524,16 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     }
                                 }
                                 if (workingExtracted == null) {
-                                    workingExtracted = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, preferDub)
+                                    workingExtracted = com.example.scraper.UnifiedStreamManager.getStream(
+                                        context = context,
+                                        title = title,
+                                        tmdbId = imdbId,
+                                        isTv = isSeries,
+                                        season = currentSeason,
+                                        episode = currentEpisode,
+                                        isAnime = true,
+                                        audioType = if (selectedServer?.type?.lowercase() == "dub") "dub" else "sub"
+                                    )
                                 }
                                 withContext(Dispatchers.Main) {
                                     if (workingExtracted != null && workingExtracted.streamUrl.isNotBlank()) {
@@ -582,11 +602,16 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
         val srv = selectedServer
         if (isAnime && srv != null) {
             withContext(Dispatchers.IO) {
-                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
-                val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
-                    server = srv,
-                    watchUrl = watchUrl,
-                    episode = currentEpisode
+                val extracted = com.example.scraper.UnifiedStreamManager.getStream(
+                    context = context,
+                    title = title,
+                    tmdbId = imdbId,
+                    isTv = isSeries,
+                    season = currentSeason,
+                    episode = currentEpisode,
+                    isAnime = true,
+                    audioType = srv.type.lowercase(),
+                    requestedServerKey = srv.id
                 )
                 if (extracted != null && extracted.streamUrl.isNotBlank()) {
                     withContext(Dispatchers.Main) {
@@ -1467,18 +1492,38 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                 isScrapingDirectStream = true
                                 scope.launch(Dispatchers.IO) {
                                     val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
-                                    val preferDub = selectedServer?.type?.lowercase() == "dub" || viewModel.preferredAnimeAudio == "dub"
-                                    val candidateServers = if (preferDub) {
-                                        (dubServers + subServers)
-                                    } else {
-                                        (subServers + dubServers)
-                                    }.distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
+                                    val candidateServers = (subServers + dubServers).distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
                                     var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
                                     var workingSrv: com.example.scraper.AnikotoServer? = null
 
                                     for (srv in candidateServers) {
                                         if (srv.streamUrl.isNotBlank() && failedAnimeUrls.contains(srv.streamUrl)) continue
-                                        val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(srv, watchUrl, currentEpisode)
+                                        
+                                        val extracted = if (srv.streamUrl.isNotBlank()) {
+                                            com.example.scraper.ScrapedStreamResult(
+                                                streamUrl = srv.streamUrl,
+                                                headers = mapOf(
+                                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                                    "Referer" to if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                                    "Origin" to "https://anikoto.cz"
+                                                ),
+                                                referer = if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                                subtitles = srv.tracks
+                                            )
+                                        } else {
+                                            com.example.scraper.UnifiedStreamManager.getStream(
+                                                context = context,
+                                                title = title,
+                                                tmdbId = imdbId,
+                                                isTv = isSeries,
+                                                season = currentSeason,
+                                                episode = currentEpisode,
+                                                isAnime = true,
+                                                audioType = srv.type.lowercase(),
+                                                requestedServerKey = srv.id
+                                            )
+                                        }
+                                        
                                         if (extracted != null && extracted.streamUrl.isNotBlank() && !failedAnimeUrls.contains(extracted.streamUrl)) {
                                             workingExtracted = extracted
                                             workingSrv = srv
@@ -1487,23 +1532,34 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     }
 
                                     if (workingExtracted == null) {
-                                        if (preferDub) {
-                                            val directDub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, true)
-                                            if (directDub != null && directDub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directDub.streamUrl)) {
-                                                workingExtracted = directDub
-                                            }
+                                        val directSub = com.example.scraper.UnifiedStreamManager.getStream(
+                                            context = context,
+                                            title = title,
+                                            tmdbId = imdbId,
+                                            isTv = isSeries,
+                                            season = currentSeason,
+                                            episode = currentEpisode,
+                                            isAnime = true,
+                                            audioType = "sub"
+                                        )
+                                        if (directSub != null && directSub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directSub.streamUrl)) {
+                                            workingExtracted = directSub
                                         }
-                                        if (workingExtracted == null) {
-                                            val directSub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
-                                            if (directSub != null && directSub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directSub.streamUrl)) {
-                                                workingExtracted = directSub
-                                            }
-                                        }
-                                        if (workingExtracted == null && !preferDub) {
-                                            val directDub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, true)
-                                            if (directDub != null && directDub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directDub.streamUrl)) {
-                                                workingExtracted = directDub
-                                            }
+                                    }
+
+                                    if (workingExtracted == null) {
+                                        val directDub = com.example.scraper.UnifiedStreamManager.getStream(
+                                            context = context,
+                                            title = title,
+                                            tmdbId = imdbId,
+                                            isTv = isSeries,
+                                            season = currentSeason,
+                                            episode = currentEpisode,
+                                            isAnime = true,
+                                            audioType = "dub"
+                                        )
+                                        if (directDub != null && directDub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directDub.streamUrl)) {
+                                            workingExtracted = directDub
                                         }
                                     }
 
@@ -1572,12 +1628,30 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     isLoading = true
                                     hasError = false
                                 }
-                                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
-                                val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
-                                    server = srv,
-                                    watchUrl = watchUrl,
-                                    episode = currentEpisode
-                                )
+                                val extracted = if (srv.streamUrl.isNotBlank()) {
+                                    com.example.scraper.ScrapedStreamResult(
+                                        streamUrl = srv.streamUrl,
+                                        headers = mapOf(
+                                            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                            "Referer" to if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                            "Origin" to "https://anikoto.cz"
+                                        ),
+                                        referer = if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                        subtitles = srv.tracks
+                                    )
+                                } else {
+                                    com.example.scraper.UnifiedStreamManager.getStream(
+                                        context = context,
+                                        title = title,
+                                        tmdbId = imdbId,
+                                        isTv = isSeries,
+                                        season = currentSeason,
+                                        episode = currentEpisode,
+                                        isAnime = true,
+                                        audioType = srv.type.lowercase(),
+                                        requestedServerKey = srv.id
+                                    )
+                                }
                                 withContext(Dispatchers.Main) {
                                     if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                         capturedVideoUrl = extracted.streamUrl
@@ -1590,6 +1664,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                         hasError = false
                                     } else {
                                         isLoading = false
+                                        hasError = true
                                     }
                                 }
                             }
@@ -2689,12 +2764,30 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                         isLoading = true
                                                         hasError = false
                                                     }
-                                                    val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
-                                                    val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
-                                                        server = srv,
-                                                        watchUrl = watchUrl,
-                                                        episode = currentEpisode
-                                                    )
+                                                    val extracted = if (srv.streamUrl.isNotBlank()) {
+                                                        com.example.scraper.ScrapedStreamResult(
+                                                            streamUrl = srv.streamUrl,
+                                                            headers = mapOf(
+                                                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                                                "Referer" to if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                                                "Origin" to "https://anikoto.cz"
+                                                            ),
+                                                            referer = if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                                            subtitles = srv.tracks
+                                                        )
+                                                    } else {
+                                                        com.example.scraper.UnifiedStreamManager.getStream(
+                                                            context = context,
+                                                            title = title,
+                                                            tmdbId = imdbId,
+                                                            isTv = isSeries,
+                                                            season = currentSeason,
+                                                            episode = currentEpisode,
+                                                            isAnime = true,
+                                                            audioType = srv.type.lowercase(),
+                                                            requestedServerKey = srv.id
+                                                        )
+                                                    }
                                                     withContext(Dispatchers.Main) {
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                                             capturedVideoUrl = extracted.streamUrl
@@ -2707,6 +2800,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                             hasError = false
                                                         } else {
                                                             isLoading = false
+                                                            hasError = true
                                                         }
                                                     }
                                                 }
@@ -2785,12 +2879,30 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                         isLoading = true
                                                         hasError = false
                                                     }
-                                                    val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { "https://anikoto.cz" }
-                                                    val extracted = com.example.scraper.AnikotoScraper.extractStreamFromServer(
-                                                        server = srv,
-                                                        watchUrl = watchUrl,
-                                                        episode = currentEpisode
-                                                    )
+                                                    val extracted = if (srv.streamUrl.isNotBlank()) {
+                                                        com.example.scraper.ScrapedStreamResult(
+                                                            streamUrl = srv.streamUrl,
+                                                            headers = mapOf(
+                                                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                                                "Referer" to if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                                                "Origin" to "https://anikoto.cz"
+                                                            ),
+                                                            referer = if (srv.referer.isNotBlank()) srv.referer else "https://anikoto.cz/",
+                                                            subtitles = srv.tracks
+                                                        )
+                                                    } else {
+                                                        com.example.scraper.UnifiedStreamManager.getStream(
+                                                            context = context,
+                                                            title = title,
+                                                            tmdbId = imdbId,
+                                                            isTv = isSeries,
+                                                            season = currentSeason,
+                                                            episode = currentEpisode,
+                                                            isAnime = true,
+                                                            audioType = srv.type.lowercase(),
+                                                            requestedServerKey = srv.id
+                                                        )
+                                                    }
                                                     withContext(Dispatchers.Main) {
                                                         if (extracted != null && extracted.streamUrl.isNotBlank()) {
                                                             capturedVideoUrl = extracted.streamUrl
@@ -2803,6 +2915,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                                             hasError = false
                                                         } else {
                                                             isLoading = false
+                                                            hasError = true
                                                         }
                                                     }
                                                 }

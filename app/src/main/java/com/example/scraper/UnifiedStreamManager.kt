@@ -148,7 +148,7 @@ object UnifiedStreamManager {
     fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1, audioType: String = "sub", requestedServerKey: String? = null): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
         val key = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
-        val entry = streamCache[key]
+        val entry = streamCache[key] ?: if (requestedServerKey.isNullOrBlank()) streamCache["$tmdbId-$season-$effectiveEpisode"] else null
         if (entry != null && (System.currentTimeMillis() - entry.timestamp < 15 * 60 * 1000L) && !blacklistedUrls.contains(entry.result.streamUrl)) {
             return entry.result
         }
@@ -212,16 +212,17 @@ object UnifiedStreamManager {
         val isItemAnime = isAnime || tmdbId.startsWith("anikoto_") || tmdbId.startsWith("al_") || tmdbId.startsWith("mal_") || AnimePosterEngine.isAnime(title = title, id = tmdbId)
         if (isItemAnime) {
             try {
-                Log.d(TAG, "Tier 0: Querying UniversalAnimeDownloadScraper for $title / TMDB ID: $tmdbId (S$season Ep$effectiveEpisode, audio: $audioType, server: $requestedServerKey)...")
-                val native = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
-                    title = when {
+                Log.d(TAG, "Tier 0: Querying NativeAnimeScraper for $title / TMDB ID: $tmdbId (S$season Ep$effectiveEpisode, audio: $audioType, server: $requestedServerKey)...")
+                val native = NativeAnimeScraper.extractStream(
+                    titleOrSlug = when {
                         tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
                         title.isNotBlank() -> title
                         else -> tmdbId
                     },
                     season = season,
-                    episode = effectiveEpisode,
-                    preferDub = audioType.equals("dub", ignoreCase = true)
+                    episodeNum = effectiveEpisode,
+                    audioType = audioType,
+                    requestedServerKey = requestedServerKey
                 )
 
                 if (native != null && native.streamUrl.isNotBlank()) {
@@ -230,6 +231,11 @@ object UnifiedStreamManager {
                     Log.d(TAG, "Native anime engine resolved stream successfully: ${native.streamUrl}")
                     return native
                 }
+
+                Log.w(
+                    TAG,
+                    "Native anime engine failed: ${NativeAnimeScraper.lastError}"
+                )
             } catch (e: Exception) {
                 Log.w(TAG, "Native anime engine error: ${e.message}")
             }

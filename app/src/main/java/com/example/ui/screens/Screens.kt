@@ -8168,9 +8168,9 @@ fun SettingsScreen(
 
             item {
                 SecretSettingRow(
-                    title = "Cine Stream",
-                    subtitle = "Stream movies & cinema collection (cine.hmair.xyz)",
-                    icon = Icons.Outlined.Movie,
+                    title = "Cinestream",
+                    subtitle = "Stream movies & cinema collection",
+                    icon = Icons.Default.Movie,
                     onClick = { showCineStreamBrowser = true }
                 )
             }

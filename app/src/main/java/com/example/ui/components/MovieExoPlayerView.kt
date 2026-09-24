@@ -359,21 +359,42 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
         exoPlayer = player
     }
 
-    // Safe Auto-play kicker
+    // Safe Auto-play kicker & 0-length media playback state watchdog
     LaunchedEffect(exoPlayer, currentUrl) {
         val p = exoPlayer ?: return@LaunchedEffect
         p.playWhenReady = true
         p.play()
 
-        // Periodically verify playback status while player is active
-        while (true) {
-            delay(2000)
-            val currentP = exoPlayer ?: break
-            if (currentP.playbackState == Player.STATE_READY) {
-                if (!currentP.isPlaying || !currentP.playWhenReady) {
-                    currentP.playWhenReady = true
-                    currentP.play()
+        // Give the first stream enough time to buffer/render. Episode 1 is often a cold
+        // request, so a 7-second "position == 0" check could incorrectly tear down a
+        // healthy player before its first frame arrives.
+        var secondsElapsed = 0
+        while (secondsElapsed < 15) {
+            delay(1000)
+            secondsElapsed++
+            if (p.playbackState == Player.STATE_READY) {
+                if (!p.isPlaying || !p.playWhenReady) {
+                    p.playWhenReady = true
+                    p.play()
                 }
+            }
+            if (hasRenderedVideoFrame && p.currentPosition > 0L) {
+                break
+            }
+        }
+
+        // Only report a stall when the player is genuinely unable to proceed. Do not
+        // treat a normal BUFFERING state or a temporary position of 0 as an error.
+        if (!hasRenderedVideoFrame) {
+            val state = p.playbackState
+            val dur = p.duration.coerceAtLeast(0L)
+            val pos = p.currentPosition.coerceAtLeast(0L)
+            val genuinelyStalled = state == Player.STATE_IDLE ||
+                state == Player.STATE_ENDED ||
+                (state == Player.STATE_READY && p.playWhenReady && !p.isPlaying && dur > 0L)
+            if (genuinelyStalled) {
+                android.util.Log.w("MovieExoPlayerView", "Playback did not start after grace period for $currentUrl (pos: ${pos}ms, dur: ${dur}ms, state: $state, playWhenReady: ${p.playWhenReady}).")
+                onPlaybackError("Playback did not start after the initial buffer window.")
             }
         }
     }
