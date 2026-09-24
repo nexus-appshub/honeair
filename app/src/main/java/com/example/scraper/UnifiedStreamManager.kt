@@ -260,6 +260,44 @@ object UnifiedStreamManager {
                 Log.w(TAG, "AnikotoScraper fallback error: ${e.message}")
             }
 
+            // Tier 0.2: Extract directly via server list (fetchAvailableServers -> extractStreamFromServer)
+            try {
+                Log.d(TAG, "Tier 0.2: Fetching available servers for $title S$season Ep$effectiveEpisode (audio: $audioType, server: $requestedServerKey)...")
+                val serverGroup = AnikotoScraper.fetchAvailableServers(
+                    title = title.ifBlank { tmdbId },
+                    season = season,
+                    episode = effectiveEpisode
+                )
+                val targetList = if (audioType.equals("dub", ignoreCase = true)) serverGroup.dubServers else serverGroup.subServers
+                val candidateList = if (!requestedServerKey.isNullOrBlank()) {
+                    val cleanKey = requestedServerKey.replace(Regex("""(?i)[-_ ]*(?:dub|sub)"""), "").lowercase().trim()
+                    targetList.filter { 
+                        val name = it.name.lowercase()
+                        val id = it.id.lowercase()
+                        name.contains(cleanKey) || id.contains(cleanKey) || cleanKey.contains(name) || cleanKey.contains(id)
+                    }.ifEmpty { targetList }
+                } else {
+                    targetList
+                }
+
+                for (candidateServer in candidateList) {
+                    val resolved = AnikotoScraper.extractStreamFromServer(
+                        server = candidateServer,
+                        watchUrl = serverGroup.watchUrl.ifBlank { title },
+                        episode = effectiveEpisode,
+                        season = season
+                    )
+                    if (resolved != null && resolved.streamUrl.isNotBlank()) {
+                        streamCache[cacheKey] = TimestampedStream(resolved)
+                        saveToRoomCache(context, cacheKey, resolved)
+                        Log.d(TAG, "Tier 0.2 resolved server ${candidateServer.name} (${candidateServer.type}) successfully: ${resolved.streamUrl}")
+                        return resolved
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Tier 0.2 extraction error: ${e.message}")
+            }
+
             // Mode B: If an explicit server was requested and unavailable, do NOT silently play wrong server or 360p
             if (!requestedServerKey.isNullOrBlank()) {
                 Log.w(TAG, "Explicitly requested anime server $requestedServerKey failed to resolve for $title S$season Ep$effectiveEpisode.")

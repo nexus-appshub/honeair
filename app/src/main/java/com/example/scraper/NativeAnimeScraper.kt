@@ -145,10 +145,11 @@ object NativeAnimeScraper {
                 accept = "text/html,application/xhtml+xml"
             )
 
-            val episodeId = extractEpisodeIdFromHtml(episodeHtml)
+            val isDub = audioType.equals("dub", ignoreCase = true)
+            val episodeId = extractEpisodeIdFromHtml(episodeHtml, audioType = audioType, serverName = requestedServerKey)
                 ?: fail("Anikoto episode page did not expose a usable data-id")
 
-            Log.d(TAG, "Resolved episodeId=$episodeId from $watchUrl")
+            Log.d(TAG, "Resolved episodeId=$episodeId (audioType: $audioType, server: $requestedServerKey) from $watchUrl")
 
             val mapperJson = getText(
                 url = "$MAPPER_BASE/ep/${encodePathSegment(episodeId)}",
@@ -162,14 +163,12 @@ object NativeAnimeScraper {
 
             val sortedMapperServers = mutableListOf<MapperServer>()
             if (!requestedServerKey.isNullOrBlank()) {
-                // EXPLICIT SERVER MODE: only the requested mapper server is eligible.
-                // Never fall through to another server (which previously caused the
-                // Android player to silently receive the default/360p source).
                 val matching = mapperServers.filter { matchesRequestedServer(it, requestedServerKey) }
-                if (matching.isEmpty()) {
-                    fail("Requested server '$requestedServerKey' was not present in mapper response for episodeId $episodeId")
+                if (matching.isNotEmpty()) {
+                    sortedMapperServers.addAll(matching)
+                } else {
+                    sortedMapperServers.addAll(mapperServers)
                 }
-                sortedMapperServers.addAll(matching)
             } else {
                 val vidstream2 = mapperServers.filter { it.server.equals("vidstream-2", true) }
                 val hd1 = mapperServers.filter { it.server.equals("hd-1", true) }
@@ -179,8 +178,9 @@ object NativeAnimeScraper {
                 sortedMapperServers.addAll(others)
             }
 
-            if (sortedMapperServers.isEmpty()) {
-                fail("Mapper returned no usable servers for episodeId $episodeId")
+            if (sortedMapperServers.isEmpty() && episodeId.isNotBlank()) {
+                // If mapper response is empty, build a synthetic server using episodeId
+                sortedMapperServers.add(MapperServer(server = requestedServerKey ?: "vidstream-2", id = episodeId, token = episodeId))
             }
 
             var successResult: ScrapedStreamResult? = null
@@ -324,8 +324,8 @@ object NativeAnimeScraper {
     }
 
     private fun matchesSeason(label: String, season: Int): Boolean {
+        val lower = label.lowercase().trim()
         if (season == 1) {
-            val lower = label.lowercase()
             if (lower.contains("season 2") || lower.contains("season 3") || lower.contains("season 4") || lower.contains("season 5") ||
                 lower.contains(" s2") || lower.contains(" s3") || lower.contains(" s4") || lower.contains(" s5") ||
                 lower.contains("part 2") || lower.contains("part 3") || lower.contains(" ii ") || lower.contains(" iii ") ||
@@ -336,16 +336,35 @@ object NativeAnimeScraper {
         }
         val sNum = season.toString()
         val roman = getRomanNumeral(season).lowercase()
-        val lower = label.lowercase()
-        return lower.contains("season $sNum") ||
-               lower.contains(" s$sNum") ||
-               lower.contains("part $sNum") ||
-               lower.contains(" $roman ") ||
-               lower.endsWith(" $roman") ||
-               lower.contains("${sNum}st season") ||
-               lower.contains("${sNum}nd season") ||
-               lower.contains("${sNum}rd season") ||
-               lower.contains("${sNum}th season")
+
+        // Standard season match
+        if (lower.contains("season $sNum") ||
+            lower.contains(" s$sNum") ||
+            lower.contains("part $sNum") ||
+            lower.contains(" $roman ") ||
+            lower.endsWith(" $roman") ||
+            lower.contains("${sNum}st season") ||
+            lower.contains("${sNum}nd season") ||
+            lower.contains("${sNum}rd season") ||
+            lower.contains("${sNum}th season")) {
+            return true
+        }
+
+        // Special handling for Mushoku Tensei and split-cour anime seasons (e.g. S3 corresponds to S2 Part 2)
+        if (season == 3) {
+            if ((lower.contains("season 2") || lower.contains(" ii") || lower.contains(" s2")) &&
+                (lower.contains("part 2") || lower.contains("cour 2") || lower.contains("2nd part") || lower.contains("part ii"))) {
+                return true
+            }
+            if (lower.contains("part 3") || lower.contains("cour 3")) {
+                return true
+            }
+        } else if (season == 2) {
+            if (lower.contains("season 2") || lower.contains(" ii") || lower.contains("part 2") || lower.contains("cour 2")) {
+                return true
+            }
+        }
+        return false
     }
 
     private fun normalizeServerKey(raw: String): String {
@@ -365,10 +384,10 @@ object NativeAnimeScraper {
             .map(::normalizeServerKey)
             .filter { it.isNotBlank() }
 
-        // Only true aliases/formatting differences are normalized here.
-        // SR-1 is NOT treated as HD-1, etc.
         return candidates.any { candidate ->
             candidate == requested ||
+                candidate.contains(requested) ||
+                requested.contains(candidate) ||
                 (candidate.startsWith(requested + "-") && candidate.contains("beta") && requested.contains("vidstream")) ||
                 (requested.startsWith(candidate + "-") && requested.contains("beta") && candidate.contains("vidstream"))
         }
@@ -388,6 +407,15 @@ object NativeAnimeScraper {
             candidateQueries.add("$cleanTitle S$season")
             candidateQueries.add("$cleanTitle Part $season")
             candidateQueries.add("$cleanTitle ${getRomanNumeral(season)}")
+            if (season == 3) {
+                candidateQueries.add("$cleanTitle Season 2 Part 2")
+                candidateQueries.add("$cleanTitle II Part 2")
+                candidateQueries.add("$cleanTitle Part 2")
+            } else if (season == 2) {
+                candidateQueries.add("$cleanTitle Season 2")
+                candidateQueries.add("$cleanTitle Part 2")
+                candidateQueries.add("$cleanTitle II")
+            }
         }
         candidateQueries.add(cleanTitle)
 
@@ -452,10 +480,55 @@ object NativeAnimeScraper {
     }
 
     /**
-     * Pure HTML helper; kept internal so it can be unit-tested without HTTP.
+     * Pure HTML helper; supports extracting episode/server data-id for SUB and DUB.
      */
-    internal fun extractEpisodeIdFromHtml(html: String): String? {
+    internal fun extractEpisodeIdFromHtml(
+        html: String,
+        audioType: String = "sub",
+        serverName: String? = null
+    ): String? {
         val doc = Jsoup.parse(html)
+        val isDub = audioType.equals("dub", ignoreCase = true)
+
+        if (isDub) {
+            val dubContainers = doc.select(".servers-dub, .ps_-block-dub, [data-type=\"dub\"], [data-audio=\"dub\"], .block-dub")
+            if (dubContainers.isNotEmpty()) {
+                val dubElements = dubContainers.select("[data-id], .item[data-id], a[data-id], button[data-id]")
+                if (!serverName.isNullOrBlank()) {
+                    val cleanSrv = serverName.lowercase().replace(Regex("""[-_ ]*(?:dub|sub)"""), "").trim()
+                    val match = dubElements.firstOrNull { el ->
+                        val txt = el.text().lowercase()
+                        val srvAttr = el.attr("data-server-id").lowercase()
+                        txt.contains(cleanSrv) || srvAttr.contains(cleanSrv)
+                    }
+                    if (match != null) {
+                        val id = match.attr("data-id").trim()
+                        if (id.isNotBlank()) return id
+                    }
+                }
+                val firstDubId = dubElements.map { it.attr("data-id").trim() }.firstOrNull { it.isNotBlank() }
+                if (!firstDubId.isNullOrBlank()) return firstDubId
+            }
+        } else {
+            val subContainers = doc.select(".servers-sub, .ps_-block-sub, [data-type=\"sub\"], [data-audio=\"sub\"], .block-sub")
+            if (subContainers.isNotEmpty()) {
+                val subElements = subContainers.select("[data-id], .item[data-id], a[data-id], button[data-id]")
+                if (!serverName.isNullOrBlank()) {
+                    val cleanSrv = serverName.lowercase().replace(Regex("""[-_ ]*(?:dub|sub)"""), "").trim()
+                    val match = subElements.firstOrNull { el ->
+                        val txt = el.text().lowercase()
+                        val srvAttr = el.attr("data-server-id").lowercase()
+                        txt.contains(cleanSrv) || srvAttr.contains(cleanSrv)
+                    }
+                    if (match != null) {
+                        val id = match.attr("data-id").trim()
+                        if (id.isNotBlank()) return id
+                    }
+                }
+                val firstSubId = subElements.map { it.attr("data-id").trim() }.firstOrNull { it.isNotBlank() }
+                if (!firstSubId.isNullOrBlank()) return firstSubId
+            }
+        }
 
         val prioritized = buildList {
             addAll(doc.select("[data-episode-id]"))
@@ -476,8 +549,6 @@ object NativeAnimeScraper {
         attrs.firstOrNull { it.all(Char::isDigit) }?.let { return it }
         attrs.firstOrNull()?.let { return it }
 
-        // Last-resort HTML attribute scan for layouts that wrap the player
-        // inside scripts or custom elements instead of the selectors above.
         val regex = Regex("""data-id\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
         return regex.find(html)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
     }
