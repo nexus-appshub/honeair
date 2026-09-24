@@ -145,19 +145,19 @@ object UnifiedStreamManager {
         }
     }
 
-    fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1): ScrapedStreamResult? {
+    fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1, audioType: String = "sub", requestedServerKey: String? = null): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
-        val key = "$tmdbId-$season-$effectiveEpisode"
-        val entry = streamCache[key] ?: streamCache["$tmdbId-$season-$episode"]
+        val key = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
+        val entry = streamCache[key]
         if (entry != null && (System.currentTimeMillis() - entry.timestamp < 15 * 60 * 1000L) && !blacklistedUrls.contains(entry.result.streamUrl)) {
             return entry.result
         }
         return null
     }
 
-    fun cacheStream(tmdbId: String, season: Int = 1, episode: Int = 1, result: ScrapedStreamResult) {
+    fun cacheStream(tmdbId: String, season: Int = 1, episode: Int = 1, audioType: String = "sub", requestedServerKey: String? = null, result: ScrapedStreamResult) {
         val effectiveEpisode = if (episode <= 0) 1 else episode
-        val key = "$tmdbId-$season-$effectiveEpisode"
+        val key = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
         streamCache[key] = TimestampedStream(result)
     }
 
@@ -168,10 +168,12 @@ object UnifiedStreamManager {
         isTv: Boolean = false,
         season: Int = 1,
         episode: Int = 1,
-        isAnime: Boolean = false
+        isAnime: Boolean = false,
+        audioType: String = "sub",
+        requestedServerKey: String? = null
     ): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
-        val cacheKey = "$tmdbId-$season-$effectiveEpisode"
+        val cacheKey = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
         val memCached = streamCache[cacheKey]
         if (memCached != null && System.currentTimeMillis() - memCached.timestamp < 15 * 60 * 1000L && !blacklistedUrls.contains(memCached.result.streamUrl)) {
             if (memCached.result.streamUrl.isNotBlank()) return memCached.result
@@ -204,67 +206,66 @@ object UnifiedStreamManager {
 
         val cleanTitle = sanitizeTitle(title)
 
-        Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime)")
+        Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime, audioType: $audioType, server: $requestedServerKey)")
 
         // 0. High-Speed Anime Native & API Resolver (Direct Native Extraction + HLS M3U8)
         val isItemAnime = isAnime || tmdbId.startsWith("anikoto_") || tmdbId.startsWith("al_") || tmdbId.startsWith("mal_") || AnimePosterEngine.isAnime(title = title, id = tmdbId)
         if (isItemAnime) {
             try {
-                val slugKey = when {
-                    tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
-                    tmdbId.contains("-") && (tmdbId.any { it.isDigit() } || tmdbId.length > 5) -> tmdbId
-                    title.contains("-") && title.any { it.isDigit() } && !title.contains(" ") -> title
-                    else -> ""
-                }
-                val lookupKey = if (title.startsWith("http") || title.contains("anikoto.cz") || title.contains("/watch/")) {
-                    title
-                } else if (cleanTitle.isNotBlank()) {
-                    cleanTitle
-                } else {
-                    title
-                }
-                Log.d(TAG, "Tier 0: Querying In-App Native Scraper & Anime API for $lookupKey / slug: $slugKey (S$season Ep$effectiveEpisode)...")
-                
-                // Priority 1: High-Speed Direct API Stream with Subtitles
-                var animeStream = if (slugKey.isNotBlank()) {
-                    AnikotoScraper.getStreamByTitle(
-                        title = slugKey,
-                        season = season,
-                        episode = effectiveEpisode
-                    )
-                } else null
-
-                if (animeStream == null || animeStream.streamUrl.isEmpty()) {
-                    animeStream = AnikotoScraper.getStreamByTitle(
-                        title = lookupKey,
-                        season = season,
-                        episode = effectiveEpisode
-                    )
-                }
-
-                if (animeStream != null && animeStream.streamUrl.isNotEmpty()) {
-                    Log.d(TAG, "Tier 0: Anime stream resolved successfully via API: ${animeStream.streamUrl}")
-                    streamCache[cacheKey] = TimestampedStream(animeStream)
-                    saveToRoomCache(context, cacheKey, animeStream)
-                    return animeStream
-                }
-
-                // Priority 2: In-app native extraction
-                val nativeTarget = if (slugKey.isNotBlank()) slugKey else lookupKey
-                val nativeStream = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
-                    title = nativeTarget,
+                Log.d(TAG, "Tier 0: Querying NativeAnimeScraper for $title / TMDB ID: $tmdbId (S$season Ep$effectiveEpisode, audio: $audioType, server: $requestedServerKey)...")
+                val native = NativeAnimeScraper.extractStream(
+                    titleOrSlug = when {
+                        tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
+                        title.isNotBlank() -> title
+                        else -> tmdbId
+                    },
                     season = season,
-                    episode = effectiveEpisode
+                    episodeNum = effectiveEpisode,
+                    audioType = audioType,
+                    requestedServerKey = requestedServerKey
                 )
-                if (nativeStream != null && nativeStream.streamUrl.isNotEmpty()) {
-                    Log.d(TAG, "Tier 0: Anime stream resolved via Native In-App Scraper: ${nativeStream.streamUrl}")
-                    streamCache[cacheKey] = TimestampedStream(nativeStream)
-                    saveToRoomCache(context, cacheKey, nativeStream)
-                    return nativeStream
+
+                if (native != null && native.streamUrl.isNotBlank()) {
+                    streamCache[cacheKey] = TimestampedStream(native)
+                    saveToRoomCache(context, cacheKey, native)
+                    Log.d(TAG, "Native anime engine resolved stream successfully: ${native.streamUrl}")
+                    return native
+                }
+
+                Log.w(
+                    TAG,
+                    "Native anime engine failed: ${NativeAnimeScraper.lastError}"
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Native anime engine error: ${e.message}")
+            }
+
+            // Tier 0.1: Fallback to AnikotoScraper web API (media.hmair.xyz)
+            try {
+                Log.d(TAG, "Tier 0.1: Fallback to AnikotoScraper web API for $title S$season Ep$effectiveEpisode (audio: $audioType, server: $requestedServerKey)...")
+                val fallbackStream = AnikotoScraper.getStreamByTitle(
+                    title = title.ifBlank { tmdbId },
+                    season = season,
+                    episode = effectiveEpisode,
+                    preferDub = audioType.equals("dub", ignoreCase = true),
+                    requestedServerKey = requestedServerKey
+                )
+                if (fallbackStream != null && fallbackStream.streamUrl.isNotBlank()) {
+                    streamCache[cacheKey] = TimestampedStream(fallbackStream)
+                    saveToRoomCache(context, cacheKey, fallbackStream)
+                    Log.d(TAG, "AnikotoScraper web API resolved stream successfully: ${fallbackStream.streamUrl}")
+                    return fallbackStream
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Tier 0 Anime resolver failed: ${e.message}")
+                Log.w(TAG, "AnikotoScraper fallback error: ${e.message}")
             }
+
+            // Mode B: If an explicit server was requested and unavailable, do NOT silently play wrong server or 360p
+            if (!requestedServerKey.isNullOrBlank()) {
+                Log.w(TAG, "Explicitly requested anime server $requestedServerKey failed to resolve for $title S$season Ep$effectiveEpisode.")
+                return null
+            }
+            return null
         }
 
         var finalTmdbId = tmdbId.trim()
@@ -566,7 +567,9 @@ object UnifiedStreamManager {
         mediaType: String,
         season: Int = 1,
         episode: Int = 1,
-        isAnime: Boolean = false
+        isAnime: Boolean = false,
+        audioType: String = "sub",
+        requestedServerKey: String? = null
     ): ScrapedStreamResult? = getStream(
         context = context,
         title = title,
@@ -574,7 +577,9 @@ object UnifiedStreamManager {
         isTv = !mediaType.equals("movie", ignoreCase = true),
         season = season,
         episode = episode,
-        isAnime = isAnime
+        isAnime = isAnime,
+        audioType = audioType,
+        requestedServerKey = requestedServerKey
     )
 
     private fun mapToJson(map: Map<String, String>): String {
@@ -727,7 +732,7 @@ object UnifiedStreamManager {
         verifiedServersMap[cacheKey] = serverList
 
         // 1. Resolve TMDB ID and TV flag
-        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1))
+        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || tmdbId.startsWith("anikoto_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || title.contains("Series", true) || title.contains("Episode", true) || season > 1 || episode > 1))
         var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, effectiveIsTv)
         if (finalTmdbId.startsWith("movie_")) {
             finalTmdbId = finalTmdbId.removePrefix("movie_")
@@ -944,7 +949,7 @@ object UnifiedStreamManager {
         }
 
         // 2. Resolve numeric TMDB ID & clean title once upfront
-        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || season > 1 || episode > 1))
+        var effectiveIsTv = isTv || tmdbId.startsWith("series_") || tmdbId.startsWith("anikoto_") || (!tmdbId.startsWith("movie_") && (title.contains("Season", true) || title.contains("Series", true) || title.contains("Episode", true) || season > 1 || episode > 1))
         var finalTmdbId = VidnestNativeScraper.resolveToNumericTmdbId(tmdbId, effectiveIsTv)
         if (finalTmdbId.startsWith("movie_")) {
             finalTmdbId = finalTmdbId.removePrefix("movie_")

@@ -17,8 +17,8 @@ android {
     applicationId = "com.homeairtv.xubilas"
     minSdk = 24
     targetSdk = 36
-    versionCode = 472
-    versionName = "4.7.2"
+    versionCode = 471
+    versionName = "4.7.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -123,6 +123,7 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.jsoup)
+  implementation(libs.gson)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

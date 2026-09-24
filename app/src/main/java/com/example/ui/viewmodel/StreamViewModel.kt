@@ -1644,9 +1644,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 val current = _selectedServer.value
                 val preferredAudio = sharedPrefs.getString("setting_anime_preferred_audio", "sub") ?: "sub"
                 val isDub = (current?.type?.lowercase() ?: preferredAudio) == "dub"
-                val targetServers = if (isDub) group.dubServers else group.subServers
-                val candidateList = (targetServers + group.subServers + group.dubServers)
-                    .distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
+                val targetServers = if (isDub && group.dubServers.isNotEmpty()) group.dubServers else group.subServers
+                val candidateList = if (isDub && group.dubServers.isNotEmpty()) {
+                    (group.dubServers + group.subServers)
+                } else {
+                    (group.subServers + group.dubServers)
+                }.distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
 
                 var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
                 var workingServer: com.example.scraper.AnikotoServer? = null
@@ -1669,7 +1672,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 if (workingServer != null) {
-                    _selectedServer.value = workingServer
+                    if (isDub && workingServer.type.lowercase() != "dub" && group.dubServers.isNotEmpty()) {
+                        _selectedServer.value = group.dubServers.firstOrNull() ?: workingServer
+                    } else {
+                        _selectedServer.value = workingServer
+                    }
                 } else {
                     _selectedServer.value = targetServers.firstOrNull() ?: group.subServers.firstOrNull() ?: group.dubServers.firstOrNull()
                 }

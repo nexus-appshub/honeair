@@ -761,7 +761,7 @@ fun MediaDetailSheet(
                             modifier = Modifier.weight(1f)
                         ) {
                             items(subServers) { srv ->
-                                val isSelected = selectedServer?.linkId == srv.linkId
+                                val isSelected = selectedServer?.id == srv.id && (selectedServer?.type?.lowercase() ?: "sub") == "sub"
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = { viewModel.selectAnikotoServer(srv) },
@@ -828,7 +828,7 @@ fun MediaDetailSheet(
                             modifier = Modifier.weight(1f)
                         ) {
                             items(dubServers) { srv ->
-                                val isSelected = selectedServer?.linkId == srv.linkId
+                                val isSelected = selectedServer?.id == srv.id && selectedServer?.type?.lowercase() == "dub"
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = { viewModel.selectAnikotoServer(srv) },

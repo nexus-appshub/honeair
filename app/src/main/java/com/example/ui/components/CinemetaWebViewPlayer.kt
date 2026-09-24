@@ -513,7 +513,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     }
                                 }
                                 if (workingExtracted == null) {
-                                    workingExtracted = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
+                                    workingExtracted = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, preferDub)
                                 }
                                 withContext(Dispatchers.Main) {
                                     if (workingExtracted != null && workingExtracted.streamUrl.isNotBlank()) {
@@ -1487,16 +1487,23 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                                     }
 
                                     if (workingExtracted == null) {
-                                        val directSub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
-                                        if (directSub != null && directSub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directSub.streamUrl)) {
-                                            workingExtracted = directSub
+                                        if (preferDub) {
+                                            val directDub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, true)
+                                            if (directDub != null && directDub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directDub.streamUrl)) {
+                                                workingExtracted = directDub
+                                            }
                                         }
-                                    }
-
-                                    if (workingExtracted == null) {
-                                        val directDub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, true)
-                                        if (directDub != null && directDub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directDub.streamUrl)) {
-                                            workingExtracted = directDub
+                                        if (workingExtracted == null) {
+                                            val directSub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, false)
+                                            if (directSub != null && directSub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directSub.streamUrl)) {
+                                                workingExtracted = directSub
+                                            }
+                                        }
+                                        if (workingExtracted == null && !preferDub) {
+                                            val directDub = com.example.scraper.AnikotoScraper.getStreamByTitle(title, currentSeason, currentEpisode, true)
+                                            if (directDub != null && directDub.streamUrl.isNotBlank() && !failedAnimeUrls.contains(directDub.streamUrl)) {
+                                                workingExtracted = directDub
+                                            }
                                         }
                                     }
 

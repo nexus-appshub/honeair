@@ -1077,6 +1077,28 @@ object AnikotoScraper {
                 }
 
                 if (dubJson != null && dubJson.optBoolean("success") == true) {
+                    val selectedStreamObj = dubJson.optJSONObject("selectedStream")
+                    if (selectedStreamObj != null) {
+                        val sUrl = makeAbsoluteUrl(selectedStreamObj.optString("streamUrl", ""))
+                        if (sUrl.isNotBlank()) {
+                            val referer = selectedStreamObj.optString("referer", "https://anikoto.cz/")
+                            val srvId = selectedStreamObj.optString("server", "Vidstream-2")
+                            val prioServer = AnikotoServer(
+                                id = srvId,
+                                linkId = sUrl,
+                                name = srvId,
+                                type = "dub",
+                                streamUrl = sUrl,
+                                rawUrl = sUrl,
+                                referer = referer,
+                                tracks = parseSubtitles(selectedStreamObj.optJSONArray("tracks"))
+                            )
+                            if (dubServers.none { it.id == prioServer.id && it.streamUrl == prioServer.streamUrl }) {
+                                dubServers.add(0, prioServer)
+                            }
+                        }
+                    }
+
                     val availableServers = dubJson.optJSONArray("availableServers")
                     if (availableServers != null && availableServers.length() > 0) {
                         for (i in 0 until availableServers.length()) {
@@ -1163,8 +1185,8 @@ object AnikotoScraper {
             if (dubServers.isEmpty()) {
                 dubServers.add(
                     AnikotoServer(
-                        id = "Vidstream-2-DUB",
-                        linkId = "Vidstream-2-DUB",
+                        id = "Vidstream-2",
+                        linkId = "Vidstream-2",
                         name = "Vidstream-2 (DUB)",
                         type = "dub",
                         streamUrl = "",
@@ -1175,9 +1197,21 @@ object AnikotoScraper {
                 )
                 dubServers.add(
                     AnikotoServer(
-                        id = "Vidstream 1 BETA-DUB",
-                        linkId = "Vidstream 1 BETA-DUB",
+                        id = "Vidstream 1 BETA",
+                        linkId = "Vidstream 1 BETA",
                         name = "Vidstream 1 BETA (DUB)",
+                        type = "dub",
+                        streamUrl = "",
+                        rawUrl = "",
+                        referer = "https://anikoto.cz/",
+                        tracks = emptyList()
+                    )
+                )
+                dubServers.add(
+                    AnikotoServer(
+                        id = "HD-1",
+                        linkId = "HD-1",
+                        name = "HD-1 (DUB)",
                         type = "dub",
                         streamUrl = "",
                         rawUrl = "",
@@ -1239,22 +1273,35 @@ object AnikotoScraper {
                 )
             }
 
-            // 2. Megaplay trustWatch handshake
-            val sourceIdMatch = Regex("""\d+""").find(server.linkId.ifBlank { server.rawUrl })?.value
-                ?: Regex("""\d+""").find(cleanKw)?.value
-            if (!sourceIdMatch.isNullOrBlank()) {
-                val megaplayRes = performMegaplayHandshake(sourceIdMatch, "$effectiveEp")
-                if (megaplayRes != null && megaplayRes.streamUrl.isNotBlank()) {
-                    return@withContext megaplayRes
+            // 2. Megaplay trustWatch handshake only for valid numeric embed IDs
+            val rawEmbed = server.linkId.ifBlank { server.rawUrl }
+            if (rawEmbed.contains("megaplay") || rawEmbed.contains("trustWatch") || rawEmbed.contains("embed")) {
+                val sourceIdMatch = Regex("""\d{4,}""").find(rawEmbed)?.value
+                if (!sourceIdMatch.isNullOrBlank()) {
+                    val megaplayRes = performMegaplayHandshake(sourceIdMatch, "$effectiveEp")
+                    if (megaplayRes != null && megaplayRes.streamUrl.isNotBlank()) {
+                        return@withContext megaplayRes
+                    }
                 }
+            }
+
+            val cleanedServerId = server.id
+                .replace(Regex("(?i)-(DUB|SUB)$"), "")
+                .replace(Regex("(?i)\\s*\\(DUB|SUB\\)"), "")
+                .trim()
+
+            val resolvedWatch = if (cleanKw.startsWith("http://") || cleanKw.startsWith("https://") || cleanKw.contains("/watch/")) {
+                cleanKw
+            } else {
+                resolveAnikotoWatchUrl(cleanKw) ?: cleanKw
             }
 
             // 3. Query the stream API with server ID and specific requested episode
             val queryUrl = buildStreamGetUrl(
-                title = if (cleanKw.isNotBlank()) cleanKw else server.id,
+                title = resolvedWatch,
                 episode = effectiveEp,
                 type = targetType,
-                server = if (server.id.contains("p") || server.id.contains("Mirror")) null else server.id
+                server = if (cleanedServerId.contains("p") || cleanedServerId.contains("Mirror")) null else cleanedServerId
             )
             Log.d(TAG, "extractStreamFromServer querying: $queryUrl for Ep $effectiveEp")
             val json = fetchJson(queryUrl)
@@ -1419,8 +1466,8 @@ object AnikotoScraper {
             // Fallback: extract via fetchAvailableServers
             try {
                 val serverGroup = fetchAvailableServers(title = cleanTitle, season = season, episode = effectiveEp)
-                val allServers = (serverGroup.subServers + serverGroup.dubServers).distinctBy { it.id.ifBlank { it.streamUrl } }
-                for (srv in allServers) {
+                val allServers = if (preferDub) (serverGroup.dubServers + serverGroup.subServers) else (serverGroup.subServers + serverGroup.dubServers)
+                for (srv in allServers.distinctBy { it.id.ifBlank { it.streamUrl } }) {
                     val serverStream = extractStreamFromServer(
                         server = srv,
                         watchUrl = directOrResolvedUrl ?: cleanTitle,
@@ -1475,6 +1522,25 @@ object AnikotoScraper {
         val candidateQueries = mutableListOf<String>()
         if (cleanTitle.isNotBlank()) candidateQueries.add(cleanTitle)
         if (withoutArticles.isNotBlank() && !candidateQueries.contains(withoutArticles)) candidateQueries.add(withoutArticles)
+
+        if (cleanTitle.contains("mushoku tensei", ignoreCase = true)) {
+            if (!candidateQueries.contains("mushoku tensei jobless reincarnation season 2 part 2")) {
+                candidateQueries.add(0, "mushoku tensei jobless reincarnation season 2 part 2")
+            }
+            if (!candidateQueries.contains("mushoku tensei jobless reincarnation")) {
+                candidateQueries.add(0, "mushoku tensei jobless reincarnation")
+            }
+            if (!candidateQueries.contains("mushoku tensei")) {
+                candidateQueries.add(0, "mushoku tensei")
+            }
+        }
+
+        if (cleanTitle.contains("season 3", ignoreCase = true)) {
+            val s2Variant = cleanTitle.replace(Regex("(?i)season 3"), "Season 2 Part 2")
+            if (!candidateQueries.contains(s2Variant)) candidateQueries.add(0, s2Variant)
+            val s2Simple = cleanTitle.replace(Regex("(?i)season 3"), "Season 2")
+            if (!candidateQueries.contains(s2Simple)) candidateQueries.add(0, s2Simple)
+        }
 
         try {
             val metadata = AnimePosterEngine.getAnimePosterAndBanner(cleanTitle)
