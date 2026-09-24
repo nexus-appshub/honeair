@@ -213,6 +213,7 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     val subServers by viewModel.availableSubServers.collectAsState()
     val dubServers by viewModel.availableDubServers.collectAsState()
     val selectedServer by viewModel.selectedServer.collectAsState()
+    val selectedServerError by viewModel.selectedServerError.collectAsState()
     val isFetchingServers by viewModel.isFetchingServers.collectAsState()
     val mediaDetailState by viewModel.mediaDetailState.collectAsState()
     val verifiedServers by viewModel.verifiedStreamServers.collectAsState()
@@ -421,35 +422,15 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
     var showTrailerDialog by remember { mutableStateOf(false) }
     var selectedDetailItem by remember { mutableStateOf<com.example.data.model.MediaItem?>(null) }
 
-    // Auto-extract stream when user or server group sets the selected Anikoto server (preserves SUB / DUB)
-    LaunchedEffect(selectedServer) {
-        val srv = selectedServer
-        if (isAnime && srv != null) {
-            withContext(Dispatchers.IO) {
-                val extracted = com.example.scraper.UnifiedStreamManager.getStream(
-                    context = context,
-                    title = title,
-                    tmdbId = imdbId,
-                    isTv = isSeries,
-                    season = currentSeason,
-                    episode = currentEpisode,
-                    isAnime = true,
-                    audioType = srv.type.lowercase(),
-                    requestedServerKey = srv.id
-                )
-                if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                    withContext(Dispatchers.Main) {
-                        capturedVideoUrl = extracted.streamUrl
-                        customScrapedHeaders = extracted.headers
-                        if (extracted.subtitles.isNotEmpty()) {
-                            activeSubtitles = extracted.subtitles
-                        }
-                        useExoPlayer = true
-                        isLoading = false
-                        hasError = false
-                    }
-                }
-            }
+    // Selected-server resolution is owned by StreamViewModel. Mirror success/error only.
+    LaunchedEffect(selectedServerError) {
+        val error = selectedServerError
+        if (!error.isNullOrBlank()) {
+            capturedVideoUrl = null
+            mainScrapedVideoUrl = null
+            isScrapingDirectStream = false
+            isLoading = false
+            hasError = true
         }
     }
 
@@ -1449,6 +1430,8 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
                             // launch a second scraper coroutine from the UI.
                             selectedVidnestServerKey = null
                             isMainSelected = false
+                            capturedVideoUrl = null
+                            mainScrapedVideoUrl = null
                             isLoading = true
                             hasError = false
                             viewModel.selectAnikotoServer(srv, currentEpisode)
