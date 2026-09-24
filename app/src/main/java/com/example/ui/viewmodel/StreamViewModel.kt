@@ -2360,7 +2360,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         )
         _availableSubServers.value = emptyList()
         _availableDubServers.value = emptyList()
-        _selectedServer.value = null
 
         if (!isAnime) {
             _isFetchingServers.value = false
@@ -2390,51 +2389,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 _availableDubServers.value = group.dubServers
                 currentServerWatchUrl = group.watchUrl
 
-                // Auto-select server while prioritizing direct playable streams (HD-1, HD-2, Vidstream, etc.)
+                // Do not auto-resolve a server here. This function only populates the
+                // SUB/DUB lists. Server selection must be initiated by the user's explicit
+                // click so a DUB selection can never be overwritten by an automatic SUB
+                // candidate while the lists are still being fetched.
                 val current = _selectedServer.value
-                val isDub = current?.type?.lowercase() == "dub"
-                val targetServers = if (isDub) group.dubServers else group.subServers
-                val candidateList = (targetServers + group.subServers + group.dubServers)
-                    .distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
-
-                var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
-                var workingServer: com.example.scraper.AnikotoServer? = null
-
-                for (srv in candidateList) {
-                    val isMirror = srv.name.contains("Mirror") || srv.id.contains("p") || srv.streamUrl.contains("pahe")
-                    if (isMirror && candidateList.any { !it.name.contains("Mirror") && !it.id.contains("p") && !it.streamUrl.contains("pahe") }) {
-                        continue
+                if (current != null) {
+                    val stillAvailable = (group.subServers + group.dubServers).any {
+                        it.id == current.id && it.type.equals(current.type, ignoreCase = true)
                     }
-                    val extracted = com.example.scraper.UnifiedStreamManager.getStream(
-                        context = getApplication(),
-                        title = group.watchUrl.ifBlank { item.title },
-                        tmdbId = item.imdbId ?: item.id,
-                        isTv = item.type.equals("series", ignoreCase = true) || item.type.equals("tv", ignoreCase = true),
-                        season = season,
-                        episode = episode,
-                        isAnime = true,
-                        audioType = srv.type.lowercase(),
-                        requestedServerKey = srv.id
-                    )
-                    if (extracted != null && extracted.streamUrl.isNotBlank()) {
-                        workingExtracted = extracted
-                        workingServer = srv
-                        break
+                    if (!stillAvailable) {
+                        _selectedServer.value = null
                     }
-                }
-
-                if (requestGeneration != currentPlaybackGeneration.get()) return@launch
-
-                if (workingServer != null) {
-                    _selectedServer.value = workingServer
-                } else {
-                    _selectedServer.value = null
-                }
-
-                if (workingExtracted != null && _activeMediaItem.value?.id == item.id) {
-                    _activeMediaStreamUrl.value = workingExtracted.streamUrl
-                    _activeMediaStreamHeaders.value = workingExtracted.headers
-                    _isPlayerPlaying.value = true
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
