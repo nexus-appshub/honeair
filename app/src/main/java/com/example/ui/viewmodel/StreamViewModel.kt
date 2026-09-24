@@ -2297,6 +2297,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val curEp = episode ?: _activeMediaEpisode.value
         val curSeason = _activeMediaSeason.value
         val generation = currentPlaybackGeneration.incrementAndGet()
+        _activeMediaStreamUrl.value = null
+        _activeMediaStreamHeaders.value = emptyMap()
+        _isPlayerPlaying.value = false
         if (server != null && activeItem != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
@@ -2314,8 +2317,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         com.example.scraper.UnifiedStreamManager.getStream(
                             context = getApplication(),
-                            title = activeItem.title,
-                            tmdbId = activeItem.id,
+                            title = currentServerWatchUrl.ifBlank { activeItem.title },
+                            tmdbId = activeItem.imdbId ?: activeItem.id,
                             isTv = activeItem.type.equals("series", ignoreCase = true) || activeItem.type.equals("tv", ignoreCase = true),
                             season = curSeason,
                             episode = curEp,
@@ -2395,8 +2398,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val extracted = com.example.scraper.UnifiedStreamManager.getStream(
                         context = getApplication(),
-                        title = item.title,
-                        tmdbId = item.id,
+                        title = group.watchUrl.ifBlank { item.title },
+                        tmdbId = item.imdbId ?: item.id,
                         isTv = item.type.equals("series", ignoreCase = true) || item.type.equals("tv", ignoreCase = true),
                         season = season,
                         episode = episode,
