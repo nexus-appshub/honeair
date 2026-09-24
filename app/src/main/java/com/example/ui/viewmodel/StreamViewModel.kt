@@ -2411,10 +2411,12 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
 
+                if (requestGeneration != currentPlaybackGeneration.get()) return@launch
+
                 if (workingServer != null) {
                     _selectedServer.value = workingServer
                 } else {
-                    _selectedServer.value = targetServers.firstOrNull() ?: group.subServers.firstOrNull() ?: group.dubServers.firstOrNull()
+                    _selectedServer.value = targetServers.firstOrNull()
                 }
 
                 if (workingExtracted != null && _activeMediaItem.value?.id == item.id) {
