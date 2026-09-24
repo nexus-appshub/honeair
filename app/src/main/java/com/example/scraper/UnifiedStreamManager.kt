@@ -240,30 +240,14 @@ object UnifiedStreamManager {
                 Log.w(TAG, "Native anime engine error: ${e.message}")
             }
 
-            // Tier 0.1: Fallback to AnikotoScraper web API (media.hmair.xyz)
-            try {
-                Log.d(TAG, "Tier 0.1: Fallback to AnikotoScraper web API for $title S$season Ep$effectiveEpisode (audio: $audioType, server: $requestedServerKey)...")
-                val fallbackStream = AnikotoScraper.getStreamByTitle(
-                    title = title.ifBlank { tmdbId },
-                    season = season,
-                    episode = effectiveEpisode,
-                    preferDub = audioType.equals("dub", ignoreCase = true),
-                    requestedServerKey = requestedServerKey
-                )
-                if (fallbackStream != null && fallbackStream.streamUrl.isNotBlank()) {
-                    streamCache[cacheKey] = TimestampedStream(fallbackStream)
-                    saveToRoomCache(context, cacheKey, fallbackStream)
-                    Log.d(TAG, "AnikotoScraper web API resolved stream successfully: ${fallbackStream.streamUrl}")
-                    return fallbackStream
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "AnikotoScraper fallback error: ${e.message}")
-            }
-
-            // Mode B: If an explicit server was requested and unavailable, do NOT silently play wrong server or 360p
+            // Native-only Anime mode: do not silently switch to the public web backend.
+            // An explicit server must fail explicitly rather than becoming another server/360p.
             if (!requestedServerKey.isNullOrBlank()) {
                 Log.w(TAG, "Explicitly requested anime server $requestedServerKey failed to resolve for $title S$season Ep$effectiveEpisode.")
-                return null
+            } else {
+                Log.w(TAG, "Native Anime resolver did not produce a stream for $title S$season Ep$effectiveEpisode")
+            }
+            return null
             }
             return null
         }
@@ -797,6 +781,9 @@ object UnifiedStreamManager {
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
 
             fun addScraper(key: String, name: String, type: String, colorHex: Long, scrapeBlock: suspend () -> ScrapedStreamResult?) {
+                // Anime has a separate Anikoto/Megapay server model. Do not let the
+                // generic Movie/TV provider fleet seed its cache or server UI.
+                if (isAnime) return
                 jobs.add(launch(Dispatchers.IO) {
                     try {
                         val res = scrapeBlock()
