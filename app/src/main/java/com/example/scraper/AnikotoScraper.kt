@@ -869,50 +869,87 @@ object AnikotoScraper {
         if (episodeId.isBlank()) return@withContext servers
 
         try {
-            val mapperUrl = "https://mapper.nekostream.site/ep/ep/$episodeId"
-            val headers = mapOf(
-                "User-Agent" to DEFAULT_UA,
-                "Referer" to "https://anikoto.cz/",
-                "Origin" to "https://anikoto.cz"
-            )
-            val json = fetchJson(mapperUrl, headers)
-            if (json != null) {
-                val srvObj = json.optJSONObject("servers") ?: json
-                val keys = srvObj.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    val sData = srvObj.optJSONObject(k)
-                    val sUrl = sData?.optString("url") ?: srvObj.optString(k, "")
-                    val sType = if (k.contains("dub", ignoreCase = true)) "dub" else "sub"
-                    val displayName = when {
-                        k.contains("vidstream-2", ignoreCase = true) -> "Vidstream-2"
-                        k.contains("vidstream", ignoreCase = true) -> "Vidstream 1 BETA"
-                        k.contains("hd-2", ignoreCase = true) -> "HD-2"
-                        k.contains("hd-1", ignoreCase = true) || k.contains("hd1", ignoreCase = true) -> "HD-1"
-                        k.contains("kiwi", ignoreCase = true) -> "Kiwi Sub"
-                        else -> k
-                    }
+            val mapperUrl = "https://mapper.nekostream.online/ep/${URLEncoder.encode(episodeId, "UTF-8")}"
+            val request = Request.Builder()
+                .url(mapperUrl)
+                .header("User-Agent", DEFAULT_UA)
+                .header("Referer", "https://anikoto.cz/")
+                .header("Accept", "application/json, */*")
+                .build()
 
-                    if (sUrl.isNotBlank()) {
-                        servers.add(
-                            AnikotoServer(
-                                id = displayName,
-                                linkId = sUrl,
-                                name = displayName,
-                                type = sType,
-                                streamUrl = if (sUrl.contains(".m3u8") || sUrl.contains("/stream/")) sUrl else "",
-                                rawUrl = sUrl,
-                                referer = "https://anikoto.cz/",
-                                tracks = buildFullSubtitleTracks(episodeId)
-                            )
-                        )
+            val body = httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                response.body?.string().orEmpty()
+            }.trim()
+
+            fun addMapperServer(obj: JSONObject) {
+                val key = obj.optString("server").ifBlank { obj.optString("name") }.trim()
+                val id = obj.optString("id").trim()
+                val token = obj.optString("token").trim()
+                if (key.isBlank() || id.isBlank() || token.isBlank()) return
+                val type = if (key.contains("dub", ignoreCase = true)) "dub" else "sub"
+                if (servers.none { it.id.equals(key, ignoreCase = true) && it.type == type }) {
+                    servers.add(AnikotoServer(
+                        id = key,
+                        linkId = "",
+                        name = key,
+                        type = type,
+                        streamUrl = "",
+                        rawUrl = "",
+                        referer = "https://anikoto.cz/",
+                        tracks = buildFullSubtitleTracks(episodeId)
+                    ))
+                }
+            }
+
+            if (body.startsWith("[")) {
+                val array = JSONArray(body)
+                for (i in 0 until array.length()) array.optJSONObject(i)?.let(::addMapperServer)
+            } else if (body.startsWith("{")) {
+                val root = JSONObject(body)
+                val array = root.optJSONArray("servers")
+                if (array != null) {
+                    for (i in 0 until array.length()) array.optJSONObject(i)?.let(::addMapperServer)
+                } else {
+                    val obj = root.optJSONObject("servers")
+                    if (obj != null) {
+                        val keys = obj.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            val value = obj.optJSONObject(key) ?: continue
+                            val enriched = JSONObject(value.toString())
+                            if (!enriched.has("server")) enriched.put("server", key)
+                            addMapperServer(enriched)
+                        }
                     }
                 }
             }
+
+            Log.d(TAG, "Nekostream mapper resolved ${servers.size} server identities for episodeId=$episodeId")
         } catch (e: Exception) {
             Log.w(TAG, "resolveNekostreamMapping error for ep $episodeId: ${e.message}")
         }
-        servers
+        return@withContext servers
+    }
+
+    private fun extractEpisodeDataIdFromWatchPage(html: String): String? {
+        val doc = org.jsoup.Jsoup.parse(html)
+        val selectors = listOf(
+            "[data-episode-id]",
+            "[data-video-id]",
+            "#video-player-container[data-id]",
+            ".video-player[data-id]",
+            "[data-id]"
+        )
+        for (selector in selectors) {
+            val value = doc.select(selector).asSequence().map { element ->
+                element.attr("data-episode-id")
+                    .ifBlank { element.attr("data-video-id") }
+                    .ifBlank { element.attr("data-id") }
+            }.firstOrNull { it.isNotBlank() }
+            if (!value.isNullOrBlank()) return value
+        }
+        return null
     }
 
     /**
@@ -939,9 +976,37 @@ object AnikotoScraper {
                 resolvedWatchUrl = directOrResolvedUrl
             }
 
-            // Check Nekostream mapping if episode ID is extractable
-            val epNumToken = "$effectiveEp"
-            val nekostreamServers = resolveNekostreamMapping(epNumToken)
+            // Resolve the real episode data-id from the exact season/episode watch page.
+            var exactEpisodeDataId = ""
+            if (resolvedWatchUrl.isNotBlank()) {
+                try {
+                    val exactWatchUrl = if (resolvedWatchUrl.contains("/ep-")) {
+                        resolvedWatchUrl.replace(Regex("/ep-\\d+/?$"), "/ep-$effectiveEp")
+                    } else {
+                        "$resolvedWatchUrl/ep-$effectiveEp"
+                    }
+                    val html = httpClient.newCall(
+                        Request.Builder()
+                            .url(exactWatchUrl)
+                            .header("User-Agent", DEFAULT_UA)
+                            .header("Referer", "$ANIKOTO_ORIGIN/")
+                            .header("Accept", "text/html,application/xhtml+xml")
+                            .build()
+                    ).execute().use { response ->
+                        if (response.isSuccessful) response.body?.string().orEmpty() else ""
+                    }
+                    exactEpisodeDataId = extractEpisodeDataIdFromWatchPage(html).orEmpty()
+                    Log.d(TAG, "Exact episode identity S$season E$effectiveEp -> data-id=$exactEpisodeDataId")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed extracting exact episode data-id for S$season E$effectiveEp: ${e.message}")
+                }
+            }
+
+            val nekostreamServers = if (exactEpisodeDataId.isNotBlank()) {
+                resolveNekostreamMapping(exactEpisodeDataId)
+            } else {
+                emptyList()
+            }
             for (nsSrv in nekostreamServers) {
                 if (nsSrv.type == "dub") dubServers.add(nsSrv) else subServers.add(nsSrv)
             }
