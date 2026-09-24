@@ -162,10 +162,14 @@ object NativeAnimeScraper {
 
             val sortedMapperServers = mutableListOf<MapperServer>()
             if (!requestedServerKey.isNullOrBlank()) {
+                // EXPLICIT SERVER MODE: only the requested mapper server is eligible.
+                // Never fall through to another server (which previously caused the
+                // Android player to silently receive the default/360p source).
                 val matching = mapperServers.filter { matchesRequestedServer(it, requestedServerKey) }
+                if (matching.isEmpty()) {
+                    fail("Requested server '$requestedServerKey' was not present in mapper response for episodeId $episodeId")
+                }
                 sortedMapperServers.addAll(matching)
-                val remaining = mapperServers.filter { !matchesRequestedServer(it, requestedServerKey) }
-                sortedMapperServers.addAll(remaining)
             } else {
                 val vidstream2 = mapperServers.filter { it.server.equals("vidstream-2", true) }
                 val hd1 = mapperServers.filter { it.server.equals("hd-1", true) }
@@ -176,7 +180,7 @@ object NativeAnimeScraper {
             }
 
             if (sortedMapperServers.isEmpty()) {
-                fail("Mapper returned no servers for episodeId $episodeId")
+                fail("Mapper returned no usable servers for episodeId $episodeId")
             }
 
             var successResult: ScrapedStreamResult? = null
@@ -344,21 +348,30 @@ object NativeAnimeScraper {
                lower.contains("${sNum}th season")
     }
 
+    private fun normalizeServerKey(raw: String): String {
+        var value = raw.trim().lowercase()
+        value = value.removePrefix("anikoto_sub_").removePrefix("anikoto_dub_")
+        value = value.replace(Regex("""[\\s_]+"""), "-")
+        value = value.replace(Regex("""[-_ ]+(?:sub|dub)$"""), "")
+        value = value.replace(Regex("""\\((?:sub|dub)\\)$"""), "")
+        return value.trim('-')
+    }
+
     private fun matchesRequestedServer(mapperServer: MapperServer, requestedKey: String): Boolean {
-        val msName = mapperServer.server.lowercase()
-        val msId = mapperServer.id.lowercase()
-        val rKey = requestedKey.lowercase()
+        val requested = normalizeServerKey(requestedKey)
+        if (requested.isBlank()) return false
 
-        val normalizedRKey = rKey.replace("sr-", "hd-")
-        val normalizedMsName = msName.replace("sr-", "hd-")
+        val candidates = listOf(mapperServer.server, mapperServer.id)
+            .map(::normalizeServerKey)
+            .filter { it.isNotBlank() }
 
-        return msName == rKey ||
-               msId == rKey ||
-               normalizedMsName == normalizedRKey ||
-               msName.contains(rKey) ||
-               rKey.contains(msName) ||
-               msId.contains(rKey) ||
-               rKey.contains(msId)
+        // Only true aliases/formatting differences are normalized here.
+        // SR-1 is NOT treated as HD-1, etc.
+        return candidates.any { candidate ->
+            candidate == requested ||
+                (candidate.startsWith(requested + "-") && candidate.contains("beta") && requested.contains("vidstream")) ||
+                (requested.startsWith(candidate + "-") && requested.contains("beta") && candidate.contains("vidstream"))
+        }
     }
 
     private fun resolveWatchUrlFromSearch(
