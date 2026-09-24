@@ -125,19 +125,22 @@ object NativeAnimeScraper {
 
     suspend fun extractStream(
         titleOrSlug: String,
-        episodeNum: Int
+        season: Int = 1,
+        episodeNum: Int = 1,
+        audioType: String = "sub",
+        requestedServerKey: String? = null
     ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
         val episode = episodeNum.coerceAtLeast(1)
         lastError = null
 
         try {
-            val watchUrl = resolveWatchUrl(titleOrSlug, episode)
+            val watchUrl = resolveWatchUrl(titleOrSlug, season, episode)
             if (watchUrl.isNullOrBlank()) {
-                fail("Could not resolve an Anikoto watch URL")
+                fail("Could not resolve an Anikoto watch URL for $titleOrSlug S$season Ep$episode")
             }
 
             val episodeHtml = getText(
-                url = watchUrl!!,
+                url = watchUrl,
                 referer = "$ANIKOTO_BASE/",
                 accept = "text/html,application/xhtml+xml"
             )
@@ -157,92 +160,116 @@ object NativeAnimeScraper {
             val mapperServers: List<MapperServer> = Gson().fromJson(mapperJson, mapperType)
                 ?: emptyList()
 
-            val target = chooseMapperServer(mapperServers)
-                ?: fail("Mapper returned no usable server")
-
-            if (target.id.isBlank() || target.token.isBlank()) {
-                fail("Mapper server is missing id/token")
+            val sortedMapperServers = mutableListOf<MapperServer>()
+            if (!requestedServerKey.isNullOrBlank()) {
+                val matching = mapperServers.filter { matchesRequestedServer(it, requestedServerKey) }
+                sortedMapperServers.addAll(matching)
+                val remaining = mapperServers.filter { !matchesRequestedServer(it, requestedServerKey) }
+                sortedMapperServers.addAll(remaining)
+            } else {
+                val vidstream2 = mapperServers.filter { it.server.equals("vidstream-2", true) }
+                val hd1 = mapperServers.filter { it.server.equals("hd-1", true) }
+                val others = mapperServers.filter { !it.server.equals("vidstream-2", true) && !it.server.equals("hd-1", true) }
+                sortedMapperServers.addAll(vidstream2)
+                sortedMapperServers.addAll(hd1)
+                sortedMapperServers.addAll(others)
             }
 
-            val epochSeconds = System.currentTimeMillis() / 1000L
-
-            val domainJson = getText(
-                url = "$MEGAPAY_BASE/check_domain.json?cache_buster=$epochSeconds",
-                referer = "$ANIKOTO_BASE/",
-                accept = "application/json,*/*"
-            )
-
-            validateCheckDomain(domainJson)
-
-            val formBody = FormBody.Builder()
-                .add("id", target.id)
-                .add("token", target.token)
-                .add("v", epochSeconds.toString())
-                .build()
-
-            val trustWatchRequest = Request.Builder()
-                .url("$MEGAPAY_BASE/stream/trustWatch")
-                .post(formBody)
-                .header("User-Agent", DEFAULT_UA)
-                .header("Accept", "application/json,*/*")
-                .header("Origin", ANIKOTO_BASE)
-                .header("Referer", "$ANIKOTO_BASE/")
-                .build()
-
-            val trustWatchBody = client.newCall(trustWatchRequest).execute().use { response ->
-                if (!response.isSuccessful) {
-                    fail("trustWatch HTTP ${response.code}")
-                }
-                response.body?.string().orEmpty()
+            if (sortedMapperServers.isEmpty()) {
+                fail("Mapper returned no servers for episodeId $episodeId")
             }
 
-            val parsed = parseTrustWatchResponse(trustWatchBody)
-                ?: fail(
-                    "trustWatch did not return structured JSON; " +
-                        "native protected-response handling is unavailable"
-                )
+            var successResult: ScrapedStreamResult? = null
+            var lastEx: Exception? = null
 
-            if (parsed.status != 200 || parsed.result == null) {
-                fail("trustWatch returned status=${parsed.status}")
-            }
+            for (target in sortedMapperServers) {
+                try {
+                    if (target.id.isBlank() || target.token.isBlank()) {
+                        continue
+                    }
 
-            val result = parsed.result
-            val source = result.sources.orEmpty()
-                .firstOrNull { it.type.equals("hls", ignoreCase = true) }
-                ?: result.sources.orEmpty().firstOrNull { it.file.contains(".m3u8", true) }
-                ?: result.sources.orEmpty().firstOrNull()
+                    val epochSeconds = System.currentTimeMillis() / 1000L
 
-            if (source == null || source.file.isBlank()) {
-                fail("trustWatch returned no playable source")
-            }
-
-            val streamUrl = source.file.trim()
-            val subtitles = result.tracks.orEmpty()
-                .filter { it.file.isNotBlank() && isSubtitleTrack(it) }
-                .distinctBy { it.file }
-                .map {
-                    SubtitleTrack(
-                        url = it.file.trim(),
-                        lang = languageCode(it.label),
-                        label = it.label.ifBlank { "Subtitle" },
-                        default = it.label.contains("English", true)
+                    val domainJson = getText(
+                        url = "$MEGAPAY_BASE/check_domain.json?cache_buster=$epochSeconds",
+                        referer = "$ANIKOTO_BASE/",
+                        accept = "application/json,*/*"
                     )
-                }
 
-            return@withContext ScrapedStreamResult(
-                streamUrl = streamUrl,
-                headers = mapOf(
-                    "User-Agent" to DEFAULT_UA,
-                    "Referer" to "$MEGAPAY_BASE/",
-                    "Origin" to MEGAPAY_BASE
-                ),
-                referer = "$MEGAPAY_BASE/",
-                subtitles = subtitles
-            )
-        } catch (e: NativeScraperException) {
-            lastError = e.message
-            Log.w(TAG, e.message ?: "Native scraping failed")
-            return@withContext null
+                    validateCheckDomain(domainJson)
+
+                    val formBody = FormBody.Builder()
+                        .add("id", target.id)
+                        .add("token", target.token)
+                        .add("v", epochSeconds.toString())
+                        .build()
+
+                    val trustWatchRequest = Request.Builder()
+                        .url("$MEGAPAY_BASE/stream/trustWatch")
+                        .post(formBody)
+                        .header("User-Agent", DEFAULT_UA)
+                        .header("Accept", "application/json,*/*")
+                        .header("Origin", ANIKOTO_BASE)
+                        .header("Referer", "$ANIKOTO_BASE/")
+                        .build()
+
+                    val trustWatchBody = client.newCall(trustWatchRequest).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            fail("trustWatch HTTP ${response.code}")
+                        }
+                        response.body?.string().orEmpty()
+                    }
+
+                    val parsed = parseTrustWatchResponse(trustWatchBody)
+                    if (parsed == null || parsed.status != 200 || parsed.result == null) {
+                        continue
+                    }
+
+                    val result = parsed.result
+                    val source = result.sources.orEmpty()
+                        .firstOrNull { it.type.equals("hls", ignoreCase = true) }
+                        ?: result.sources.orEmpty().firstOrNull { it.file.contains(".m3u8", true) }
+                        ?: result.sources.orEmpty().firstOrNull()
+
+                    if (source == null || source.file.isBlank()) {
+                        continue
+                    }
+
+                    val streamUrl = source.file.trim()
+                    val subtitles = result.tracks.orEmpty()
+                        .filter { it.file.isNotBlank() && isSubtitleTrack(it) }
+                        .distinctBy { it.file }
+                        .map {
+                            SubtitleTrack(
+                                url = it.file.trim(),
+                                lang = languageCode(it.label),
+                                label = it.label.ifBlank { "Subtitle" },
+                                default = it.label.contains("English", true)
+                            )
+                        }
+
+                    successResult = ScrapedStreamResult(
+                        streamUrl = streamUrl,
+                        headers = mapOf(
+                            "User-Agent" to DEFAULT_UA,
+                            "Referer" to "$MEGAPAY_BASE/",
+                            "Origin" to MEGAPAY_BASE
+                        ),
+                        referer = "$MEGAPAY_BASE/",
+                        subtitles = subtitles
+                    )
+                    break
+                } catch (e: Exception) {
+                    lastEx = e
+                    Log.w(TAG, "Failed resolving mapper server ${target.server}: ${e.message}")
+                }
+            }
+
+            if (successResult != null) {
+                return@withContext successResult
+            } else {
+                throw lastEx ?: NativeScraperException("All candidate servers failed to resolve")
+            }
         } catch (e: Exception) {
             lastError = e.message ?: e.javaClass.simpleName
             Log.e(TAG, "Native scraping failed", e)
@@ -250,7 +277,7 @@ object NativeAnimeScraper {
         }
     }
 
-    private fun resolveWatchUrl(titleOrSlug: String, episode: Int): String? {
+    private fun resolveWatchUrl(titleOrSlug: String, season: Int, episode: Int): String? {
         val raw = titleOrSlug.trim()
         if (raw.isBlank()) return null
 
@@ -273,63 +300,138 @@ object NativeAnimeScraper {
             return "$ANIKOTO_BASE/watch/$cleaned/ep-$episode"
         }
 
-        return resolveWatchUrlFromSearch(cleaned, episode)
+        return resolveWatchUrlFromSearch(cleaned, season, episode)
+    }
+
+    private fun getRomanNumeral(number: Int): String {
+        return when (number) {
+            1 -> "I"
+            2 -> "II"
+            3 -> "III"
+            4 -> "IV"
+            5 -> "V"
+            6 -> "VI"
+            7 -> "VII"
+            8 -> "VIII"
+            9 -> "IX"
+            10 -> "X"
+            else -> number.toString()
+        }
+    }
+
+    private fun matchesSeason(label: String, season: Int): Boolean {
+        if (season == 1) {
+            val lower = label.lowercase()
+            if (lower.contains("season 2") || lower.contains("season 3") || lower.contains("season 4") || lower.contains("season 5") ||
+                lower.contains(" s2") || lower.contains(" s3") || lower.contains(" s4") || lower.contains(" s5") ||
+                lower.contains("part 2") || lower.contains("part 3") || lower.contains(" ii ") || lower.contains(" iii ") ||
+                lower.endsWith(" ii") || lower.endsWith(" iii")) {
+                return false
+            }
+            return true
+        }
+        val sNum = season.toString()
+        val roman = getRomanNumeral(season).lowercase()
+        val lower = label.lowercase()
+        return lower.contains("season $sNum") ||
+               lower.contains(" s$sNum") ||
+               lower.contains("part $sNum") ||
+               lower.contains(" $roman ") ||
+               lower.endsWith(" $roman") ||
+               lower.contains("${sNum}st season") ||
+               lower.contains("${sNum}nd season") ||
+               lower.contains("${sNum}rd season") ||
+               lower.contains("${sNum}th season")
+    }
+
+    private fun matchesRequestedServer(mapperServer: MapperServer, requestedKey: String): Boolean {
+        val msName = mapperServer.server.lowercase()
+        val msId = mapperServer.id.lowercase()
+        val rKey = requestedKey.lowercase()
+
+        val normalizedRKey = rKey.replace("sr-", "hd-")
+        val normalizedMsName = msName.replace("sr-", "hd-")
+
+        return msName == rKey ||
+               msId == rKey ||
+               normalizedMsName == normalizedRKey ||
+               msName.contains(rKey) ||
+               rKey.contains(msName) ||
+               msId.contains(rKey) ||
+               rKey.contains(msId)
     }
 
     private fun resolveWatchUrlFromSearch(
         title: String,
+        season: Int,
         episode: Int
     ): String? {
-        val encoded = URLEncoder.encode(title, Charsets.UTF_8.name())
-        val urls = listOf(
-            "$ANIKOTO_BASE/filter?keyword=$encoded",
-            "$ANIKOTO_BASE/search?keyword=$encoded"
-        )
+        val cleanTitle = title.replace(Regex("""(?i)(?:season|part|cour|arc|s)\s*\d+.*"""), "").trim()
 
-        val target = normalizeTitle(title)
+        val candidateQueries = mutableListOf<String>()
+        if (season > 1) {
+            candidateQueries.add("$cleanTitle Season $season")
+            candidateQueries.add("$cleanTitle $season")
+            candidateQueries.add("$cleanTitle S$season")
+            candidateQueries.add("$cleanTitle Part $season")
+            candidateQueries.add("$cleanTitle ${getRomanNumeral(season)}")
+        }
+        candidateQueries.add(cleanTitle)
 
-        for (url in urls) {
-            try {
-                val html = getText(
-                    url = url,
-                    referer = "$ANIKOTO_BASE/",
-                    accept = "text/html,application/xhtml+xml"
-                )
-                val doc = Jsoup.parse(html)
+        val target = normalizeTitle(cleanTitle)
 
-                val candidates = doc
-                    .select("a[href*=\"/watch/\"], .flw-item a, .film-name a")
-                    .mapNotNull { element ->
-                        val href = element.attr("href").trim()
-                        if (!href.contains("/watch/")) return@mapNotNull null
+        for (query in candidateQueries) {
+            val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
+            val urls = listOf(
+                "$ANIKOTO_BASE/filter?keyword=$encoded",
+                "$ANIKOTO_BASE/search?keyword=$encoded"
+            )
 
-                        val label = element.text().trim()
-                            .ifBlank { element.attr("title").trim() }
+            for (url in urls) {
+                try {
+                    val html = getText(
+                        url = url,
+                        referer = "$ANIKOTO_BASE/",
+                        accept = "text/html,application/xhtml+xml"
+                    )
+                    val doc = Jsoup.parse(html)
 
-                        if (label.isBlank()) return@mapNotNull null
+                    val candidates = doc
+                        .select("a[href*=\"/watch/\"], .flw-item a, .film-name a")
+                        .mapNotNull { element ->
+                            val href = element.attr("href").trim()
+                            if (!href.contains("/watch/")) return@mapNotNull null
 
-                        val absolute = if (href.startsWith("http")) {
-                            href
-                        } else {
-                            "$ANIKOTO_BASE${if (href.startsWith("/")) "" else "/"}$href"
+                            val label = element.text().trim()
+                                .ifBlank { element.attr("title").trim() }
+
+                            if (label.isBlank()) return@mapNotNull null
+
+                            val absolute = if (href.startsWith("http")) {
+                                href
+                            } else {
+                                "$ANIKOTO_BASE${if (href.startsWith("/")) "" else "/"}$href"
+                            }
+
+                            if (!matchesSeason(label, season)) return@mapNotNull null
+
+                            Triple(label, absolute, scoreTitle(target, normalizeTitle(label)))
                         }
+                        .distinctBy { it.second }
 
-                        Triple(label, absolute, scoreTitle(target, normalizeTitle(label)))
+                    val best = candidates.maxByOrNull { it.third }
+                    if (best != null && best.third >= 35) {
+                        val slug = best.second.substringAfter("/watch/")
+                            .substringBefore("?")
+                            .trim('/')
+                            .substringBefore("/ep-")
+                        if (slug.isNotBlank()) {
+                            return "$ANIKOTO_BASE/watch/$slug/ep-$episode"
+                        }
                     }
-                    .distinctBy { it.second }
-
-                val best = candidates.maxByOrNull { it.third }
-                if (best != null && best.third >= 45) {
-                    val slug = best.second.substringAfter("/watch/")
-                        .substringBefore("?")
-                        .trim('/')
-                        .substringBefore("/ep-")
-                    if (slug.isNotBlank()) {
-                        return "$ANIKOTO_BASE/watch/$slug/ep-$episode"
-                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "Search resolver failed for $url: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.d(TAG, "Search resolver failed for $url: ${e.message}")
             }
         }
 

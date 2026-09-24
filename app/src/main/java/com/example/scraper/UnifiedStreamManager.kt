@@ -145,9 +145,9 @@ object UnifiedStreamManager {
         }
     }
 
-    fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1): ScrapedStreamResult? {
+    fun getCachedStream(tmdbId: String, season: Int = 1, episode: Int = 1, audioType: String = "sub", requestedServerKey: String? = null): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
-        val key = "$tmdbId-$season-$effectiveEpisode"
+        val key = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
         val entry = streamCache[key] ?: streamCache["$tmdbId-$season-$episode"]
         if (entry != null && (System.currentTimeMillis() - entry.timestamp < 15 * 60 * 1000L) && !blacklistedUrls.contains(entry.result.streamUrl)) {
             return entry.result
@@ -155,9 +155,9 @@ object UnifiedStreamManager {
         return null
     }
 
-    fun cacheStream(tmdbId: String, season: Int = 1, episode: Int = 1, result: ScrapedStreamResult) {
+    fun cacheStream(tmdbId: String, season: Int = 1, episode: Int = 1, audioType: String = "sub", requestedServerKey: String? = null, result: ScrapedStreamResult) {
         val effectiveEpisode = if (episode <= 0) 1 else episode
-        val key = "$tmdbId-$season-$effectiveEpisode"
+        val key = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
         streamCache[key] = TimestampedStream(result)
     }
 
@@ -168,10 +168,12 @@ object UnifiedStreamManager {
         isTv: Boolean = false,
         season: Int = 1,
         episode: Int = 1,
-        isAnime: Boolean = false
+        isAnime: Boolean = false,
+        audioType: String = "sub",
+        requestedServerKey: String? = null
     ): ScrapedStreamResult? {
         val effectiveEpisode = if (episode <= 0) 1 else episode
-        val cacheKey = "$tmdbId-$season-$effectiveEpisode"
+        val cacheKey = "$tmdbId-$season-$effectiveEpisode-$audioType-${requestedServerKey ?: "default"}"
         val memCached = streamCache[cacheKey]
         if (memCached != null && System.currentTimeMillis() - memCached.timestamp < 15 * 60 * 1000L && !blacklistedUrls.contains(memCached.result.streamUrl)) {
             if (memCached.result.streamUrl.isNotBlank()) return memCached.result
@@ -204,20 +206,23 @@ object UnifiedStreamManager {
 
         val cleanTitle = sanitizeTitle(title)
 
-        Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime)")
+        Log.d(TAG, "Starting Exact High-Power Stream Extraction for: $cleanTitle (TMDB: $tmdbId, isTv: $isTv, isAnime: $isAnime, audioType: $audioType, server: $requestedServerKey)")
 
         // 0. High-Speed Anime Native & API Resolver (Direct Native Extraction + HLS M3U8)
         val isItemAnime = isAnime || tmdbId.startsWith("anikoto_") || tmdbId.startsWith("al_") || tmdbId.startsWith("mal_") || AnimePosterEngine.isAnime(title = title, id = tmdbId)
         if (isItemAnime) {
             try {
-                Log.d(TAG, "Tier 0: Querying NativeAnimeScraper for $title / TMDB ID: $tmdbId (S$season Ep$effectiveEpisode)...")
+                Log.d(TAG, "Tier 0: Querying NativeAnimeScraper for $title / TMDB ID: $tmdbId (S$season Ep$effectiveEpisode, audio: $audioType, server: $requestedServerKey)...")
                 val native = NativeAnimeScraper.extractStream(
                     titleOrSlug = when {
                         tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
                         title.isNotBlank() -> title
                         else -> tmdbId
                     },
-                    episodeNum = effectiveEpisode
+                    season = season,
+                    episodeNum = effectiveEpisode,
+                    audioType = audioType,
+                    requestedServerKey = requestedServerKey
                 )
 
                 if (native != null && native.streamUrl.isNotBlank()) {
@@ -539,7 +544,9 @@ object UnifiedStreamManager {
         mediaType: String,
         season: Int = 1,
         episode: Int = 1,
-        isAnime: Boolean = false
+        isAnime: Boolean = false,
+        audioType: String = "sub",
+        requestedServerKey: String? = null
     ): ScrapedStreamResult? = getStream(
         context = context,
         title = title,
@@ -547,7 +554,9 @@ object UnifiedStreamManager {
         isTv = !mediaType.equals("movie", ignoreCase = true),
         season = season,
         episode = episode,
-        isAnime = isAnime
+        isAnime = isAnime,
+        audioType = audioType,
+        requestedServerKey = requestedServerKey
     )
 
     private fun mapToJson(map: Map<String, String>): String {
