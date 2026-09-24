@@ -1417,8 +1417,20 @@ object AnikotoScraper {
             }
 
             if (json != null && json.optBoolean("success") == true) {
+                val requestedKey = requestedServerKey?.let(::normalizeServerSelectionKey).orEmpty()
                 val selectedStream = json.optJSONObject("selectedStream")
-                if (selectedStream != null) {
+
+                fun belongsToRequestedServer(obj: JSONObject): Boolean {
+                    if (requestedKey.isBlank()) return true
+                    return listOf(
+                        obj.optString("server"),
+                        obj.optString("name"),
+                        obj.optString("provider")
+                    ).filter { it.isNotBlank() }
+                        .any { normalizeServerSelectionKey(it) == requestedKey }
+                }
+
+                if (selectedStream != null && belongsToRequestedServer(selectedStream)) {
                     val rawStreamUrl = selectedStream.optString("streamUrl", "")
                     if (rawStreamUrl.isNotBlank()) {
                         val finalStreamUrl = makeAbsoluteUrl(rawStreamUrl)
@@ -1427,7 +1439,7 @@ object AnikotoScraper {
                             buildFullSubtitleTracks(title)
                         }
 
-                        Log.d(TAG, "Anime Stream API resolved: $finalStreamUrl with ${subtitles.size} subtitles")
+                        Log.d(TAG, "Anime Stream API resolved requested server=$requestedKey: $finalStreamUrl with ${subtitles.size} subtitles")
                         return@withContext ScrapedStreamResult(
                             streamUrl = finalStreamUrl,
                             headers = mapOf(
@@ -1445,41 +1457,51 @@ object AnikotoScraper {
                 if (availableServers != null && availableServers.length() > 0) {
                     for (i in 0 until availableServers.length()) {
                         val sObj = availableServers.optJSONObject(i) ?: continue
+                        if (!belongsToRequestedServer(sObj)) continue
                         val rawStream = sObj.optString("streamUrl", "").ifBlank { sObj.optString("rawUrl", "") }
                         if (rawStream.isNotBlank()) {
                             val resolvedUrl = makeAbsoluteUrl(rawStream)
                             val referer = sObj.optString("referer", "$API_BASE_URL/")
-                            Log.d(TAG, "Anime Stream resolved via availableServers array: $resolvedUrl")
+                            Log.d(TAG, "Anime Stream resolved requested server=$requestedKey via availableServers: $resolvedUrl")
                             return@withContext ScrapedStreamResult(
                                 streamUrl = resolvedUrl,
                                 headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer, "Origin" to "https://anikoto.cz"),
                                 referer = referer,
-                                subtitles = buildFullSubtitleTracks(title)
+                                subtitles = parseSubtitles(sObj.optJSONArray("tracks")).ifEmpty { buildFullSubtitleTracks(title) }
                             )
                         }
                     }
                 }
             }
 
-            // Fallback: extract via fetchAvailableServers
+            // Fallback: extract via fetchAvailableServers.
+            // In explicit-server mode only the requested server may be attempted.
             try {
                 val serverGroup = fetchAvailableServers(title = cleanTitle, season = season, episode = effectiveEp)
-                val allServers = (serverGroup.subServers + serverGroup.dubServers).distinctBy { it.id.ifBlank { it.streamUrl } }
+                val allServers = (serverGroup.subServers + serverGroup.dubServers)
+                    .distinctBy { it.id.ifBlank { it.streamUrl } }
+                    .let { servers ->
+                        if (requestedServerKey.isNullOrBlank()) {
+                            servers
+                        } else {
+                            servers.filter { normalizeServerSelectionKey(it.id.ifBlank { it.name }) == normalizeServerSelectionKey(requestedServerKey) }
+                        }
+                    }
+
                 for (srv in allServers) {
                     val serverStream = extractStreamFromServer(
                         server = srv,
                         watchUrl = directOrResolvedUrl ?: cleanTitle,
-                        episode = effectiveEp
+                        episode = effectiveEp,
+                        season = season
                     )
                     if (serverStream != null && serverStream.streamUrl.isNotBlank()) {
-                        return@withContext ScrapedStreamResult(
-                            streamUrl = serverStream.streamUrl,
-                            headers = serverStream.headers,
-                            referer = serverStream.referer,
-                            subtitles = serverStream.subtitles
-                        )
+                        return@withContext serverStream
                     }
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Available servers extraction error: ${e.message}")
+            }
             } catch (e: Exception) {
                 Log.w(TAG, "Available servers extraction error: ${e.message}")
             }
