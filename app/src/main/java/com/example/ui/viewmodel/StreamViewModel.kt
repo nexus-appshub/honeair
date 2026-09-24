@@ -2284,6 +2284,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedServer = MutableStateFlow<com.example.scraper.AnikotoServer?>(null)
     val selectedServer: StateFlow<com.example.scraper.AnikotoServer?> = _selectedServer.asStateFlow()
 
+    private val _selectedServerError = MutableStateFlow<String?>(null)
+    val selectedServerError: StateFlow<String?> = _selectedServerError.asStateFlow()
+
     private val _isFetchingServers = MutableStateFlow(false)
     val isFetchingServers: StateFlow<Boolean> = _isFetchingServers.asStateFlow()
 
@@ -2292,6 +2295,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?, episode: Int? = null) {
         activePlaybackJob?.cancel()
+        _selectedServerError.value = null
         _selectedServer.value = server
         val activeItem = _activeMediaItem.value
         val curEp = episode ?: _activeMediaEpisode.value
@@ -2329,13 +2333,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     if (streamRes != null && streamRes.streamUrl.isNotBlank()) {
                         if (generation == currentPlaybackGeneration.get()) {
+                            _selectedServerError.value = null
                             _activeMediaStreamUrl.value = streamRes.streamUrl
                             _activeMediaStreamHeaders.value = streamRes.headers
                             _isPlayerPlaying.value = true
                         }
+                    } else if (generation == currentPlaybackGeneration.get()) {
+                        _selectedServerError.value = "${server.name.ifBlank { server.id }} unavailable for S${curSeason}E${curEp}"
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    if (generation == currentPlaybackGeneration.get()) {
+                        _selectedServerError.value = "${server.name.ifBlank { server.id }} unavailable: ${e.message ?: "stream resolution failed"}"
+                    }
                 }
             }
         }
@@ -2419,7 +2428,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 if (workingServer != null) {
                     _selectedServer.value = workingServer
                 } else {
-                    _selectedServer.value = targetServers.firstOrNull()
+                    _selectedServer.value = null
                 }
 
                 if (workingExtracted != null && _activeMediaItem.value?.id == item.id) {
