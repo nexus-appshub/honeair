@@ -341,8 +341,10 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
         )
     }
 
-    // Automatic In-App Scraping to enable ExoPlayer playback immediately on Server 0
-    LaunchedEffect(imdbId, title, isSeries, currentSeason, currentEpisode, isAnime, directScrapeAttemptCount) {
+    // Playback resolution is owned by StreamViewModel. Do not start a second
+    // scraper loop here: competing coroutines were causing Episode-1 and server
+    // selections to overwrite one another.
+    LaunchedEffect(imdbId, title, currentSeason, currentEpisode, isAnime) {
         if (isAnime) {
             val tempItem = currentMediaItem ?: MediaItem(
                 id = imdbId,
@@ -355,202 +357,24 @@ fun CinemetaWebViewPlayer(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () 
             )
             viewModel.fetchAnikotoMediaData(tempItem, currentSeason)
             viewModel.fetchAnikotoServers(tempItem, currentSeason, currentEpisode)
-        } else {
-            viewModel.selectAnikotoServer(null)
         }
 
-        // Check if ViewModel active stream matches
-        val currentVmUrl = viewModel.activeMediaStreamUrl.value
-        val currentVmSeason = viewModel.activeMediaSeason.value
-        val currentVmEp = viewModel.activeMediaEpisode.value
-        if (!currentVmUrl.isNullOrBlank() && currentVmSeason == currentSeason && currentVmEp == currentEpisode) {
-            capturedVideoUrl = currentVmUrl
+        // Mirror the authoritative ViewModel stream into the player surface.
+        // The ViewModel owns cancellation, request generation and server selection.
+        val vmUrl = viewModel.activeMediaStreamUrl.value
+        val vmSeason = viewModel.activeMediaSeason.value
+        val vmEpisode = viewModel.activeMediaEpisode.value
+        if (!vmUrl.isNullOrBlank() && vmSeason == currentSeason && vmEpisode == currentEpisode) {
+            capturedVideoUrl = vmUrl
             customScrapedHeaders = viewModel.activeMediaStreamHeaders.value
+            mainScrapedVideoUrl = vmUrl
+            mainScrapedHeaders = viewModel.activeMediaStreamHeaders.value
             useExoPlayer = true
             isScrapingDirectStream = false
             directScrapeSecondsRemaining = 0
-            return@LaunchedEffect
         }
-
-        if (!effectiveNativeUrl.isNullOrBlank()) {
-            capturedVideoUrl = effectiveNativeUrl
-            customScrapedHeaders = nativeHeaders
-            useExoPlayer = true
-            isScrapingDirectStream = false
-            directScrapeSecondsRemaining = 0
-            return@LaunchedEffect
-        }
-
-        val cached = com.example.scraper.UnifiedStreamManager.getCachedStream(imdbId, currentSeason, currentEpisode)
-        if (cached != null && cached.streamUrl.isNotBlank()) {
-            capturedVideoUrl = cached.streamUrl
-            customScrapedHeaders = cached.headers
-            mainScrapedVideoUrl = cached.streamUrl
-            mainScrapedHeaders = cached.headers
-            activeSubtitles = cached.subtitles
-            useExoPlayer = true
-            isScrapingDirectStream = false
-            directScrapeSecondsRemaining = 0
-        } else {
-            isScrapingDirectStream = true
-            directScrapeSecondsRemaining = 0
-
-            // Continuous parallel scraping loop across all cloud engines
-            withContext(Dispatchers.IO) {
-                val loopStartTime = System.currentTimeMillis()
-                var iteration = 1
-                while (capturedVideoUrl.isNullOrBlank() && (System.currentTimeMillis() - loopStartTime) < 25000L) {
-                    try {
-                        withContext(Dispatchers.Main) {
-                            directScrapeStatusText = when (iteration % 4) {
-                                1 -> "Parallel scraping Hindi, HM VIP, Beta, Sigma, Ophim, Gama..."
-                                2 -> "Racing VidLink, VidSrc, AutoEmbed, ZOZO in parallel..."
-                                3 -> "Fastest cloud stream connecting..."
-                                else -> "Connecting to fastest server stream..."
-                            }
-                        }
-
-                        // On second iteration, if preferred server didn't respond, widen search to all servers
-                        val keyToUse = if (iteration > 1) "fastest_auto" else (selectedVidnestServerKey ?: "fastest_auto")
-
-                        val result = if (!isAnime) {
-                            com.example.scraper.UnifiedStreamManager.raceFastestServerStream(
-                                context = context,
-                                tmdbId = imdbId,
-                                title = title,
-                                isTv = isSeries,
-                                season = currentSeason,
-                                episode = currentEpisode,
-                                preferredServerKey = keyToUse
-                            )?.result
-                        } else {
-                            com.example.scraper.UnifiedStreamManager.getStream(
-                                context = context,
-                                title = title,
-                                tmdbId = imdbId,
-                                isTv = isSeries,
-                                season = currentSeason,
-                                episode = currentEpisode,
-                                isAnime = isAnime,
-                                audioType = if (selectedServer?.type?.lowercase() == "dub") "dub" else "sub",
-                                requestedServerKey = selectedServer?.id
-                            )
-                        }
-                        if (result != null && result.streamUrl.isNotBlank()) {
-                            withContext(Dispatchers.Main) {
-                                capturedVideoUrl = result.streamUrl
-                                customScrapedHeaders = result.headers
-                                mainScrapedVideoUrl = result.streamUrl
-                                mainScrapedHeaders = result.headers
-                                activeSubtitles = result.subtitles
-                                useExoPlayer = true
-                                isScrapingDirectStream = false
-                                directScrapeSecondsRemaining = 0
-                            }
-                            break
-                        }
-
-                        // For anime, also directly probe high-speed Anikoto / universal endpoints
-                        if (isAnime) {
-                            val animeRes = com.example.scraper.UnifiedStreamManager.getStream(
-                                context = context,
-                                title = title,
-                                tmdbId = imdbId,
-                                isTv = isSeries,
-                                season = currentSeason,
-                                episode = currentEpisode,
-                                isAnime = isAnime,
-                                audioType = if (selectedServer?.type?.lowercase() == "dub") "dub" else "sub"
-                            )
-                            if (animeRes != null && animeRes.streamUrl.isNotBlank()) {
-                                withContext(Dispatchers.Main) {
-                                    capturedVideoUrl = animeRes.streamUrl
-                                    customScrapedHeaders = animeRes.headers
-                                    mainScrapedVideoUrl = animeRes.streamUrl
-                                    mainScrapedHeaders = animeRes.headers
-                                    activeSubtitles = animeRes.subtitles
-                                    useExoPlayer = true
-                                    isScrapingDirectStream = false
-                                    directScrapeSecondsRemaining = 0
-                                }
-                                break
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-
-                    iteration++
-                    val elapsed = System.currentTimeMillis() - loopStartTime
-                    if (elapsed < 20000L && capturedVideoUrl.isNullOrBlank()) {
-                        delay(1200)
-                    } else {
-                        break
-                    }
-                }
-
-                withContext(Dispatchers.Main) {
-                    isScrapingDirectStream = false
-                    directScrapeSecondsRemaining = 0
-                    if (capturedVideoUrl.isNullOrBlank()) {
-                        if (!isAnime) {
-                            // If direct native extraction has no stream for this episode, seamlessly switch to embed player
-                            useExoPlayer = false
-                        } else {
-                            // For anime, keep ExoPlayer active and extract from working candidate anime servers
-                            useExoPlayer = true
-                            scope.launch(Dispatchers.IO) {
-                                val watchUrl = viewModel.currentServerWatchUrl.ifEmpty { title }
-                                var workingExtracted: com.example.scraper.ScrapedStreamResult? = null
-                                var workingSrv: com.example.scraper.AnikotoServer? = null
-                                val srvList = (subServers + dubServers).distinctBy { (it.id.ifBlank { it.streamUrl }) + "_" + it.type }
-                                for (srv in srvList) {
-                                    if (srv.streamUrl.isNotBlank() && failedAnimeUrls.contains(srv.streamUrl)) continue
-                                    val extracted = com.example.scraper.UnifiedStreamManager.getStream(
-                                        context = context,
-                                        title = title,
-                                        tmdbId = imdbId,
-                                        isTv = isSeries,
-                                        season = currentSeason,
-                                        episode = currentEpisode,
-                                        isAnime = true,
-                                        audioType = srv.type.lowercase(),
-                                        requestedServerKey = srv.id
-                                    )
-                                    if (extracted != null && extracted.streamUrl.isNotBlank() && !failedAnimeUrls.contains(extracted.streamUrl)) {
-                                        workingExtracted = extracted
-                                        workingSrv = srv
-                                        break
-                                    }
-                                }
-                                if (workingExtracted == null) {
-                                    workingExtracted = com.example.scraper.UnifiedStreamManager.getStream(
-                                        context = context,
-                                        title = title,
-                                        tmdbId = imdbId,
-                                        isTv = isSeries,
-                                        season = currentSeason,
-                                        episode = currentEpisode,
-                                        isAnime = true,
-                                        audioType = if (selectedServer?.type?.lowercase() == "dub") "dub" else "sub"
-                                    )
-                                }
-                                withContext(Dispatchers.Main) {
-                                    if (workingExtracted != null && workingExtracted.streamUrl.isNotBlank()) {
-                                        capturedVideoUrl = workingExtracted.streamUrl
-                                        customScrapedHeaders = workingExtracted.headers
-                                        if (workingExtracted.subtitles.isNotEmpty()) activeSubtitles = workingExtracted.subtitles
-                                        if (workingSrv != null) viewModel.selectAnikotoServer(workingSrv)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Universal automated subtitle fetching for stream enhancement
+    }
+    // Universal automated subtitle fetching for stream enhancement
         scope.launch(Dispatchers.IO) {
             try {
                 val fetchedSubs = com.example.scraper.SubtitleFetcher.fetchSubtitles(
