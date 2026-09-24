@@ -2291,6 +2291,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         private set
 
     fun selectAnikotoServer(server: com.example.scraper.AnikotoServer?, episode: Int? = null) {
+        activePlaybackJob?.cancel()
         _selectedServer.value = server
         val activeItem = _activeMediaItem.value
         val curEp = episode ?: _activeMediaEpisode.value
@@ -2338,6 +2339,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun fetchAnikotoServers(item: MediaItem, season: Int = 1, episode: Int = 1) {
+        val requestGeneration = currentPlaybackGeneration.get()
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
             title = item.title,
             category = item.category,
@@ -2370,6 +2372,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     season = season,
                     episode = episode
                 )
+                if (requestGeneration != currentPlaybackGeneration.get()) return@launch
+
                 _availableSubServers.value = group.subServers
                 _availableDubServers.value = group.dubServers
                 currentServerWatchUrl = group.watchUrl
@@ -3698,6 +3702,9 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val effectiveItem = item.copy(imdbId = item.imdbId ?: item.id)
         val tmdbId = effectiveItem.imdbId ?: effectiveItem.id
 
+        // New content starts in automatic mode; do not inherit a previous manual server.
+        _selectedStreamServerKey.value = null
+
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
             title = effectiveItem.title,
             category = effectiveItem.category,
@@ -3798,6 +3805,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _activeMediaEpisode.value = episode
         _activeMediaStreamUrl.value = null
         _activeMediaStreamHeaders.value = emptyMap()
+        _isPlayerPlaying.value = false
         addMediaToHistory(effectiveItem)
 
         val isAnime = com.example.scraper.AnimePosterEngine.isAnime(
