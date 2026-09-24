@@ -69,8 +69,34 @@ fun MediaDetailSheet(
         "Series & TV Shows", "Anime", "Anime Series", "Anime Movies", "K-Dramas", "Hindi Series"
     )
 
-    var selectedSeason by remember { mutableIntStateOf(1) }
-    var selectedEpisode by remember { mutableIntStateOf(1) }
+    val initialSeason = remember(item) {
+        val lower = item.title.lowercase()
+        val seasonPattern = Regex("""season\s*:?\s*(\d+)""")
+        val match = seasonPattern.find(lower)
+        var parsed = 1
+        if (match != null) {
+            val num = match.groupValues[1].toIntOrNull()
+            if (num != null && num > 0) parsed = num
+        } else {
+            val sPattern = Regex("""\b[sS](\d+)\b""")
+            val matchS = sPattern.find(item.title)
+            if (matchS != null) {
+                val num = matchS.groupValues[1].toIntOrNull()
+                if (num != null && num > 0) parsed = num
+            } else {
+                val partPattern = Regex("""part\s*:?\s*(\d+)""")
+                val matchPart = partPattern.find(lower)
+                if (matchPart != null) {
+                    val num = matchPart.groupValues[1].toIntOrNull()
+                    if (num != null && num > 0) parsed = num
+                }
+            }
+        }
+        parsed
+    }
+
+    var selectedSeason by remember(item) { mutableIntStateOf(initialSeason) }
+    var selectedEpisode by remember(item) { mutableIntStateOf(1) }
     var showDownloaderModal by remember { mutableStateOf(false) }
     var isPlayingTrailer by remember { mutableStateOf(startWithTrailer) }
     var showTrailerModal by remember { mutableStateOf(startWithTrailer) }

@@ -168,7 +168,7 @@ object SmartNetworkBoosterEngine {
         // Ensure critical anti-hotlinking headers (Referer, Origin, Sec-CH-UA) are present based on target URL
         if (url != null && !isToffeeStream) {
             when {
-                urlLower.contains("media.hmair.xyz") && !urlLower.contains("/api/stream") -> {
+                urlLower.contains("media.hmair.xyz") -> {
                     if (!baseHeaders.containsKey("Referer") || baseHeaders["Referer"]?.contains("toffee") == true) {
                         baseHeaders["Referer"] = "https://anikoto.cz/"
                     }

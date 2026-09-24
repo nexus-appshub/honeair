@@ -474,6 +474,26 @@ private fun SingleReelPlayerItem(
                     Spacer(modifier = Modifier.size(36.dp))
                 }
 
+                // Compact & small stylish header title for Airing Reels
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Black.copy(alpha = 0.65f),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Airing Reels",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
                 Surface(
                     shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.65f),

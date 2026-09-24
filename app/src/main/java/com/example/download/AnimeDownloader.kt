@@ -323,6 +323,43 @@ object AnimeDownloader {
     }
 
     /**
+     * Extracts direct downloadable URL if available, or returns formatted link.
+     */
+    fun getDirectDownloadUrl(streamUrl: String, quality: String = "720p"): String? {
+        return if (streamUrl.contains(".mp4") || streamUrl.contains("kwik.cx") || streamUrl.contains("pahe.nekostream.site") || streamUrl.contains("woencalmy.cfd")) {
+            streamUrl
+        } else if (streamUrl.startsWith("http")) {
+            streamUrl
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Starts direct MP4 download without HLS segment processing.
+     */
+    fun startNativeDirectDownload(
+        context: Context,
+        animeTitle: String,
+        season: Int = 1,
+        episode: Int = 1,
+        quality: String = "720p",
+        directUrl: String,
+        coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
+    ) {
+        val sanitizedTitle = animeTitle.replace(Regex("[^A-Za-z0-9 ]"), "").replace(" ", "_")
+        val fileName = "${sanitizedTitle}_S${season}E${episode}_${quality}.mp4"
+        MediaDownloader.downloadFile(
+            context = context,
+            url = directUrl,
+            fileName = fileName,
+            coroutineScope = coroutineScope,
+            userAgent = DEFAULT_UA,
+            referer = "https://anikoto.cz/"
+        )
+    }
+
+    /**
      * Main Anime Download Entry Point.
      * Dispatches the download to DownloadService or directly executes with full notification tracking.
      */
@@ -390,6 +427,7 @@ object AnimeDownloader {
         val effectiveHeaders = (customHeaders ?: emptyMap()).toMutableMap()
         if (!effectiveHeaders.containsKey("User-Agent")) effectiveHeaders["User-Agent"] = DEFAULT_UA
         if (!effectiveHeaders.containsKey("Accept")) effectiveHeaders["Accept"] = "*/*"
+        if (!effectiveHeaders.containsKey("Origin")) effectiveHeaders["Origin"] = "https://megaplay.buzz"
         val effectiveReferer = referer ?: "https://anikoto.cz/"
 
         // 1. Fetch Playlist Content

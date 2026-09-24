@@ -36,6 +36,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Verified
@@ -65,7 +66,8 @@ fun UserProfileBottomSheet(
     onDeleteAccount: () -> Unit,
     onShowCopyrightAlert: () -> Unit = {},
     onShowFloatingPlayerLimit: () -> Unit = {},
-    onShowMasterAnime: () -> Unit = {}
+    onShowMasterAnime: () -> Unit = {},
+    onShowCineStream: () -> Unit = {}
 ) {
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val bgColor = if (isDark) Color(0xFF141416) else Color(0xFFF9F9FA)
@@ -379,6 +381,67 @@ fun UserProfileBottomSheet(
                             )
                             Text(
                                 text = "Stream exclusive anime collection",
+                                fontSize = 11.sp,
+                                color = Color.LightGray.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = Color(0xFF00DFD8),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Cinestream Button (Added right below Master Anime Button)
+            Surface(
+                onClick = {
+                    onDismiss()
+                    onShowCineStream()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF0B192C),
+                border = BorderStroke(1.dp, Brush.horizontalGradient(listOf(Color(0xFF00DFD8), Color(0xFF007FFF), Color(0xFF7928CA))))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    Brush.linearGradient(listOf(Color(0xFF00DFD8), Color(0xFF007FFF))),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Movie,
+                                contentDescription = "Cinestream",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Cinestream",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Stream movies & cinema collection",
                                 fontSize = 11.sp,
                                 color = Color.LightGray.copy(alpha = 0.8f)
                             )

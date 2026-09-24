@@ -210,61 +210,34 @@ object UnifiedStreamManager {
         val isItemAnime = isAnime || tmdbId.startsWith("anikoto_") || tmdbId.startsWith("al_") || tmdbId.startsWith("mal_") || AnimePosterEngine.isAnime(title = title, id = tmdbId)
         if (isItemAnime) {
             try {
-                val slugKey = when {
-                    tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
-                    tmdbId.contains("-") && (tmdbId.any { it.isDigit() } || tmdbId.length > 5) -> tmdbId
-                    title.contains("-") && title.any { it.isDigit() } && !title.contains(" ") -> title
-                    else -> ""
-                }
-                val lookupKey = if (title.startsWith("http") || title.contains("anikoto.cz") || title.contains("/watch/")) {
-                    title
-                } else if (cleanTitle.isNotBlank()) {
-                    cleanTitle
-                } else {
-                    title
-                }
-                Log.d(TAG, "Tier 0: Querying In-App Native Scraper & Anime API for $lookupKey / slug: $slugKey (S$season Ep$effectiveEpisode)...")
-                
-                // Priority 1: High-Speed Direct API Stream with Subtitles
-                var animeStream = if (slugKey.isNotBlank()) {
-                    AnikotoScraper.getStreamByTitle(
-                        title = slugKey,
-                        season = season,
-                        episode = effectiveEpisode
-                    )
-                } else null
-
-                if (animeStream == null || animeStream.streamUrl.isEmpty()) {
-                    animeStream = AnikotoScraper.getStreamByTitle(
-                        title = lookupKey,
-                        season = season,
-                        episode = effectiveEpisode
-                    )
-                }
-
-                if (animeStream != null && animeStream.streamUrl.isNotEmpty()) {
-                    Log.d(TAG, "Tier 0: Anime stream resolved successfully via API: ${animeStream.streamUrl}")
-                    streamCache[cacheKey] = TimestampedStream(animeStream)
-                    saveToRoomCache(context, cacheKey, animeStream)
-                    return animeStream
-                }
-
-                // Priority 2: In-app native extraction
-                val nativeTarget = if (slugKey.isNotBlank()) slugKey else lookupKey
-                val nativeStream = UniversalAnimeDownloadScraper.extractNativeAnimeStream(
-                    title = nativeTarget,
-                    season = season,
-                    episode = effectiveEpisode
+                Log.d(TAG, "Tier 0: Querying NativeAnimeScraper for $title / TMDB ID: $tmdbId (S$season Ep$effectiveEpisode)...")
+                val native = NativeAnimeScraper.extractStream(
+                    titleOrSlug = when {
+                        tmdbId.startsWith("anikoto_") -> tmdbId.removePrefix("anikoto_")
+                        title.isNotBlank() -> title
+                        else -> tmdbId
+                    },
+                    episodeNum = effectiveEpisode
                 )
-                if (nativeStream != null && nativeStream.streamUrl.isNotEmpty()) {
-                    Log.d(TAG, "Tier 0: Anime stream resolved via Native In-App Scraper: ${nativeStream.streamUrl}")
-                    streamCache[cacheKey] = TimestampedStream(nativeStream)
-                    saveToRoomCache(context, cacheKey, nativeStream)
-                    return nativeStream
+
+                if (native != null && native.streamUrl.isNotBlank()) {
+                    streamCache[cacheKey] = TimestampedStream(native)
+                    saveToRoomCache(context, cacheKey, native)
+                    Log.d(TAG, "Native anime engine resolved stream successfully: ${native.streamUrl}")
+                    return native
                 }
+
+                Log.w(
+                    TAG,
+                    "Native anime engine failed: ${NativeAnimeScraper.lastError}"
+                )
             } catch (e: Exception) {
-                Log.w(TAG, "Tier 0 Anime resolver failed: ${e.message}")
+                Log.w(TAG, "Native anime engine error: ${e.message}")
             }
+
+            // Strict native-only anime mode:
+            // do not continue into media.hmair.xyz or Railway fallback routes.
+            return null
         }
 
         var finalTmdbId = tmdbId.trim()

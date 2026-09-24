@@ -83,6 +83,7 @@ fun DownloaderModal(
     val isEffectiveAnime = isAnime || imdbId.startsWith("anikoto_") || title.contains("anime", ignoreCase = true)
     var preferDubForAnime by remember { mutableStateOf(false) }
     var animeDownloadInfo by remember { mutableStateOf<com.example.download.AnimeEpisodeDownloadInfo?>(null) }
+    var activeQualityForChoice by remember { mutableStateOf<com.example.download.AnimeQualityOption?>(null) }
     var isAnimeScrapingQualities by remember { mutableStateOf(false) }
 
     LaunchedEffect(isEffectiveAnime, preferDubForAnime, showModal, title, season, episode) {
@@ -751,22 +752,7 @@ fun DownloaderModal(
 
                             Surface(
                                 onClick = {
-                                    checkAndRequestPermissions {
-                                        com.example.download.AnimeDownloader.startAnimeDownload(
-                                            context = context,
-                                            animeTitle = title,
-                                            season = season,
-                                            episode = episode,
-                                            qualityOption = quality,
-                                            coroutineScope = coroutineScope
-                                        )
-                                        Toast.makeText(
-                                            context,
-                                            "Downloading $title ${quality.resolution} (${quality.estimatedSize})",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        onDismiss()
-                                    }
+                                    activeQualityForChoice = quality
                                 },
                                 color = if (isDarkTheme) DeepSlate else Color(0xFFF8FAFC),
                                 shape = RoundedCornerShape(14.dp),
@@ -1187,6 +1173,129 @@ fun DownloaderModal(
                 }
             }
         }
+    }
+
+    if (activeQualityForChoice != null) {
+        val quality = activeQualityForChoice!!
+        val directUrl: String? = com.example.download.AnimeDownloader.getDirectDownloadUrl(quality.streamUrl, quality.resolution)
+        val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+
+        AlertDialog(
+            onDismissRequest = { activeQualityForChoice = null },
+            title = {
+                Text(
+                    text = "Download Ready 🚀",
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "File: ${title.replace(Regex("[^A-Za-z0-9 ]"), "")}_S${season}E${episode}_${quality.resolution}.mp4",
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Estimated Size: ${quality.estimatedSize}",
+                        color = NeonCyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Select your preferred download method below:",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (directUrl != null) {
+                        Button(
+                            onClick = {
+                                com.example.download.AnimeDownloader.startNativeDirectDownload(
+                                    context = context,
+                                    animeTitle = title,
+                                    season = season,
+                                    episode = episode,
+                                    quality = quality.resolution,
+                                    directUrl = directUrl
+                                )
+                                activeQualityForChoice = null
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.FlashOn, contentDescription = null, tint = Color.Black)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Direct High-Speed (MP4)", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            checkAndRequestPermissions {
+                                com.example.download.AnimeDownloader.startAnimeDownload(
+                                    context = context,
+                                    animeTitle = title,
+                                    season = season,
+                                    episode = episode,
+                                    qualityOption = quality,
+                                    coroutineScope = coroutineScope
+                                )
+                                Toast.makeText(
+                                    context,
+                                    "Downloading $title ${quality.resolution} (${quality.estimatedSize})",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                activeQualityForChoice = null
+                                onDismiss()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (isDarkTheme) DeepSlate else Color(0xFFF1F5F9)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, tint = TextPrimary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Standard Segmented HLS", color = TextPrimary)
+                    }
+
+                    if (directUrl != null) {
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(directUrl.toString()))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Cannot open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                                activeQualityForChoice = null
+                                onDismiss()
+                            },
+                            border = BorderStroke(1.dp, NeonMagenta),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = NeonMagenta)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Open Link in Browser", color = NeonMagenta)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { activeQualityForChoice = null }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = if (isDarkTheme) SpaceBlack else Color.White,
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 

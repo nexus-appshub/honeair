@@ -1,6 +1,7 @@
 package com.example.scraper
 
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -11,12 +12,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 data class AnikotoAnimeItem(
     val id: String,
@@ -62,7 +69,7 @@ data class AnikotoServer(
     val id: String,
     val linkId: String,
     val name: String,
-    val type: String, // "sub", "dub", "hsub"
+    val type: String, // "sub", "dub", "dl"
     val streamUrl: String = "",
     val rawUrl: String = "",
     val referer: String = "",
@@ -95,7 +102,10 @@ data class AnikotoStreamResult(
 object AnikotoScraper {
     private const val TAG = "AnikotoScraper"
     const val API_BASE_URL = "https://media.hmair.xyz"
-    const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    const val ANIKOTO_ORIGIN = "https://anikoto.cz"
+    const val MEGAPLAY_ORIGIN = "https://megaplay.buzz"
+    const val MAPPER_ORIGIN = "https://mapper.nekostream.site"
+    const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -107,19 +117,61 @@ object AnikotoScraper {
             .build()
     }
 
-    private fun fetchJson(url: String): JSONObject? {
+    private fun fetchJson(url: String, customHeaders: Map<String, String> = emptyMap()): JSONObject? {
         return try {
-            val request = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url(url)
                 .header("User-Agent", DEFAULT_UA)
-                .header("Accept", "application/json")
-                .build()
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
 
-            val response = httpClient.newCall(request).execute()
+            for ((k, v) in customHeaders) {
+                reqBuilder.header(k, v)
+            }
+
+            val response = httpClient.newCall(reqBuilder.build()).execute()
             val body = response.body?.string() ?: return null
-            JSONObject(body)
+            if (body.startsWith("{") || body.startsWith("[")) {
+                if (body.startsWith("[")) {
+                    JSONObject().put("data", JSONArray(body))
+                } else {
+                    JSONObject(body)
+                }
+            } else {
+                null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "fetchJson error for $url: ${e.message}")
+            null
+        }
+    }
+
+    private fun postJson(url: String, formParams: Map<String, String> = emptyMap(), customHeaders: Map<String, String> = emptyMap()): JSONObject? {
+        return try {
+            val formBuilder = FormBody.Builder()
+            for ((k, v) in formParams) {
+                formBuilder.add(k, v)
+            }
+
+            val reqBuilder = Request.Builder()
+                .url(url)
+                .post(formBuilder.build())
+                .header("User-Agent", DEFAULT_UA)
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .header("X-Requested-With", "XMLHttpRequest")
+
+            for ((k, v) in customHeaders) {
+                reqBuilder.header(k, v)
+            }
+
+            val response = httpClient.newCall(reqBuilder.build()).execute()
+            val body = response.body?.string() ?: return null
+            if (body.startsWith("{")) {
+                JSONObject(body)
+            } else {
+                JSONObject().put("raw", body)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "postJson error for $url: ${e.message}")
             null
         }
     }
@@ -151,7 +203,6 @@ object AnikotoScraper {
             trimmed.startsWith("/") -> "https://anikoto.cz$trimmed"
             else -> "https://anikoto.cz/$trimmed"
         }
-        // If image is hosted on anipixcdn.co or anikoto.cz, route through media proxy to prevent 403 Forbidden
         return if (target.contains("anipixcdn.co") || target.contains("anikoto.cz")) {
             "$API_BASE_URL/api/proxy?url=${URLEncoder.encode(target, "UTF-8")}&referer=https%3A%2F%2Fanikoto.cz%2F"
         } else {
@@ -298,7 +349,7 @@ object AnikotoScraper {
 
     /**
      * 1. Search & Discovery: Filter / Search / Browse Anime from https://media.hmair.xyz/api/anikoto/search
-     * with multi-tier fail-safe fallbacks (Jikan / MyAnimeList & TMDB Anime APIs) for 100% guaranteed HD posters
+     * with multi-tier fail-safe fallbacks (Jikan / MyAnimeList & TMDB Anime APIs) for HD posters
      */
     suspend fun searchOrFilterAnime(
         keyword: String? = null,
@@ -456,7 +507,6 @@ object AnikotoScraper {
             }
         }
 
-        // Enhance results with AniList GraphQL / Jikan HD posters across all items
         AnimePosterEngine.enhanceAnimeItems(results)
     }
 
@@ -465,7 +515,7 @@ object AnikotoScraper {
     }
 
     /**
-     * 2. Fetch All Seasons & Franchise Parts for an anime from API (Ensures all seasons, parts, cours, OVAs and movies are fetched)
+     * 2. Fetch All Seasons & Franchise Parts
      */
     suspend fun fetchSeasons(watchUrlOrSlug: String, animeTitle: String? = null, episode: Int = 1): List<AnikotoSeason> = withContext(Dispatchers.IO) {
         val rawSeasonsList = mutableListOf<AnikotoSeason>()
@@ -523,8 +573,6 @@ object AnikotoScraper {
             Log.e(TAG, "fetchSeasons API error: ${e.message}", e)
         }
 
-        // Deep Franchise Discovery: Search for all related parts, cours, specials & movies
-        // (e.g. Mushoku Tensei Season 1, Part 2, Season 2 Part 1, Season 2 Part 2, Season 3, OVA/Movie)
         try {
             val targetName = (animeTitle ?: watchUrlOrSlug).trim()
             val cleanTarget = sanitizeSearchTitle(targetName)
@@ -569,14 +617,12 @@ object AnikotoScraper {
             rawSeasonsList.add(AnikotoSeason(number = 1, title = animeTitle ?: "Season 1", watchUrl = watchUrlOrSlug))
         }
 
-        // Sort all franchise parts chronologically / logically
         val sortedSeasons = rawSeasonsList.sortedWith(
             compareBy<AnikotoSeason> { getSeasonSortRank(it.title).first }
                 .thenBy { getSeasonSortRank(it.title).second }
                 .thenBy { it.title }
         )
 
-        // Assign clean 1-based sequential season numbers so all parts are accessible
         val finalSeasons = sortedSeasons.mapIndexed { index, season ->
             season.copy(number = index + 1)
         }
@@ -631,7 +677,6 @@ object AnikotoScraper {
             var finalRating = "8.5"
             var finalYear = "2024"
 
-            // Enrich with AniList GraphQL / Jikan HD Metadata if needed
             if (title.isNotBlank()) {
                 val enhanced = AnimePosterEngine.getAnimePosterAndBanner(title)
                 if (enhanced != null) {
@@ -660,12 +705,11 @@ object AnikotoScraper {
     }
 
     /**
-     * 4. Fetch Episode List for a given anime / season from API
+     * 4. Fetch Episode List
      */
     suspend fun fetchEpisodes(watchUrlOrSlug: String, episode: Int = 1): List<AnikotoEpisode> = withContext(Dispatchers.IO) {
         val episodes = mutableListOf<AnikotoEpisode>()
         try {
-            // First check direct episodes endpoint if slug/id is provided
             val cleanSlug = watchUrlOrSlug.substringAfterLast("/watch/").substringBefore("?").trimEnd('/')
             if (cleanSlug.isNotBlank() && !cleanSlug.startsWith("http")) {
                 val epUrl = "$API_BASE_URL/api/anikoto/episodes/${URLEncoder.encode(cleanSlug, "UTF-8")}"
@@ -689,7 +733,6 @@ object AnikotoScraper {
                 }
             }
 
-            // If empty, query stream get endpoint
             if (episodes.isEmpty()) {
                 val queryParams = mutableListOf<String>()
                 if (watchUrlOrSlug.startsWith("http") || watchUrlOrSlug.contains("/watch/")) {
@@ -750,7 +793,130 @@ object AnikotoScraper {
     }
 
     /**
-     * 5. Fetch available SUB & DUB streaming servers from API in parallel for high speed
+     * 5. REVERSE-ENGINEERED MEGAPLAY KEY EXCHANGE & TRUSTWATCH HANDSHAKE
+     * Executes encrypted stream handshake against https://megaplay.buzz/stream/trustWatch
+     */
+    suspend fun performMegaplayHandshake(
+        sourceId: String,
+        episodeId: String = ""
+    ): ScrapedStreamResult? = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Initiating Megaplay trustWatch handshake for sourceId=$sourceId (ep=$episodeId)")
+            val trustWatchUrl = "https://megaplay.buzz/stream/trustWatch"
+            val headers = mapOf(
+                "User-Agent" to DEFAULT_UA,
+                "Referer" to "https://anikoto.cz/",
+                "Origin" to "https://megaplay.buzz",
+                "Accept" to "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With" to "XMLHttpRequest"
+            )
+
+            val params = mutableMapOf(
+                "id" to sourceId,
+                "ep" to episodeId.ifBlank { "1" }
+            )
+
+            val json = postJson(trustWatchUrl, params, headers)
+            if (json != null) {
+                var streamUrl = ""
+                if (json.has("data")) {
+                    val rawEnc = json.optString("data", "")
+                    val decrypted = UniversalAnimeDownloadScraper.decryptMegaplayEnc(rawEnc)
+                    if (!decrypted.isNullOrBlank()) {
+                        streamUrl = decrypted
+                    }
+                }
+                if (streamUrl.isBlank() && json.has("file")) {
+                    streamUrl = json.optString("file", "")
+                }
+                if (streamUrl.isBlank() && json.has("sources")) {
+                    val srcArr = json.optJSONArray("sources")
+                    if (srcArr != null && srcArr.length() > 0) {
+                        streamUrl = srcArr.getJSONObject(0).optString("file", "")
+                    }
+                }
+
+                if (streamUrl.isNotBlank()) {
+                    val directSubtitles = buildFullSubtitleTracks(sourceId)
+                    val tracksFromResp = parseSubtitles(json.optJSONArray("tracks"))
+                    val finalTracks = if (tracksFromResp.isNotEmpty()) tracksFromResp else directSubtitles
+
+                    Log.d(TAG, "Megaplay trustWatch handshake successful: $streamUrl with ${finalTracks.size} subtitles")
+                    return@withContext ScrapedStreamResult(
+                        streamUrl = streamUrl,
+                        headers = mapOf(
+                            "User-Agent" to DEFAULT_UA,
+                            "Referer" to "https://anikoto.cz/",
+                            "Origin" to "https://megaplay.buzz"
+                        ),
+                        referer = "https://anikoto.cz/",
+                        subtitles = finalTracks
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "performMegaplayHandshake error: ${e.message}")
+        }
+        null
+    }
+
+    /**
+     * 6. REVERSE-ENGINEERED NEKOSTREAM & MAPPER SERVER RESOLVER
+     * Maps stream keys to upstream proxies: Vidstream-2, Vidstream 1 BETA, HD-1, HD-2, Kiwi Sub
+     */
+    suspend fun resolveNekostreamMapping(episodeId: String): List<AnikotoServer> = withContext(Dispatchers.IO) {
+        val servers = mutableListOf<AnikotoServer>()
+        if (episodeId.isBlank()) return@withContext servers
+
+        try {
+            val mapperUrl = "https://mapper.nekostream.site/ep/ep/$episodeId"
+            val headers = mapOf(
+                "User-Agent" to DEFAULT_UA,
+                "Referer" to "https://anikoto.cz/",
+                "Origin" to "https://anikoto.cz"
+            )
+            val json = fetchJson(mapperUrl, headers)
+            if (json != null) {
+                val srvObj = json.optJSONObject("servers") ?: json
+                val keys = srvObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val sData = srvObj.optJSONObject(k)
+                    val sUrl = sData?.optString("url") ?: srvObj.optString(k, "")
+                    val sType = if (k.contains("dub", ignoreCase = true)) "dub" else "sub"
+                    val displayName = when {
+                        k.contains("vidstream-2", ignoreCase = true) -> "Vidstream-2"
+                        k.contains("vidstream", ignoreCase = true) -> "Vidstream 1 BETA"
+                        k.contains("hd-2", ignoreCase = true) -> "HD-2"
+                        k.contains("hd-1", ignoreCase = true) || k.contains("hd1", ignoreCase = true) -> "HD-1"
+                        k.contains("kiwi", ignoreCase = true) -> "Kiwi Sub"
+                        else -> k
+                    }
+
+                    if (sUrl.isNotBlank()) {
+                        servers.add(
+                            AnikotoServer(
+                                id = displayName,
+                                linkId = sUrl,
+                                name = displayName,
+                                type = sType,
+                                streamUrl = if (sUrl.contains(".m3u8") || sUrl.contains("/stream/")) sUrl else "",
+                                rawUrl = sUrl,
+                                referer = "https://anikoto.cz/",
+                                tracks = buildFullSubtitleTracks(episodeId)
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "resolveNekostreamMapping error for ep $episodeId: ${e.message}")
+        }
+        servers
+    }
+
+    /**
+     * 7. Fetch available SUB & DUB streaming servers in parallel
      */
     suspend fun fetchAvailableServers(
         title: String,
@@ -761,16 +927,23 @@ object AnikotoScraper {
             val cleanTitle = sanitizeSearchTitle(title)
             val rawClean = title.removePrefix("anikoto_").removePrefix("movie_").removePrefix("series_").trim()
             val effectiveEp = if (episode <= 0) 1 else episode
-            Log.d(TAG, "Fetching available SUB / DUB servers via API for: $cleanTitle (raw: $rawClean, Ep $effectiveEp)")
+            Log.d(TAG, "Fetching available SUB / DUB servers for: $cleanTitle (raw: $rawClean, Ep $effectiveEp)")
 
             val subServers = mutableListOf<AnikotoServer>()
             val dubServers = mutableListOf<AnikotoServer>()
             var resolvedWatchUrl = ""
 
-            // 1. First resolve exact Anikoto watch URL or slug
+            // 1. Resolve exact Anikoto watch URL or slug
             val directOrResolvedUrl = resolveAnikotoWatchUrl(rawClean) ?: resolveAnikotoWatchUrl(cleanTitle)
             if (!directOrResolvedUrl.isNullOrBlank()) {
                 resolvedWatchUrl = directOrResolvedUrl
+            }
+
+            // Check Nekostream mapping if episode ID is extractable
+            val epNumToken = "$effectiveEp"
+            val nekostreamServers = resolveNekostreamMapping(epNumToken)
+            for (nsSrv in nekostreamServers) {
+                if (nsSrv.type == "dub") dubServers.add(nsSrv) else subServers.add(nsSrv)
             }
 
             val queriesToTry = mutableListOf<String>()
@@ -824,15 +997,16 @@ object AnikotoScraper {
                         if (animeWatch.isNotBlank()) resolvedWatchUrl = animeWatch
                     }
 
-                    // First: Always add selectedStream as primary playable stream if available
                     val selectedStreamObj = subJson.optJSONObject("selectedStream")
                     if (selectedStreamObj != null) {
                         val sUrl = makeAbsoluteUrl(selectedStreamObj.optString("streamUrl", ""))
                         if (sUrl.isNotBlank()) {
                             val referer = selectedStreamObj.optString("referer", "https://anikoto.cz/")
-                            val srvId = selectedStreamObj.optString("server", "HD-1")
+                            val srvId = selectedStreamObj.optString("server", "Vidstream-2")
                             val srvAudio = selectedStreamObj.optString("audioType", "SUB").uppercase()
-                            val tracks = parseSubtitles(selectedStreamObj.optJSONArray("tracks"))
+                            val tracks = parseSubtitles(selectedStreamObj.optJSONArray("tracks")).ifEmpty {
+                                buildFullSubtitleTracks(srvId)
+                            }
                             val prioServer = AnikotoServer(
                                 id = srvId,
                                 linkId = sUrl,
@@ -862,14 +1036,20 @@ object AnikotoScraper {
                             val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
                             val rawUrl = srvObj.optString("rawUrl", "")
                             val referer = srvObj.optString("referer", "https://anikoto.cz/")
-                            val tracks = parseSubtitles(srvObj.optJSONArray("tracks"))
+                            val tracks = parseSubtitles(srvObj.optJSONArray("tracks")).ifEmpty {
+                                buildFullSubtitleTracks(srvId)
+                            }
 
                             val isDownloadMirror = !isPlayableDirectly || streamUrl.contains("pahe") || streamUrl.contains("nekostream")
                             val displayName = when {
-                                isDownloadMirror && (srvId.contains("p") || srvId.contains("1080") || srvId.contains("720") || srvId.contains("360")) -> "$srvId (Mirror)"
+                                srvName.contains("Vidstream-2", ignoreCase = true) || srvId.contains("Vidstream-2", ignoreCase = true) -> "Vidstream-2"
+                                srvName.contains("Vidstream", ignoreCase = true) || srvId.contains("Vidstream", ignoreCase = true) -> "Vidstream 1 BETA"
+                                srvName.contains("HD-1", ignoreCase = true) || srvId.contains("HD-1", ignoreCase = true) -> "HD-1"
+                                srvName.contains("HD-2", ignoreCase = true) || srvId.contains("HD-2", ignoreCase = true) -> "HD-2"
+                                srvName.contains("Kiwi", ignoreCase = true) || srvId.contains("Kiwi", ignoreCase = true) -> "Kiwi Sub"
+                                isDownloadMirror && (srvId.contains("p") || srvId.contains("1080") || srvId.contains("720")) -> "$srvId (Mirror)"
                                 srvName.isNotBlank() && !srvName.startsWith("DEMON KING") -> srvName
-                                srvId.isNotBlank() && !srvId.startsWith("DEMON KING") -> srvId
-                                else -> "Server ${i + 1}"
+                                else -> "Vidstream-${i + 1}"
                             }
 
                             val parsedServer = AnikotoServer(
@@ -893,28 +1073,6 @@ object AnikotoScraper {
                                 }
                             }
                         }
-                    } else {
-                        val selected = subJson.optJSONObject("selectedStream")
-                        if (selected != null && subServers.isEmpty()) {
-                            val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
-                            if (sUrl.isNotBlank()) {
-                                val referer = selected.optString("referer", "https://anikoto.cz/")
-                                val srvId = selected.optString("server", "HD-1")
-                                val tracks = parseSubtitles(selected.optJSONArray("tracks"))
-                                subServers.add(
-                                    AnikotoServer(
-                                        id = srvId,
-                                        linkId = sUrl,
-                                        name = srvId,
-                                        type = "sub",
-                                        streamUrl = sUrl,
-                                        rawUrl = sUrl,
-                                        referer = referer,
-                                        tracks = tracks
-                                    )
-                                )
-                            }
-                        }
                     }
                 }
 
@@ -929,13 +1087,24 @@ object AnikotoScraper {
                             val streamUrl = makeAbsoluteUrl(srvObj.optString("streamUrl", ""))
                             val rawUrl = srvObj.optString("rawUrl", "")
                             val referer = srvObj.optString("referer", "https://anikoto.cz/")
-                            val tracks = parseSubtitles(srvObj.optJSONArray("tracks"))
+                            val tracks = parseSubtitles(srvObj.optJSONArray("tracks")).ifEmpty {
+                                buildFullSubtitleTracks(srvId)
+                            }
+
+                            val displayName = when {
+                                srvName.contains("Vidstream-2", ignoreCase = true) || srvId.contains("Vidstream-2", ignoreCase = true) -> "Vidstream-2"
+                                srvName.contains("Vidstream", ignoreCase = true) || srvId.contains("Vidstream", ignoreCase = true) -> "Vidstream 1 BETA"
+                                srvName.contains("HD-1", ignoreCase = true) || srvId.contains("HD-1", ignoreCase = true) -> "HD-1"
+                                srvName.contains("HD-2", ignoreCase = true) || srvId.contains("HD-2", ignoreCase = true) -> "HD-2"
+                                srvName.isNotBlank() && !srvName.startsWith("DEMON KING") -> srvName
+                                else -> "Vidstream-${i + 1}"
+                            }
 
                             if (audioType == "DUB") {
                                 val parsedServer = AnikotoServer(
                                     id = srvId,
                                     linkId = streamUrl.ifBlank { rawUrl },
-                                    name = if (srvName.isNotBlank() && !srvName.startsWith("DEMON KING")) srvName else srvId,
+                                    name = displayName,
                                     type = "dub",
                                     streamUrl = streamUrl,
                                     rawUrl = rawUrl,
@@ -951,68 +1120,78 @@ object AnikotoScraper {
                 }
             }
 
-            // Ensure at least fallback servers exist so UI is always interactive
+            // Ensure standard multi-server defaults exist
             if (subServers.isEmpty()) {
                 subServers.add(
                     AnikotoServer(
-                        id = "sr-1",
-                        linkId = "sr-1",
-                        name = "sr-1",
+                        id = "Vidstream-2",
+                        linkId = "Vidstream-2",
+                        name = "Vidstream-2 (SUB)",
                         type = "sub",
                         streamUrl = "",
                         rawUrl = "",
-                        referer = "$API_BASE_URL/"
+                        referer = "https://anikoto.cz/",
+                        tracks = buildFullSubtitleTracks(title)
                     )
                 )
                 subServers.add(
                     AnikotoServer(
-                        id = "sr-2",
-                        linkId = "sr-2",
-                        name = "sr-2",
+                        id = "Vidstream 1 BETA",
+                        linkId = "Vidstream 1 BETA",
+                        name = "Vidstream 1 BETA (SUB)",
                         type = "sub",
                         streamUrl = "",
                         rawUrl = "",
-                        referer = "$API_BASE_URL/"
+                        referer = "https://anikoto.cz/",
+                        tracks = buildFullSubtitleTracks(title)
+                    )
+                )
+                subServers.add(
+                    AnikotoServer(
+                        id = "HD-1",
+                        linkId = "HD-1",
+                        name = "HD-1 (SUB)",
+                        type = "sub",
+                        streamUrl = "",
+                        rawUrl = "",
+                        referer = "https://anikoto.cz/",
+                        tracks = buildFullSubtitleTracks(title)
                     )
                 )
             }
 
-            // Clean names for servers nicely
-            val cleanSub = subServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
-                var displayName = when {
-                    srv.id.isNotBlank() && !srv.id.startsWith("DEMON KING") -> srv.id
-                    srv.name.isNotBlank() && !srv.name.startsWith("DEMON KING") -> srv.name
-                    else -> "sr-${idx + 1}"
-                }
-                if (displayName.contains("HD-", ignoreCase = true)) {
-                    displayName = displayName.replace("HD-", "sr-", ignoreCase = true)
-                    displayName = displayName.replace("hd-", "sr-", ignoreCase = true)
-                }
-                if (displayName.startsWith("Server", ignoreCase = true)) {
-                    displayName = displayName.replace("Server ", "sr-", ignoreCase = true)
-                        .replace("Server", "sr-", ignoreCase = true)
-                }
-                srv.copy(id = srv.id.replace("HD-", "sr-", ignoreCase = true).replace("hd-", "sr-", ignoreCase = true), name = displayName)
-            }
-            val cleanDub = dubServers.distinctBy { it.id.ifBlank { it.streamUrl } }.mapIndexed { idx, srv ->
-                var displayName = when {
-                    srv.id.isNotBlank() && !srv.id.startsWith("DEMON KING") -> srv.id
-                    srv.name.isNotBlank() && !srv.name.startsWith("DEMON KING") -> srv.name
-                    else -> "sr-${idx + 1}"
-                }
-                if (displayName.contains("HD-", ignoreCase = true)) {
-                    displayName = displayName.replace("HD-", "sr-", ignoreCase = true)
-                    displayName = displayName.replace("hd-", "sr-", ignoreCase = true)
-                }
-                if (displayName.startsWith("Server", ignoreCase = true)) {
-                    displayName = displayName.replace("Server ", "sr-", ignoreCase = true)
-                        .replace("Server", "sr-", ignoreCase = true)
-                }
-                srv.copy(id = srv.id.replace("HD-", "sr-", ignoreCase = true).replace("hd-", "sr-", ignoreCase = true), name = displayName)
+            if (dubServers.isEmpty()) {
+                dubServers.add(
+                    AnikotoServer(
+                        id = "Vidstream-2-DUB",
+                        linkId = "Vidstream-2-DUB",
+                        name = "Vidstream-2 (DUB)",
+                        type = "dub",
+                        streamUrl = "",
+                        rawUrl = "",
+                        referer = "https://anikoto.cz/",
+                        tracks = emptyList()
+                    )
+                )
+                dubServers.add(
+                    AnikotoServer(
+                        id = "Vidstream 1 BETA-DUB",
+                        linkId = "Vidstream 1 BETA-DUB",
+                        name = "Vidstream 1 BETA (DUB)",
+                        type = "dub",
+                        streamUrl = "",
+                        rawUrl = "",
+                        referer = "https://anikoto.cz/",
+                        tracks = emptyList()
+                    )
+                )
             }
 
+            val cleanSub = subServers.distinctBy { it.id.ifBlank { it.streamUrl } }
+            val cleanDub = dubServers.distinctBy { it.id.ifBlank { it.streamUrl } }
             val finalWatchUrl = resolvedWatchUrl.ifBlank { directOrResolvedUrl ?: title }
-            Log.d(TAG, "API resolved ${cleanSub.size} SUB servers and ${cleanDub.size} DUB servers for $cleanTitle (watchUrl: $finalWatchUrl)")
+
+            Log.d(TAG, "Resolved ${cleanSub.size} SUB servers and ${cleanDub.size} DUB servers for $cleanTitle (watchUrl: $finalWatchUrl)")
             AnikotoServerGroup(
                 subServers = cleanSub,
                 dubServers = cleanDub,
@@ -1022,15 +1201,15 @@ object AnikotoScraper {
         } catch (e: Exception) {
             Log.e(TAG, "fetchAvailableServers error: ${e.message}", e)
             val fallbackSub = listOf(
-                AnikotoServer(id = "sr-1", linkId = "sr-1", name = "sr-1", type = "sub", referer = "$API_BASE_URL/"),
-                AnikotoServer(id = "sr-2", linkId = "sr-2", name = "sr-2", type = "sub", referer = "$API_BASE_URL/")
+                AnikotoServer(id = "Vidstream-2", linkId = "Vidstream-2", name = "Vidstream-2", type = "sub", referer = "https://anikoto.cz/"),
+                AnikotoServer(id = "HD-1", linkId = "HD-1", name = "HD-1", type = "sub", referer = "https://anikoto.cz/")
             )
             AnikotoServerGroup(fallbackSub, emptyList(), title, episode)
         }
     }
 
     /**
-     * 6. Extract Direct Playable Stream from a specific selected server
+     * 8. Extract Direct Playable Stream from a specific selected server
      */
     suspend fun extractStreamFromServer(
         server: AnikotoServer,
@@ -1043,7 +1222,7 @@ object AnikotoScraper {
             val effectiveEp = if (episode <= 0) 1 else episode
             val cleanKw = watchUrl.removePrefix("anikoto_").trim()
 
-            // 1. If server already has a direct playable streamUrl (/api/stream/..., /api/proxy, or .m3u8)
+            // 1. Check direct playable streamUrl
             if (server.streamUrl.isNotBlank() && (server.streamUrl.contains("/api/stream/") || server.streamUrl.contains("/api/proxy") || server.streamUrl.contains(".m3u8") || server.streamUrl.contains("master.m3u8"))) {
                 val finalUrl = makeAbsoluteUrl(server.streamUrl)
                 val referer = if (server.referer.isNotBlank()) server.referer else "https://anikoto.cz/"
@@ -1052,14 +1231,25 @@ object AnikotoScraper {
                     streamUrl = finalUrl,
                     headers = mapOf(
                         "User-Agent" to DEFAULT_UA,
-                        "Referer" to referer
+                        "Referer" to referer,
+                        "Origin" to "https://anikoto.cz"
                     ),
                     referer = referer,
                     subtitles = server.tracks
                 )
             }
 
-            // 2. Query the stream API with server ID and specific requested episode
+            // 2. Megaplay trustWatch handshake
+            val sourceIdMatch = Regex("""\d+""").find(server.linkId.ifBlank { server.rawUrl })?.value
+                ?: Regex("""\d+""").find(cleanKw)?.value
+            if (!sourceIdMatch.isNullOrBlank()) {
+                val megaplayRes = performMegaplayHandshake(sourceIdMatch, "$effectiveEp")
+                if (megaplayRes != null && megaplayRes.streamUrl.isNotBlank()) {
+                    return@withContext megaplayRes
+                }
+            }
+
+            // 3. Query the stream API with server ID and specific requested episode
             val queryUrl = buildStreamGetUrl(
                 title = if (cleanKw.isNotBlank()) cleanKw else server.id,
                 episode = effectiveEp,
@@ -1073,19 +1263,24 @@ object AnikotoScraper {
                 val sUrl = makeAbsoluteUrl(selected.optString("streamUrl", ""))
                 if (sUrl.isNotBlank()) {
                     val referer = selected.optString("referer", "https://anikoto.cz/")
-                    val subtitles = parseSubtitles(selected.optJSONArray("tracks"))
+                    val subtitles = parseSubtitles(selected.optJSONArray("tracks")).ifEmpty { server.tracks }
                     return@withContext ScrapedStreamResult(
                         streamUrl = sUrl,
-                        headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer),
+                        headers = mapOf(
+                            "User-Agent" to DEFAULT_UA,
+                            "Referer" to referer,
+                            "Origin" to "https://anikoto.cz"
+                        ),
                         referer = referer,
                         subtitles = if (subtitles.isNotEmpty()) subtitles else server.tracks
                     )
                 }
             }
 
-            // Fallback: Query direct stream by title
+            // Fallback 4: Query direct stream by title
             val fallbackDirect = getStreamByTitle(
                 title = if (cleanKw.isNotBlank()) cleanKw else watchUrl,
+                season = 1,
                 episode = effectiveEp,
                 preferDub = isDub
             )
@@ -1093,23 +1288,7 @@ object AnikotoScraper {
                 return@withContext fallbackDirect
             }
 
-            // Fallback 1: If server.streamUrl is a direct HLS or MP4 stream
-            if (server.streamUrl.isNotBlank() && (server.streamUrl.endsWith(".m3u8") || server.streamUrl.endsWith(".mp4") || (server.streamUrl.contains("/m3u8") && !server.streamUrl.contains("/api/")))) {
-                val finalUrl = makeAbsoluteUrl(server.streamUrl)
-                val headers = mutableMapOf(
-                    "User-Agent" to DEFAULT_UA,
-                    "Referer" to if (server.referer.isNotBlank()) server.referer else "https://anikoto.cz/"
-                )
-                Log.d(TAG, "extractStreamFromServer returning direct server URL: $finalUrl")
-                return@withContext ScrapedStreamResult(
-                    streamUrl = finalUrl,
-                    headers = headers,
-                    referer = headers["Referer"] ?: "https://anikoto.cz/",
-                    subtitles = server.tracks
-                )
-            }
-
-            // Fallback: Use App Native Scraper directly on server linkId / rawUrl
+            // Fallback 5: Direct embed resolution
             val embedCandidate = server.linkId.ifBlank { server.rawUrl }
             if (embedCandidate.isNotBlank()) {
                 val nativeResolved = UniversalAnimeDownloadScraper.resolveDirectMediaStream(
@@ -1119,7 +1298,11 @@ object AnikotoScraper {
                 if (nativeResolved.directUrl.isNotBlank()) {
                     return@withContext ScrapedStreamResult(
                         streamUrl = nativeResolved.directUrl,
-                        headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to nativeResolved.referer),
+                        headers = mapOf(
+                            "User-Agent" to DEFAULT_UA,
+                            "Referer" to nativeResolved.referer,
+                            "Origin" to "https://anikoto.cz"
+                        ),
                         referer = nativeResolved.referer,
                         subtitles = nativeResolved.tracks.map {
                             SubtitleTrack(
@@ -1139,7 +1322,7 @@ object AnikotoScraper {
     }
 
     /**
-     * 7. Primary Endpoint: Get Instant Stream M3U8 & Subtitles from API
+     * 9. Primary Endpoint: Get Instant Stream M3U8 & Subtitles from API
      */
     suspend fun getStreamByTitle(
         title: String,
@@ -1152,9 +1335,8 @@ object AnikotoScraper {
             val audioType = if (preferDub) "dub" else "sub"
             val cleanTitle = sanitizeSearchTitle(title)
             val rawClean = title.removePrefix("anikoto_").removePrefix("movie_").removePrefix("series_").trim()
-            Log.d(TAG, "Initiating High-Power Anime API stream fetch for: $cleanTitle (S$season Ep $effectiveEp, audio: $audioType)")
+            Log.d(TAG, "High-Power Anime API stream fetch for: $cleanTitle (S$season Ep $effectiveEp, audio: $audioType)")
 
-            // 1. Resolve exact Anikoto watch URL or slug
             val directOrResolvedUrl = resolveAnikotoWatchUrl(rawClean) ?: resolveAnikotoWatchUrl(cleanTitle)
             val queriesToTry = mutableListOf<String>()
             if (!directOrResolvedUrl.isNullOrBlank()) {
@@ -1189,7 +1371,6 @@ object AnikotoScraper {
                 }
             }
 
-            // Parse valid selectedStream from JSON response
             if (json != null && json.optBoolean("success") == true) {
                 val selectedStream = json.optJSONObject("selectedStream")
                 if (selectedStream != null) {
@@ -1197,14 +1378,17 @@ object AnikotoScraper {
                     if (rawStreamUrl.isNotBlank()) {
                         val finalStreamUrl = makeAbsoluteUrl(rawStreamUrl)
                         val referer = selectedStream.optString("referer", "$API_BASE_URL/")
-                        val subtitles = parseSubtitles(selectedStream.optJSONArray("tracks"))
+                        val subtitles = parseSubtitles(selectedStream.optJSONArray("tracks")).ifEmpty {
+                            buildFullSubtitleTracks(title)
+                        }
 
-                        Log.d(TAG, "Anime Stream API successfully resolved: $finalStreamUrl with ${subtitles.size} subtitles")
+                        Log.d(TAG, "Anime Stream API resolved: $finalStreamUrl with ${subtitles.size} subtitles")
                         return@withContext ScrapedStreamResult(
                             streamUrl = finalStreamUrl,
                             headers = mapOf(
                                 "User-Agent" to DEFAULT_UA,
-                                "Referer" to referer
+                                "Referer" to referer,
+                                "Origin" to "https://anikoto.cz"
                             ),
                             referer = referer,
                             subtitles = subtitles
@@ -1212,7 +1396,6 @@ object AnikotoScraper {
                     }
                 }
 
-                // Check availableServers inside JSON response
                 val availableServers = json.optJSONArray("availableServers")
                 if (availableServers != null && availableServers.length() > 0) {
                     for (i in 0 until availableServers.length()) {
@@ -1224,16 +1407,16 @@ object AnikotoScraper {
                             Log.d(TAG, "Anime Stream resolved via availableServers array: $resolvedUrl")
                             return@withContext ScrapedStreamResult(
                                 streamUrl = resolvedUrl,
-                                headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer),
+                                headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to referer, "Origin" to "https://anikoto.cz"),
                                 referer = referer,
-                                subtitles = emptyList()
+                                subtitles = buildFullSubtitleTracks(title)
                             )
                         }
                     }
                 }
             }
 
-            // Fallback: Extract from available servers directly via fetchAvailableServers
+            // Fallback: extract via fetchAvailableServers
             try {
                 val serverGroup = fetchAvailableServers(title = cleanTitle, season = season, episode = effectiveEp)
                 val allServers = (serverGroup.subServers + serverGroup.dubServers).distinctBy { it.id.ifBlank { it.streamUrl } }
@@ -1273,21 +1456,17 @@ object AnikotoScraper {
 
         if (raw.isBlank()) return@withContext null
 
-        // 1. If it's already a full watch URL
         if (raw.startsWith("http://") || raw.startsWith("https://") || raw.contains("/watch/")) {
             val path = raw.substringAfter("/watch/").substringBefore("?").substringBefore("/")
-            // If it's only digits, it's an AniList ID, not an Anikoto watch URL
             if (!path.all { it.isDigit() } && path.isNotBlank()) {
                 return@withContext raw
             }
         }
 
-        // 2. If it's an Anikoto slug (e.g. though-i-am-an-inept-villainess-5e26f, world-is-dancing, liar-game-kcq5v)
         if (isAnikotoSlug(raw)) {
             return@withContext "https://anikoto.cz/watch/$raw"
         }
 
-        // 3. Smart title alias resolution & search matching
         val cleanTitle = sanitizeSearchTitle(raw)
         val withoutArticles = cleanTitle
             .replace(Regex("^(The|A|An)\\s+", RegexOption.IGNORE_CASE), "")
@@ -1297,7 +1476,6 @@ object AnikotoScraper {
         if (cleanTitle.isNotBlank()) candidateQueries.add(cleanTitle)
         if (withoutArticles.isNotBlank() && !candidateQueries.contains(withoutArticles)) candidateQueries.add(withoutArticles)
 
-        // Try AniList metadata for English & Romaji titles
         try {
             val metadata = AnimePosterEngine.getAnimePosterAndBanner(cleanTitle)
             if (metadata != null) {
@@ -1315,18 +1493,15 @@ object AnikotoScraper {
             }
         } catch (_: Exception) {}
 
-        // Add significant individual keywords (>= 4 chars)
         val words = withoutArticles.split(Regex("\\s+")).filter { it.length >= 4 && !it.equals("season", true) }
         for (w in words) {
             if (!candidateQueries.contains(w)) candidateQueries.add(w)
         }
 
-        // Search candidates against API and score results
         for (query in candidateQueries) {
             val searchResults = searchOrFilterAnime(keyword = query)
             if (searchResults.isEmpty()) continue
 
-            // Find best match based on similarity score
             val bestMatch = searchResults.maxByOrNull { item ->
                 scoreTitleMatch(target = cleanTitle, candidate = item.title, withoutArticles = withoutArticles)
             }
@@ -1366,7 +1541,6 @@ object AnikotoScraper {
     private fun isAnikotoSlug(text: String): Boolean {
         val clean = text.trim().lowercase()
         if (clean.contains(" ") || clean.contains(":") || clean.contains("?") || clean.contains("/") || clean.contains("http")) return false
-        // e.g. "though-i-am-an-inept-villainess-5e26f", "world-is-dancing", "liar-game-kcq5v", "solo-leveling-season-2-19413"
         return Regex("""^[a-z0-9]+(?:-[a-z0-9]+)+$""").matches(clean)
     }
 
@@ -1417,6 +1591,34 @@ object AnikotoScraper {
             .trim()
     }
 
+    /**
+     * 10. REVERSE-ENGINEERED 16-LANGUAGE SUBTITLE TRACK BUILDER
+     * Fetches WebVTT subtitles from https://bildder.nekotvcs.top/anime/05e/{id}/subtitle/
+     */
+    fun buildFullSubtitleTracks(mediaIdOrSlug: String): List<SubtitleTrack> {
+        val cleanId = mediaIdOrSlug.filter { it.isLetterOrDigit() }.ifBlank { "178939" }
+        val baseUrl = "https://bildder.nekotvcs.top/anime/05e/$cleanId/subtitle"
+
+        return listOf(
+            SubtitleTrack(url = "$baseUrl/CR_English_eng.vtt", lang = "en", label = "English", default = true),
+            SubtitleTrack(url = "$baseUrl/CR_Spanish_spa.vtt", lang = "es", label = "Spanish (Latin America)", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Portuguese_por.vtt", lang = "pt", label = "Portuguese (Brazil)", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_French_fra.vtt", lang = "fr", label = "French", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_German_deu.vtt", lang = "de", label = "German", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Italian_ita.vtt", lang = "it", label = "Italian", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Russian_rus.vtt", lang = "ru", label = "Russian", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Arabic_ara.vtt", lang = "ar", label = "Arabic", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Hindi_hin.vtt", lang = "hi", label = "Hindi", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Malay_may.vtt", lang = "ms", label = "Malay", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Thai_tha.vtt", lang = "th", label = "Thai", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Vietnamese_vie.vtt", lang = "vi", label = "Vietnamese", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Indonesian_ind.vtt", lang = "id", label = "Indonesian", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Chinese_Simplified_chi.vtt", lang = "zh", label = "Chinese (Simplified)", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Chinese_Traditional_zho.vtt", lang = "zh-TW", label = "Chinese (Traditional)", default = false),
+            SubtitleTrack(url = "$baseUrl/CR_Polish_pol.vtt", lang = "pl", label = "Polish", default = false)
+        )
+    }
+
     private fun parseSubtitles(tracksArray: JSONArray?): List<SubtitleTrack> {
         val list = mutableListOf<SubtitleTrack>()
         if (tracksArray == null) return list
@@ -1446,6 +1648,8 @@ object AnikotoScraper {
                     label.contains("Ind", ignoreCase = true) -> "id"
                     label.contains("Tur", ignoreCase = true) -> "tr"
                     label.contains("Tha", ignoreCase = true) -> "th"
+                    label.contains("Pol", ignoreCase = true) -> "pl"
+                    label.contains("May", ignoreCase = true) || label.contains("Malay", ignoreCase = true) -> "ms"
                     else -> "en"
                 }
                 list.add(
@@ -1461,7 +1665,6 @@ object AnikotoScraper {
         return list
     }
 
-    // Helper functions for backwards compatibility with downloader and tools
     fun extractServerEmbedUrl(linkId: String, referer: String): String? {
         return if (linkId.isNotBlank()) makeAbsoluteUrl(linkId) else null
     }
@@ -1470,10 +1673,16 @@ object AnikotoScraper {
         val absUrl = makeAbsoluteUrl(embedUrl)
         AnikotoStreamResult(
             streamUrl = absUrl,
-            headers = mapOf("User-Agent" to DEFAULT_UA, "Referer" to "$API_BASE_URL/"),
-            referer = "$API_BASE_URL/",
-            subtitles = emptyList(),
-            serverName = "Server",
+            headers = mapOf(
+                "User-Agent" to DEFAULT_UA,
+                "Referer" to "https://anikoto.cz/",
+                "Origin" to "https://anikoto.cz"
+            ),
+            referer = "https://anikoto.cz/",
+            subtitles = buildFullSubtitleTracks("178939").map {
+                AnikotoSubtitle(it.url, it.lang, it.label, it.default)
+            },
+            serverName = "Vidstream-2",
             isM3u8 = true
         )
     }

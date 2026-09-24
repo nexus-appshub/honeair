@@ -912,6 +912,7 @@ fun HomeScreen(
     var showCopyrightSheet by remember { mutableStateOf(false) }
     var showFloatingPlayerLimitSheet by remember { mutableStateOf(false) }
     var showMasterAnimeBrowser by remember { mutableStateOf(false) }
+    var showCineStreamBrowser by remember { mutableStateOf(false) }
     var activeWebPlayer by remember { mutableStateOf<WebPlayerState?>(null) }
     var selectedItemForDetail by remember { mutableStateOf<MediaItem?>(null) }
     var activePreviewFeedItemId by remember { mutableStateOf<String?>(null) }
@@ -2451,7 +2452,7 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                items(realMediaList, key = { it.id }) { mediaItem ->
+                                itemsIndexed(realMediaList, key = { index, mediaItem -> "${mediaItem.id}_$index" }) { index, mediaItem ->
                                     Surface(
                                         shape = RoundedCornerShape(16.dp),
                                         color = Color(0xFF1C1C1E),
@@ -3181,6 +3182,10 @@ fun HomeScreen(
             onShowMasterAnime = {
                 showProfileSheet = false
                 showMasterAnimeBrowser = true
+            },
+            onShowCineStream = {
+                showProfileSheet = false
+                showCineStreamBrowser = true
             }
         )
     }
@@ -3189,6 +3194,13 @@ fun HomeScreen(
         MasterAnimeBrowserModal(
             url = "https://media.hmair.xyz",
             onDismiss = { showMasterAnimeBrowser = false }
+        )
+    }
+
+    if (showCineStreamBrowser) {
+        MasterAnimeBrowserModal(
+            url = "https://cine.hmair.xyz/",
+            onDismiss = { showCineStreamBrowser = false }
         )
     }
 
@@ -7498,6 +7510,7 @@ fun SettingsScreen(
     var showWatchHistorySheet by remember { mutableStateOf(false) }
     var showWebVersionView by remember { mutableStateOf(false) }
     var showMasterAnimeBrowser by remember { mutableStateOf(false) }
+    var showCineStreamBrowser by remember { mutableStateOf(false) }
     var showSubscriptionSheet by remember { mutableStateOf(false) }
     var showSubscriptionPlanModalInProfile by remember { mutableStateOf(false) }
     var showHelpCenterSheet by remember { mutableStateOf(false) }
@@ -8155,6 +8168,15 @@ fun SettingsScreen(
 
             item {
                 SecretSettingRow(
+                    title = "Cinestream",
+                    subtitle = "Stream movies & cinema collection",
+                    icon = Icons.Default.Movie,
+                    onClick = { showCineStreamBrowser = true }
+                )
+            }
+
+            item {
+                SecretSettingRow(
                     title = "Watch History",
                     subtitle = "View recently watched movies, shows & live TV",
                     icon = Icons.Outlined.History,
@@ -8354,6 +8376,10 @@ fun SettingsScreen(
             onShowMasterAnime = {
                 showProfileSheet = false
                 showMasterAnimeBrowser = true
+            },
+            onShowCineStream = {
+                showProfileSheet = false
+                showCineStreamBrowser = true
             }
         )
     }
@@ -8362,6 +8388,13 @@ fun SettingsScreen(
         MasterAnimeBrowserModal(
             url = "https://media.hmair.xyz",
             onDismiss = { showMasterAnimeBrowser = false }
+        )
+    }
+
+    if (showCineStreamBrowser) {
+        MasterAnimeBrowserModal(
+            url = "https://cine.hmair.xyz/",
+            onDismiss = { showCineStreamBrowser = false }
         )
     }
 
@@ -11765,7 +11798,7 @@ fun MediaCategoryRowSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(items = items, key = { item -> item.id }) { item ->
+            itemsIndexed(items = items, key = { index, item -> "${item.id}_$index" }) { index, item ->
                 CompactMediaCard(
                     item = item,
                     onClick = { onItemClick(item) },
@@ -12036,7 +12069,7 @@ fun ContinueWatchingRowSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(items = items, key = { item -> "cw_" + item.id }) { item ->
+            itemsIndexed(items = items, key = { index, item -> "cw_${item.id}_$index" }) { index, item ->
                 val progressInfo = remember(item.id, item.imdbId) {
                     viewModel.getMediaPlaybackProgress(item.imdbId ?: item.id)
                 }
