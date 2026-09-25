@@ -121,9 +121,15 @@ object VipApiClient {
     private const val BASE_URL = "https://homeairtv-server.onrender.com/"
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .dispatcher(okhttp3.Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 16
+        })
+        .connectionPool(okhttp3.ConnectionPool(15, 5, TimeUnit.MINUTES))
+        .connectTimeout(15, TimeUnit.SECONDS) // Max wait for Render spin-up
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     val apiService: VipApiService by lazy {

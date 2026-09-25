@@ -9,11 +9,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.StringReader
+import java.util.concurrent.TimeUnit
 
 object IptvParser {
-    private val client = OkHttpClient.Builder()
+    private val client = okhttp3.OkHttpClient.Builder()
+        .dispatcher(okhttp3.Dispatcher().apply {
+            maxRequests = 128
+            maxRequestsPerHost = 32
+        })
+        .connectionPool(okhttp3.ConnectionPool(30, 5, TimeUnit.MINUTES))
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
         .addInterceptor { chain ->
             val original = chain.request()
             val request = original.newBuilder()

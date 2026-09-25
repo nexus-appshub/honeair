@@ -109,11 +109,17 @@ object AnikotoScraper {
 
     val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .dispatcher(okhttp3.Dispatcher().apply {
+                maxRequests = 128
+                maxRequestsPerHost = 32
+            })
+            .connectionPool(okhttp3.ConnectionPool(30, 5, TimeUnit.MINUTES))
             .addInterceptor(DiagnosticLoggingInterceptor(tag = "AnimeApi-Diagnostic", enforceBypassHeaders = true))
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
             .build()
     }
 

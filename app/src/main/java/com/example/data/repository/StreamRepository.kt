@@ -26,6 +26,7 @@ class StreamRepository(
     // Local In-Memory Cache
     private var playlistCache: List<IptvPlaylist> = emptyList()
     private val channelCache = mutableMapOf<String, List<IptvChannel>>()
+    private var updateChannelsCache: List<IptvChannel>? = null
 
     // Database Flows
     val favorites: Flow<List<IptvChannel>> = favoriteDao.getAllFavorites().map { entities ->
@@ -229,9 +230,13 @@ class StreamRepository(
 
             val finalResult = if (isBdPlaylist || isInPlaylist) {
                 try {
-                    val updateUrl = "https://raw.githubusercontent.com/nexus-appshub/homeairtv.xyz/main/hmairtv.m3u8"
-                    val updateRaw = IptvParser.fetchRawContent(updateUrl)
-                    val updateChannels = IptvParser.parseChannels(updateRaw)
+                    val updateChannels = updateChannelsCache ?: run {
+                        val updateUrl = "https://raw.githubusercontent.com/nexus-appshub/homeairtv.xyz/main/hmairtv.m3u8"
+                        val updateRaw = IptvParser.fetchRawContent(updateUrl)
+                        val parsedUpdate = IptvParser.parseChannels(updateRaw)
+                        updateChannelsCache = parsedUpdate
+                        parsedUpdate
+                    }
                     
                     val keywords = if (isBdPlaylist) {
                         listOf("bangla", "bangladesh", "bd", "btv", "somoy", "ekattor", "jamuna", "independent", "ntv", "atn", "rtv", "gtv", "t sports", "dbc", "channel 24", "news24", "deepto", "nagorik", "boishakhi", "maasranga", "my tv", "asian tv", "bijoy", "duronto", "sa tv", "mohona", "nexus", "global tv", "gazi", "channel i")
