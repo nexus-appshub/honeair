@@ -93,6 +93,142 @@ fun getSportEmojiAndDisplayName(canonicalId: String, rawSport: String): Pair<Str
     }
 }
 
+// Formats timestamp or ISO date string into "Sep-26, 12:44 PM"
+fun formatEventDateTime(raw: String?): String {
+    if (raw.isNullOrBlank()) return "Live Now"
+    val trimmed = raw.trim()
+
+    // 1. Numeric timestamp (seconds or milliseconds)
+    val numericVal = trimmed.toLongOrNull()
+    if (numericVal != null) {
+        val millis = if (numericVal < 100_000_000_000L) numericVal * 1000L else numericVal
+        val date = java.util.Date(millis)
+        val sdf = java.text.SimpleDateFormat("MMM-dd, hh:mm a", java.util.Locale.ENGLISH)
+        sdf.timeZone = java.util.TimeZone.getDefault()
+        return sdf.format(date)
+    }
+
+    // 2. Parse standard date patterns
+    val inputPatterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+        "yyyy-MM-dd'T'HH:mm:ssX",
+        "yyyy-MM-dd'T'HH:mm:ssZ",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd",
+        "dd-MM-yyyy HH:mm:ss",
+        "dd-MM-yyyy HH:mm",
+        "dd/MM/yyyy HH:mm:ss",
+        "dd/MM/yyyy HH:mm",
+        "EEE, dd MMM yyyy HH:mm:ss z",
+        "EEE, dd MMM yyyy HH:mm:ss",
+        "MMM dd, yyyy HH:mm",
+        "MMM dd, yyyy hh:mm a",
+        "MMM dd, yyyy",
+        "MMMM dd, yyyy hh:mm a"
+    )
+
+    for (pattern in inputPatterns) {
+        try {
+            val parser = java.text.SimpleDateFormat(pattern, java.util.Locale.ENGLISH)
+            if (pattern.endsWith("X") || pattern.endsWith("Z") || pattern.contains("'T'")) {
+                parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }
+            val parsedDate = parser.parse(trimmed)
+            if (parsedDate != null) {
+                val outFormat = java.text.SimpleDateFormat("MMM-dd, hh:mm a", java.util.Locale.ENGLISH)
+                outFormat.timeZone = java.util.TimeZone.getDefault()
+                return outFormat.format(parsedDate)
+            }
+        } catch (_: Exception) {}
+    }
+
+    // 3. Regex match for ISO-like dates (e.g. 2026-09-26 12:44)
+    try {
+        val isoDateRegex = Regex("(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})[T ](\\d{1,2}):(\\d{1,2})")
+        val match = isoDateRegex.find(trimmed)
+        if (match != null) {
+            val (year, month, day, hour, min) = match.destructured
+            val cal = java.util.Calendar.getInstance()
+            cal.set(year.toInt(), month.toInt() - 1, day.toInt(), hour.toInt(), min.toInt(), 0)
+            val outFormat = java.text.SimpleDateFormat("MMM-dd, hh:mm a", java.util.Locale.ENGLISH)
+            return outFormat.format(cal.time)
+        }
+    } catch (_: Exception) {}
+
+    return trimmed
+}
+
+// Extracts duration number for live match without extra text
+fun getLiveMatchDuration(match: LiveMatch): String? {
+    // 1. Minute from gameState (e.g. "64", "45+2")
+    val rawMinute = match.gameState?.minute?.trim()
+    if (!rawMinute.isNullOrBlank()) {
+        val clean = rawMinute.replace("'", "").replace("min", "").replace("m", "").trim()
+        return if (clean.all { it.isDigit() || it == '+' }) "$clean'" else clean
+    }
+
+    // 2. Overs from gameState (Cricket)
+    val overs = match.gameState?.overs?.trim()
+    if (!overs.isNullOrBlank()) {
+        return "$overs ov"
+    }
+
+    // 3. Period or short status text (HT, 1H, 2H, Q1, Q2)
+    val period = match.gameState?.period?.trim() ?: match.gameState?.statusText?.trim()
+    if (!period.isNullOrBlank() && period.length <= 8) {
+        return period
+    }
+
+    // 4. Elapsed minutes calculated from startTime if live
+    val startTimeStr = match.startTime?.trim()
+    if (!startTimeStr.isNullOrBlank()) {
+        var startMillis: Long? = startTimeStr.toLongOrNull()
+        if (startMillis != null && startMillis < 100_000_000_000L) {
+            startMillis *= 1000L
+        }
+        if (startMillis == null) {
+            val patterns = listOf(
+                "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+                "yyyy-MM-dd'T'HH:mm:ssX",
+                "yyyy-MM-dd'T'HH:mm:ss",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm"
+            )
+            for (p in patterns) {
+                try {
+                    val sdf = java.text.SimpleDateFormat(p, java.util.Locale.ENGLISH)
+                    if (p.contains("'T'") || p.endsWith("X")) sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    val d = sdf.parse(startTimeStr)
+                    if (d != null) {
+                        startMillis = d.time
+                        break
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        if (startMillis != null) {
+            val elapsedMs = System.currentTimeMillis() - startMillis
+            if (elapsedMs in 0..(150 * 60 * 1000L)) {
+                val elapsedMinutes = elapsedMs / (60 * 1000L)
+                return "$elapsedMinutes'"
+            }
+        }
+    }
+
+    // 5. Fallback badge text if it looks like a duration
+    val badge = match.badgeText?.trim()
+    if (!badge.isNullOrBlank() && (badge.contains("'") || badge.contains("min") || badge.matches(Regex("\\d+")))) {
+        val clean = badge.replace("'", "").replace("min", "").trim()
+        return if (clean.all { it.isDigit() }) "$clean'" else badge
+    }
+
+    return null
+}
+
 @Composable
 fun SportsHubScreen(
     viewModel: StreamViewModel,
@@ -479,15 +615,15 @@ fun LiveEventsTab(
                                 modifier = Modifier.clickable { selectedCategory = cat.id }
                             ) {
                                 Box(modifier = Modifier.size(54.dp)) {
-                                    // Category Circle Ring
+                                    // Category Circle Ring with Orange Theme
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .clip(CircleShape)
-                                            .background(Color(0xFF131D2D))
+                                            .background(if (isSelected) Color(0xFF261508) else Color(0xFF131D2D))
                                             .border(
                                                 width = if (isSelected) 2.dp else 1.dp,
-                                                color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B),
+                                                brush = if (isSelected) Brush.linearGradient(listOf(Color(0xFFFF6B00), Color(0xFFFF9E00))) else Brush.linearGradient(listOf(Color(0xFF1E293B), Color(0xFF1E293B))),
                                                 shape = CircleShape
                                             ),
                                         contentAlignment = Alignment.Center
@@ -516,7 +652,7 @@ fun LiveEventsTab(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = cat.name,
-                                    color = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
+                                    color = if (isSelected) Color(0xFFFF8800) else Color.Gray,
                                     fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
@@ -525,7 +661,7 @@ fun LiveEventsTab(
                     }
                 }
 
-                // 2. STATUS FILTER PILLS (All, Live, Upcoming, Recent)
+                // 2. STATUS FILTER PILLS (All, Live, Upcoming, Recent) with Orange Gradient
                 val statusList = listOf(
                     "all" to "All (${allMatches.size})",
                     "live" to "Live (${allMatches.count { it.status.equals("live", ignoreCase = true) }})",
@@ -541,10 +677,10 @@ fun LiveEventsTab(
                         val isSelected = selectedStatus == statusId
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) Color(0xFF132238) else Color(0xFF131D2D),
+                            color = if (isSelected) Color(0xFF261508) else Color(0xFF131D2D),
                             border = BorderStroke(
                                 width = if (isSelected) 1.5.dp else 1.dp,
-                                color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B)
+                                brush = if (isSelected) Brush.linearGradient(listOf(Color(0xFFFF6B00), Color(0xFFFF9E00))) else Brush.linearGradient(listOf(Color(0xFF1E293B), Color(0xFF1E293B)))
                             ),
                             modifier = Modifier.clickable { selectedStatus = statusId }
                         ) {
@@ -556,14 +692,14 @@ fun LiveEventsTab(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = null,
-                                        tint = Color(0xFF00E5FF),
+                                        tint = Color(0xFFFF6B00),
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                 }
                                 Text(
                                     text = label,
-                                    color = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
+                                    color = if (isSelected) Color(0xFFFF8800) else Color.Gray,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -640,7 +776,7 @@ fun SportzfyEventCard(
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF131D2D)),
-        border = BorderStroke(1.dp, if (isLive) Color(0xFF00E5FF).copy(alpha = 0.5f) else Color(0xFF1E293B)),
+        border = BorderStroke(1.dp, if (isLive) Color(0xFFFF6B00).copy(alpha = 0.6f) else Color(0xFF1E293B)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
@@ -654,7 +790,7 @@ fun SportzfyEventCard(
             }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // 1. Header Row: Category || Tournament/Title (Left) & Time/Date (Right)
+            // 1. Header Row: Category || Tournament/Title (Left) & Time/Date/Live Duration (Right)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -664,12 +800,12 @@ fun SportzfyEventCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
-                    val (symbol, tintColor) = when (match.sportCategory.lowercase()) {
-                        "cricket" -> "🏏" to Color(0xFF00E5FF)
+                    val (symbol, _) = when (match.sportCategory.lowercase()) {
+                        "cricket" -> "🏏" to Color(0xFFFF6B00)
                         "football", "soccer" -> "⚡" to Color(0xFFFF4D4D)
                         "racing", "motorsports" -> "🏎️" to Color(0xFFFF9500)
                         "combat", "wrestling" -> "🥊" to Color(0xFFFF2D55)
-                        else -> "🏆" to Color(0xFF00E5FF)
+                        else -> "🏆" to Color(0xFFFF8800)
                     }
                     Text(text = symbol, fontSize = 13.sp)
                     Spacer(modifier = Modifier.width(6.dp))
@@ -685,24 +821,47 @@ fun SportzfyEventCard(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Cyan / Bright Time & Date on Right
+                // Right Side: Live Badge + Small Live Duration Number (e.g. 64') OR Formatted Date-Time (Sep-26, 12:44 PM)
                 if (isLive) {
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFFDC2626)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Text(
-                            text = "🔴 LIVE",
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFFDC2626)
+                        ) {
+                            Text(
+                                text = "🔴 LIVE",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        val duration = getLiveMatchDuration(match)
+                        if (!duration.isNullOrBlank()) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF1E293B),
+                                border = BorderStroke(0.6.dp, Color(0xFFFF6B00).copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = duration,
+                                    color = Color(0xFFFF9E00),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                 } else {
                     Text(
-                        text = match.startTime ?: "Live Now",
-                        color = Color(0xFF00E5FF),
+                        text = formatEventDateTime(match.startTime),
+                        color = Color(0xFFFF9E00),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
@@ -768,7 +927,7 @@ fun SportzfyEventCard(
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = match.teamA.score,
-                                color = Color(0xFFFF6B00),
+                                color = Color(0xFFFF7A00),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 maxLines = 1,
@@ -791,19 +950,19 @@ fun SportzfyEventCard(
                         fontWeight = FontWeight.Black
                     )
                     val gameDetail = match.gameState?.overs?.let { "$it ov" }
-                        ?: match.gameState?.minute?.let { "${it}'" }
+                        ?: match.gameState?.minute?.let { "${it.replace("'", "")}'" }
                         ?: match.gameState?.period
                         ?: match.gameState?.statusText
                     if (!gameDetail.isNullOrBlank()) {
                         Surface(
                             shape = RoundedCornerShape(4.dp),
-                            color = Color(0xFF00E5FF).copy(alpha = 0.12f),
-                            border = BorderStroke(0.5.dp, Color(0xFF00E5FF).copy(alpha = 0.3f)),
+                            color = Color(0xFFFF6B00).copy(alpha = 0.15f),
+                            border = BorderStroke(0.5.dp, Color(0xFFFF6B00).copy(alpha = 0.4f)),
                             modifier = Modifier.padding(top = 2.dp)
                         ) {
                             Text(
                                 text = gameDetail,
-                                color = Color(0xFF00E5FF),
+                                color = Color(0xFFFF9E00),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -836,7 +995,7 @@ fun SportzfyEventCard(
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = match.teamB.score,
-                                color = Color(0xFFFF6B00),
+                                color = Color(0xFFFF7A00),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 maxLines = 1,
@@ -894,24 +1053,24 @@ fun SportzfyEventCard(
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = null,
-                            tint = Color(0xFF00E5FF),
+                            tint = Color(0xFFFF6B00),
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Streaming Servers",
-                            color = Color(0xFF00E5FF),
+                            color = Color(0xFFFF8800),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(4.dp),
-                            color = Color(0x3300E5FF)
+                            color = Color(0x33FF6B00)
                         ) {
                             Text(
                                 text = "${servers.size} ONLINE",
-                                color = Color(0xFF00E5FF),
+                                color = Color(0xFFFF9E00),
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Black,
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
@@ -922,7 +1081,7 @@ fun SportzfyEventCard(
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowDown,
                         contentDescription = null,
-                        tint = Color(0xFF00E5FF),
+                        tint = Color(0xFFFF8800),
                         modifier = Modifier.rotate(arrowRotation)
                     )
                 }
@@ -951,11 +1110,11 @@ fun SportzfyEventCard(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
-                                            color = Color(0x3300E5FF)
+                                            color = Color(0x33FF6B00)
                                         ) {
                                             Text(
                                                 text = "S${index + 1}",
-                                                color = Color(0xFF00E5FF),
+                                                color = Color(0xFFFF9E00),
                                                 fontSize = 9.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

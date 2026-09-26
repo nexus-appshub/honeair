@@ -2152,7 +2152,15 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             val gameObj = obj.optJSONObject("gameState") ?: obj.optJSONObject("gameStateInfo") ?: obj.optJSONObject("matchState")
             val gameState = if (gameObj != null) {
                 com.example.data.model.GameStateInfo(
-                    minute = gameObj.optString("minute", "").ifBlank { null },
+                    minute = gameObj.optString("minute", "").ifBlank {
+                        gameObj.optString("elapsed", "").ifBlank {
+                            gameObj.optString("duration", "").ifBlank {
+                                gameObj.optString("matchTime", "").ifBlank {
+                                    gameObj.optString("liveTime", "")
+                                }
+                            }
+                        }
+                    }.ifBlank { null },
                     period = gameObj.optString("period", "").ifBlank { null },
                     overs = gameObj.optString("overs", "").ifBlank { null },
                     inning = gameObj.optString("inning", "").ifBlank { null },
@@ -2160,7 +2168,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 )
             } else {
                 val overs = obj.optString("overs", "").ifBlank { obj.optString("currentOver", "") }.ifBlank { null }
-                val minute = obj.optString("minute", "").ifBlank { null }
+                val minute = obj.optString("minute", "").ifBlank {
+                    obj.optString("elapsed", "").ifBlank {
+                        obj.optString("duration", "").ifBlank {
+                            obj.optString("matchTime", "").ifBlank {
+                                obj.optString("liveTime", "").ifBlank {
+                                    obj.optString("gameTime", "")
+                                }
+                            }
+                        }
+                    }
+                }.ifBlank { null }
                 val period = obj.optString("period", "").ifBlank { null }
                 val inning = obj.optString("inning", "").ifBlank { null }
                 val statusText = obj.optString("statusText", "").ifBlank { obj.optString("gameStatus", "") }.ifBlank { null }
