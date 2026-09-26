@@ -170,6 +170,13 @@ fun SubscriptionPlanModal(
     var selectedPlanIndex by remember { mutableIntStateOf(if (plans.size > 1) 1 else 0) }
     var showPaymentGuideStep by remember { androidx.compose.runtime.mutableStateOf(false) }
     var selectedPaymentMethod by remember { androidx.compose.runtime.mutableStateOf("bkash") }
+
+    androidx.compose.runtime.LaunchedEffect(isVisible) {
+        if (isVisible) {
+            SubscriptionManager.fetchLiveVipConfig()
+            viewModel.fetchAppControlConfig()
+        }
+    }
     
     val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -902,74 +909,65 @@ fun RedeemCodeSection(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            if (!isUserLoggedIn) {
-                Text(
-                    text = "⚠️ You must login to apply redeem codes.",
-                    fontSize = 10.sp,
-                    color = accentOrange,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    BasicTextField(
-                        value = codeText,
-                        onValueChange = { codeText = it },
-                        textStyle = LocalTextStyle.current.copy(color = textColor, fontSize = 12.sp),
-                        cursorBrush = SolidColor(accentOrange),
-                        singleLine = true,
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(inputBg, RoundedCornerShape(8.dp))
-                            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        decorationBox = { innerTextField ->
-                            if (codeText.isEmpty()) {
-                                Text(
-                                    text = "Enter code...",
-                                    color = Color.Gray,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            innerTextField()
-                        }
-                    )
-
-                    Button(
-                        onClick = {
-                            if (codeText.isNotBlank() && !isSubmitting) {
-                                isSubmitting = true
-                                scope.launch {
-                                    val (success, message) = viewModel.applyRedeemCode(codeText, userEmail)
-                                    redeemSuccess = success
-                                    redeemMessage = message
-                                    if (success) {
-                                        codeText = ""
-                                    }
-                                    isSubmitting = false
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = accentOrange,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        if (isSubmitting) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                BasicTextField(
+                    value = codeText,
+                    onValueChange = { codeText = it },
+                    textStyle = LocalTextStyle.current.copy(color = textColor, fontSize = 12.sp),
+                    cursorBrush = SolidColor(accentOrange),
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(inputBg, RoundedCornerShape(8.dp))
+                        .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    decorationBox = { innerTextField ->
+                        if (codeText.isEmpty()) {
+                            Text(
+                                text = "Enter VIP / Promo Code...",
+                                color = Color.Gray,
+                                fontSize = 12.sp
                             )
-                        } else {
-                            Text("Apply", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
+                        innerTextField()
+                    }
+                )
+
+                Button(
+                    onClick = {
+                        if (codeText.isNotBlank() && !isSubmitting) {
+                            isSubmitting = true
+                            redeemMessage = "Validating code..."
+                            scope.launch {
+                                val (success, message) = viewModel.applyRedeemCode(codeText, userEmail)
+                                redeemSuccess = success
+                                redeemMessage = message
+                                if (success) {
+                                    codeText = ""
+                                }
+                                isSubmitting = false
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accentOrange,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    if (isSubmitting) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Apply", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             }

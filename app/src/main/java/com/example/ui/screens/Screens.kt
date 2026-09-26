@@ -11,6 +11,7 @@ import android.os.Build
 import com.example.notifications.LocalNotificationManager
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -3064,7 +3065,8 @@ fun HomeScreen(
                                         onMoveToBottomClick = { viewModel.moveChannelToBottom(channel, filteredChannels) },
                                         onMoveUpClick = { viewModel.moveChannel(channel, up = true, activeList = filteredChannels) },
                                         onMoveDownClick = { viewModel.moveChannel(channel, up = false, activeList = filteredChannels) },
-                                        onResetOrderClick = { viewModel.resetChannelOrder(filteredChannels) }
+                                        onResetOrderClick = { viewModel.resetChannelOrder(filteredChannels) },
+                                        onDragDelta = { delta -> viewModel.moveChannelByDelta(channel, delta, filteredChannels) }
                                     )
                                 }
                                 item {
@@ -3653,7 +3655,8 @@ fun ChannelListRow(
     onMoveToBottomClick: (() -> Unit)? = null,
     onMoveUpClick: (() -> Unit)? = null,
     onMoveDownClick: (() -> Unit)? = null,
-    onResetOrderClick: (() -> Unit)? = null
+    onResetOrderClick: (() -> Unit)? = null,
+    onDragDelta: ((Int) -> Unit)? = null
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -3791,6 +3794,38 @@ fun ChannelListRow(
                         contentDescription = "Favorite",
                         tint = if (isFavorite) NeonMagenta else TextSecondary
                     )
+                }
+
+                if (onDragDelta != null) {
+                    var accumulatedDrag by remember { mutableStateOf(0f) }
+                    IconButton(
+                        onClick = { onLongClick?.invoke() },
+                        modifier = Modifier.pointerInput(channel.url) {
+                            detectDragGestures(
+                                onDragStart = { accumulatedDrag = 0f },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    accumulatedDrag += dragAmount.y
+                                    if (accumulatedDrag > 40f) {
+                                        onDragDelta(1)
+                                        accumulatedDrag = 0f
+                                    } else if (accumulatedDrag < -40f) {
+                                        onDragDelta(-1)
+                                        accumulatedDrag = 0f
+                                    }
+                                },
+                                onDragEnd = { accumulatedDrag = 0f },
+                                onDragCancel = { accumulatedDrag = 0f }
+                            )
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DragHandle,
+                            contentDescription = "Drag to Move Channel",
+                            tint = NeonCyan.copy(alpha = 0.85f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 if (onHideClick != null || onMoveUpClick != null || onMoveDownClick != null || onMoveToTopClick != null || onMoveToBottomClick != null) {

@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -90,24 +91,91 @@ object SubscriptionManager {
     }
 
     /**
-     * Standalone VIP config provider: disconnected from website admin panel server
+     * Live VIP config provider: Fetches configuration from Firebase RTDB and backend server.
      */
     fun fetchLiveVipConfig() {
         scope.launch(Dispatchers.IO) {
-            // Standalone mode: do not connect to remote admin panel server
-            val defaultVipConfig = VipConfigResponse(
-                success = true,
-                version = "2.0",
-                pricingPlans = emptyList(),
-                paymentGateways = null,
-                merchantConfig = null,
-                premiumUsers = emptyList()
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+
+            val endpoints = listOf(
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/app_vip_config.json",
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/configs/vipConfig.json",
+                "https://homeair-backend.up.railway.app/api/vip/config",
+                "${com.example.network.AppConfigManager.DEFAULT_BACKEND_URL}/api/vip/config"
             )
-            _vipConfig.value = defaultVipConfig
+
+            var parsedConfig: VipConfigResponse? = null
+            for (url in endpoints) {
+                try {
+                    val req = okhttp3.Request.Builder()
+                        .url(url)
+                        .header("Accept", "application/json")
+                        .header("Cache-Control", "no-cache")
+                        .build()
+                    client.newCall(req).execute().use { res ->
+                        val body = res.body?.string()
+                        if (res.isSuccessful && !body.isNullOrBlank() && body.trim() != "null" && body.trim().startsWith("{")) {
+                            val config = parseVipConfigFromJson(body)
+                            if (config != null && (config.pricingPlans.isNotEmpty() || config.redeemCodes.isNotEmpty() || config.merchantConfig != null)) {
+                                parsedConfig = config
+                                return@use
+                            }
+                        }
+                    }
+                    if (parsedConfig != null) break
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error fetching VIP config from $url: ${e.message}")
+                }
+            }
+
+            if (parsedConfig != null) {
+                _vipConfig.value = parsedConfig
+            } else if (_vipConfig.value == null) {
+                _vipConfig.value = VipConfigResponse(
+                    success = true,
+                    version = "2.0",
+                    pricingPlans = emptyList(),
+                    paymentGateways = null,
+                    merchantConfig = null,
+                    premiumUsers = emptyList()
+                )
+            }
+
             val auth = try { FirebaseAuth.getInstance() } catch (e: Throwable) { null }
             val user = auth?.currentUser
             checkUserSubscription(user?.email, user?.uid)
         }
+    }
+
+    /**
+     * Grants an active VIP status directly in memory upon successful code redemption
+     */
+    fun grantUserRedeemPass(
+        email: String,
+        planName: String,
+        expiryDateStr: String?,
+        expiryTimestamp: Long?,
+        isLifetime: Boolean
+    ) {
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isBlank()) return
+
+        val info = PremiumUserInfo(
+            email = cleanEmail,
+            isLifetime = isLifetime,
+            planName = planName,
+            expiryDate = expiryDateStr,
+            expiryTimestamp = expiryTimestamp,
+            isExpired = false
+        )
+        remotePremiumUsersMap[cleanEmail] = info
+        synchronized(remotePremiumEmails) {
+            remotePremiumEmails.add(cleanEmail)
+        }
+        recomputeStatus(cleanEmail, null)
     }
 
     /**
@@ -166,65 +234,171 @@ object SubscriptionManager {
                 whatsapp = whatsappNum
             )
 
-            // 3. Pricing Plans
+            // 3. Pricing Plans (Supports Array or Map Object)
             val plansList = mutableListOf<VipPlan>()
-            val plansArr = json.optJSONArray("pricingPlans")
-            if (plansArr != null) {
-                for (i in 0 until plansArr.length()) {
-                    val pObj = plansArr.optJSONObject(i) ?: continue
-                    val featuresList = mutableListOf<String>()
-                    val fArr = pObj.optJSONArray("features")
-                    if (fArr != null) {
-                        for (f in 0 until fArr.length()) {
-                            val feat = fArr.optString(f)
-                            if (feat.isNotBlank()) featuresList.add(feat)
+            val rawPlans = json.opt("pricingPlans")
+            when (rawPlans) {
+                is JSONArray -> {
+                    for (i in 0 until rawPlans.length()) {
+                        val pObj = rawPlans.optJSONObject(i) ?: continue
+                        val featuresList = mutableListOf<String>()
+                        val fArr = pObj.optJSONArray("features")
+                        if (fArr != null) {
+                            for (f in 0 until fArr.length()) {
+                                val feat = fArr.optString(f)
+                                if (feat.isNotBlank()) featuresList.add(feat)
+                            }
+                        }
+                        plansList.add(
+                            VipPlan(
+                                id = pObj.optString("id", "plan_$i"),
+                                name = pObj.optString("name", "VIP Plan"),
+                                duration = pObj.optString("duration", ""),
+                                priceBDT = pObj.optInt("priceBDT", pObj.optInt("price", 0)),
+                                originalPriceBDT = if (pObj.has("originalPriceBDT")) pObj.optInt("originalPriceBDT") else null,
+                                isPopular = pObj.optBoolean("isPopular", false),
+                                badge = pObj.optString("badge", "").takeIf { it.isNotBlank() },
+                                features = featuresList
+                            )
+                        )
+                    }
+                }
+                is JSONObject -> {
+                    val keys = rawPlans.keys()
+                    var idx = 0
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        val pObj = rawPlans.optJSONObject(k) ?: continue
+                        val featuresList = mutableListOf<String>()
+                        val fArr = pObj.optJSONArray("features")
+                        if (fArr != null) {
+                            for (f in 0 until fArr.length()) {
+                                val feat = fArr.optString(f)
+                                if (feat.isNotBlank()) featuresList.add(feat)
+                            }
+                        }
+                        plansList.add(
+                            VipPlan(
+                                id = pObj.optString("id", k),
+                                name = pObj.optString("name", "VIP Plan"),
+                                duration = pObj.optString("duration", ""),
+                                priceBDT = pObj.optInt("priceBDT", pObj.optInt("price", 0)),
+                                originalPriceBDT = if (pObj.has("originalPriceBDT")) pObj.optInt("originalPriceBDT") else null,
+                                isPopular = pObj.optBoolean("isPopular", false),
+                                badge = pObj.optString("badge", "").takeIf { it.isNotBlank() },
+                                features = featuresList
+                            )
+                        )
+                        idx++
+                    }
+                }
+            }
+
+            // 4. Redeem Codes (Supports Array or Map Object)
+            val redeemCodesList = mutableListOf<RedeemCode>()
+            val rawCodes = json.opt("redeemCodes")
+            when (rawCodes) {
+                is JSONArray -> {
+                    for (i in 0 until rawCodes.length()) {
+                        val rObj = rawCodes.optJSONObject(i) ?: continue
+                        val codeStr = rObj.optString("code", "").trim()
+                        if (codeStr.isNotBlank()) {
+                            val durDays: Double? = if (rObj.has("durationDays")) rObj.optDouble("durationDays") else null
+                            redeemCodesList.add(
+                                RedeemCode(
+                                    code = codeStr,
+                                    planName = rObj.optString("planName", "VIP Plan"),
+                                    maxUses = rObj.optInt("maxUses", 1),
+                                    isActive = rObj.optBoolean("isActive", true),
+                                    durationDays = durDays,
+                                    expiresAt = rObj.optString("expiresAt", "").takeIf { it.isNotBlank() },
+                                    isLifetime = rObj.optBoolean("isLifetime", false),
+                                    usedCount = rObj.optInt("usedCount", 0)
+                                )
+                            )
                         }
                     }
-                    plansList.add(
-                        VipPlan(
-                            id = pObj.optString("id", "plan_$i"),
-                            name = pObj.optString("name", "VIP Plan"),
-                            duration = pObj.optString("duration", ""),
-                            priceBDT = pObj.optInt("priceBDT", 0),
-                            originalPriceBDT = if (pObj.has("originalPriceBDT")) pObj.optInt("originalPriceBDT") else null,
-                            isPopular = pObj.optBoolean("isPopular", false),
-                            badge = pObj.optString("badge", null),
-                            features = featuresList
-                        )
-                    )
+                }
+                is JSONObject -> {
+                    val keys = rawCodes.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        val rObj = rawCodes.optJSONObject(k) ?: continue
+                        val codeStr = rObj.optString("code", k).trim()
+                        if (codeStr.isNotBlank()) {
+                            val durDays: Double? = if (rObj.has("durationDays")) rObj.optDouble("durationDays") else null
+                            redeemCodesList.add(
+                                RedeemCode(
+                                    code = codeStr,
+                                    planName = rObj.optString("planName", "VIP Plan"),
+                                    maxUses = rObj.optInt("maxUses", 1),
+                                    isActive = rObj.optBoolean("isActive", true),
+                                    durationDays = durDays,
+                                    expiresAt = rObj.optString("expiresAt", "").takeIf { it.isNotBlank() },
+                                    isLifetime = rObj.optBoolean("isLifetime", false),
+                                    usedCount = rObj.optInt("usedCount", 0)
+                                )
+                            )
+                        }
+                    }
                 }
             }
 
-            // 4. Redeem Codes
-            val redeemCodesList = mutableListOf<RedeemCode>()
-            val rcArr = json.optJSONArray("redeemCodes")
-            if (rcArr != null) {
-                for (i in 0 until rcArr.length()) {
-                    val rObj = rcArr.optJSONObject(i) ?: continue
-                    redeemCodesList.add(
-                        RedeemCode(
-                            code = rObj.optString("code", ""),
-                            planName = rObj.optString("planName", null),
-                            maxUses = rObj.optInt("maxUses", 1),
-                            isActive = rObj.optBoolean("isActive", true),
-                            durationDays = if (rObj.has("durationDays")) rObj.optDouble("durationDays") else null,
-                            expiresAt = rObj.optString("expiresAt", null),
-                            isLifetime = rObj.optBoolean("isLifetime", false),
-                            usedCount = rObj.optInt("usedCount", 0)
-                        )
-                    )
-                }
-            }
-
-            // 5. Premium Users
+            // 5. Premium Users (Supports Array or Map Object)
             val premiumEmailsList = mutableListOf<String>()
-            val puArr = json.optJSONArray("premiumUsers")
-            if (puArr != null) {
-                remotePremiumUsersMap.clear()
-                for (i in 0 until puArr.length()) {
-                    when (val item = puArr.get(i)) {
-                        is JSONObject -> {
-                            val email = item.optString("email", "").trim().lowercase()
+            val rawPu = json.opt("premiumUsers")
+            when (rawPu) {
+                is JSONArray -> {
+                    for (i in 0 until rawPu.length()) {
+                        when (val item = rawPu.get(i)) {
+                            is JSONObject -> {
+                                val email = item.optString("email", "").trim().lowercase()
+                                if (email.isNotBlank()) {
+                                    val status = item.optString("status", "active")
+                                    val isLifetime = item.optBoolean("isLifetime", false)
+                                    val plan = item.optString("planName", item.optString("plan", "VIP Plan"))
+                                    val expDate = item.optString("expiresAt", item.optString("expiryDate", item.optString("validUntil", ""))).ifBlank { null }
+                                    val expTs = if (item.has("expiresAtTimestamp")) item.optLong("expiresAtTimestamp") else null
+
+                                    val expired = if (isLifetime) {
+                                        false
+                                    } else if (status.equals("expired", ignoreCase = true)) {
+                                        true
+                                    } else {
+                                        isDateExpired(expDate, expTs)
+                                    }
+
+                                    val userInfo = PremiumUserInfo(
+                                        email = email,
+                                        isLifetime = isLifetime,
+                                        planName = plan,
+                                        expiryDate = expDate,
+                                        expiryTimestamp = expTs,
+                                        isExpired = expired
+                                    )
+                                    remotePremiumUsersMap[email] = userInfo
+                                    if (!expired) {
+                                        premiumEmailsList.add(email)
+                                    }
+                                }
+                            }
+                            is String -> {
+                                val email = item.trim().lowercase()
+                                if (email.isNotBlank()) {
+                                    remotePremiumUsersMap[email] = PremiumUserInfo(email = email, isLifetime = false, planName = "VIP Plan")
+                                    premiumEmailsList.add(email)
+                                }
+                            }
+                        }
+                    }
+                }
+                is JSONObject -> {
+                    val keys = rawPu.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        val item = rawPu.optJSONObject(k)
+                        if (item != null) {
+                            val email = item.optString("email", k).trim().lowercase()
                             if (email.isNotBlank()) {
                                 val status = item.optString("status", "active")
                                 val isLifetime = item.optBoolean("isLifetime", false)
@@ -252,13 +426,6 @@ object SubscriptionManager {
                                 if (!expired) {
                                     premiumEmailsList.add(email)
                                 }
-                            }
-                        }
-                        is String -> {
-                            val email = item.trim().lowercase()
-                            if (email.isNotBlank()) {
-                                remotePremiumUsersMap[email] = PremiumUserInfo(email = email, isLifetime = false, planName = "VIP Plan")
-                                premiumEmailsList.add(email)
                             }
                         }
                     }

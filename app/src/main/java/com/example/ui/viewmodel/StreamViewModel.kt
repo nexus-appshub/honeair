@@ -693,78 +693,20 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun moveChannelToTop(channel: IptvChannel, activeList: List<IptvChannel>) {
-        viewModelScope.launch {
-            val index = activeList.indexOfFirst { it.url == channel.url }
-            if (index <= 0) return@launch
-            val reorderedList = activeList.toMutableList()
-            val item = reorderedList.removeAt(index)
-            reorderedList.add(0, item)
-            persistChannelOrder(reorderedList)
-        }
-    }
+    private var persistOrderJob: kotlinx.coroutines.Job? = null
 
-    fun moveChannelToBottom(channel: IptvChannel, activeList: List<IptvChannel>) {
-        viewModelScope.launch {
-            val index = activeList.indexOfFirst { it.url == channel.url }
-            if (index == -1 || index >= activeList.size - 1) return@launch
-            val reorderedList = activeList.toMutableList()
-            val item = reorderedList.removeAt(index)
-            reorderedList.add(item)
-            persistChannelOrder(reorderedList)
-        }
-    }
-
-    fun moveChannel(channel: IptvChannel, up: Boolean, activeList: List<IptvChannel>) {
-        viewModelScope.launch {
-            val index = activeList.indexOfFirst { it.url == channel.url }
-            if (index == -1) return@launch
-            val targetIndex = if (up) index - 1 else index + 1
-            if (targetIndex < 0 || targetIndex >= activeList.size) return@launch
-            val reorderedList = activeList.toMutableList()
-            val item = reorderedList.removeAt(index)
-            reorderedList.add(targetIndex, item)
-            persistChannelOrder(reorderedList)
-        }
-    }
-
-    fun reorderChannels(fromIndex: Int, toIndex: Int, activeList: List<IptvChannel>) {
-        if (fromIndex == toIndex || fromIndex < 0 || fromIndex >= activeList.size || toIndex < 0 || toIndex >= activeList.size) return
-        viewModelScope.launch {
-            val reorderedList = activeList.toMutableList()
-            val item = reorderedList.removeAt(fromIndex)
-            reorderedList.add(toIndex, item)
-            persistChannelOrder(reorderedList)
-        }
-    }
-
-    private suspend fun persistChannelOrder(orderedList: List<IptvChannel>) {
-        val db = AppDatabase.getDatabase(getApplication())
-        val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
-        val updatedEntities = orderedList.mapIndexed { idx, ch ->
-            val pref = existingPrefs[ch.url]
-            com.example.data.database.ChannelPreferenceEntity(
-                url = ch.url,
-                name = ch.name,
-                isHidden = pref?.isHidden ?: false,
-                displayOrder = idx,
-                customGroup = pref?.customGroup ?: ch.group
-            )
-        }
-        db.channelPreferenceDao().insertPreferences(updatedEntities)
-    }
-
-    fun resetChannelOrder(activeList: List<IptvChannel>) {
-        viewModelScope.launch {
+    private fun persistFullListOrder(orderedList: List<IptvChannel>) {
+        persistOrderJob?.cancel()
+        persistOrderJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val db = AppDatabase.getDatabase(getApplication())
             val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
-            val updatedEntities = activeList.map { ch ->
+            val updatedEntities = orderedList.mapIndexed { idx, ch ->
                 val pref = existingPrefs[ch.url]
                 com.example.data.database.ChannelPreferenceEntity(
                     url = ch.url,
                     name = ch.name,
                     isHidden = pref?.isHidden ?: false,
-                    displayOrder = -1,
+                    displayOrder = idx,
                     customGroup = pref?.customGroup ?: ch.group
                 )
             }
@@ -772,8 +714,173 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun moveChannelToTop(channel: IptvChannel, activeList: List<IptvChannel>) {
+        val currentState = _channelsState.value
+        if (currentState !is UiState.Success) return
+        val fullList = currentState.data.toMutableList()
+
+        val fromFullIndex = fullList.indexOfFirst { it.url == channel.url }
+        if (fromFullIndex == -1) return
+        val item = fullList.removeAt(fromFullIndex)
+
+        val firstActive = activeList.firstOrNull { it.url != channel.url }
+        val targetFullIndex = if (firstActive != null) {
+            val idx = fullList.indexOfFirst { it.url == firstActive.url }
+            if (idx != -1) idx else 0
+        } else {
+            0
+        }
+        fullList.add(targetFullIndex.coerceIn(0, fullList.size), item)
+        _channelsState.value = UiState.Success(fullList)
+        persistFullListOrder(fullList)
+    }
+
+    fun moveChannelToBottom(channel: IptvChannel, activeList: List<IptvChannel>) {
+        val currentState = _channelsState.value
+        if (currentState !is UiState.Success) return
+        val fullList = currentState.data.toMutableList()
+
+        val fromFullIndex = fullList.indexOfFirst { it.url == channel.url }
+        if (fromFullIndex == -1) return
+        val item = fullList.removeAt(fromFullIndex)
+
+        val lastActive = activeList.lastOrNull { it.url != channel.url }
+        val targetFullIndex = if (lastActive != null) {
+            val idx = fullList.indexOfFirst { it.url == lastActive.url }
+            if (idx != -1) idx + 1 else fullList.size
+        } else {
+            fullList.size
+        }
+        fullList.add(targetFullIndex.coerceIn(0, fullList.size), item)
+        _channelsState.value = UiState.Success(fullList)
+        persistFullListOrder(fullList)
+    }
+
+    fun moveChannel(channel: IptvChannel, up: Boolean, activeList: List<IptvChannel>) {
+        val fromActiveIndex = activeList.indexOfFirst { it.url == channel.url }
+        if (fromActiveIndex == -1) return
+        val toActiveIndex = if (up) fromActiveIndex - 1 else fromActiveIndex + 1
+        if (toActiveIndex < 0 || toActiveIndex >= activeList.size) return
+
+        val targetChannel = activeList[toActiveIndex]
+
+        val currentState = _channelsState.value
+        if (currentState !is UiState.Success) return
+        val fullList = currentState.data.toMutableList()
+
+        val fromFullIndex = fullList.indexOfFirst { it.url == channel.url }
+        if (fromFullIndex == -1) return
+        val item = fullList.removeAt(fromFullIndex)
+
+        val targetFullIndex = fullList.indexOfFirst { it.url == targetChannel.url }
+        if (targetFullIndex == -1) {
+            fullList.add(fromFullIndex.coerceIn(0, fullList.size), item)
+            return
+        }
+
+        val insertIndex = if (up) targetFullIndex else targetFullIndex + 1
+        fullList.add(insertIndex.coerceIn(0, fullList.size), item)
+        _channelsState.value = UiState.Success(fullList)
+        persistFullListOrder(fullList)
+    }
+
     fun moveChannelByDelta(channel: IptvChannel, delta: Int, activeList: List<IptvChannel>) {
-        moveChannel(channel, up = delta < 0, activeList = activeList)
+        if (delta == 0) return
+        val fromActiveIndex = activeList.indexOfFirst { it.url == channel.url }
+        if (fromActiveIndex == -1) return
+        val toActiveIndex = (fromActiveIndex + delta).coerceIn(0, activeList.size - 1)
+        if (toActiveIndex == fromActiveIndex) return
+
+        val targetChannel = activeList[toActiveIndex]
+
+        val currentState = _channelsState.value
+        if (currentState !is UiState.Success) return
+        val fullList = currentState.data.toMutableList()
+
+        val fromFullIndex = fullList.indexOfFirst { it.url == channel.url }
+        if (fromFullIndex == -1) return
+        val item = fullList.removeAt(fromFullIndex)
+
+        val targetFullIndex = fullList.indexOfFirst { it.url == targetChannel.url }
+        if (targetFullIndex == -1) {
+            fullList.add(fromFullIndex.coerceIn(0, fullList.size), item)
+            return
+        }
+
+        val insertIndex = if (delta < 0) targetFullIndex else targetFullIndex + 1
+        fullList.add(insertIndex.coerceIn(0, fullList.size), item)
+        _channelsState.value = UiState.Success(fullList)
+        persistFullListOrder(fullList)
+    }
+
+    fun reorderChannels(fromIndex: Int, toIndex: Int, activeList: List<IptvChannel>) {
+        if (fromIndex == toIndex || fromIndex < 0 || fromIndex >= activeList.size || toIndex < 0 || toIndex >= activeList.size) return
+        val channel = activeList[fromIndex]
+        val targetChannel = activeList[toIndex]
+
+        val currentState = _channelsState.value
+        if (currentState !is UiState.Success) return
+        val fullList = currentState.data.toMutableList()
+
+        val fromFullIndex = fullList.indexOfFirst { it.url == channel.url }
+        if (fromFullIndex == -1) return
+        val item = fullList.removeAt(fromFullIndex)
+
+        val targetFullIndex = fullList.indexOfFirst { it.url == targetChannel.url }
+        if (targetFullIndex == -1) {
+            fullList.add(fromFullIndex.coerceIn(0, fullList.size), item)
+            return
+        }
+
+        val insertIndex = if (fromIndex > toIndex) targetFullIndex else targetFullIndex + 1
+        fullList.add(insertIndex.coerceIn(0, fullList.size), item)
+        _channelsState.value = UiState.Success(fullList)
+        persistFullListOrder(fullList)
+    }
+
+    fun resetChannelOrder(activeList: List<IptvChannel>) {
+        viewModelScope.launch {
+            val currentPlaylist = _selectedPlaylist.value
+            val url = currentPlaylist?.url
+            val rawChannels = if (url != null) {
+                if (url.startsWith("custom://")) {
+                    val id = url.substringAfter("custom://").toLongOrNull() ?: 0L
+                    val db = AppDatabase.getDatabase(getApplication())
+                    val playlist = db.customPlaylistDao().getAllCustomPlaylists().find { it.id == id }
+                    if (playlist != null) {
+                        val content = if (playlist.rawContent.startsWith("file://")) {
+                            val file = java.io.File(playlist.rawContent.substring(7))
+                            if (file.exists()) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.readText() }
+                            } else ""
+                        } else {
+                            playlist.rawContent
+                        }
+                        com.example.data.network.IptvParser.parseChannels(content)
+                    } else emptyList()
+                } else {
+                    repository.getChannelsFromPlaylist(url, forceRefresh = false)
+                }
+            } else {
+                emptyList()
+            }
+            if (rawChannels.isNotEmpty()) {
+                _channelsState.value = UiState.Success(rawChannels)
+                val db = AppDatabase.getDatabase(getApplication())
+                val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
+                val updatedEntities = rawChannels.map { ch ->
+                    val pref = existingPrefs[ch.url]
+                    com.example.data.database.ChannelPreferenceEntity(
+                        url = ch.url,
+                        name = ch.name,
+                        isHidden = pref?.isHidden ?: false,
+                        displayOrder = -1,
+                        customGroup = pref?.customGroup ?: ch.group
+                    )
+                }
+                db.channelPreferenceDao().insertPreferences(updatedEntities)
+            }
+        }
     }
 
     fun createCustomCategory(channels: List<IptvChannel>, categoryName: String) {
@@ -913,70 +1020,86 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     suspend fun applyRedeemCode(code: String, userEmail: String?): Pair<Boolean, String> {
-        val cleanEmail = userEmail?.trim()?.lowercase() ?: ""
-        if (cleanEmail.isBlank()) {
-            return Pair(false, "Please login first.")
-        }
+        val fbEmail = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email } catch (_: Throwable) { null }
+        val profEmail = _userProfile.value?.email
+        val savedEmail = sharedPrefs.getString("user_email", "") ?: ""
+        val deviceId = try {
+            val app = getApplication<android.app.Application>()
+            android.provider.Settings.Secure.getString(app.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "device"
+        } catch (_: Exception) { "device" }
+
+        val cleanEmail = userEmail?.trim()?.lowercase()
+            ?.ifBlank { fbEmail?.trim()?.lowercase() }
+            ?.ifBlank { profEmail?.trim()?.lowercase() }
+            ?.ifBlank { savedEmail.trim().lowercase() }
+            ?: "guest_${deviceId}@homeair.tv"
 
         val entered = code.trim()
         if (entered.isBlank()) {
-            return Pair(false, "Invalid code! Please check and try again.")
+            return Pair(false, "Invalid code! Please enter a valid promo or redeem code.")
         }
 
-        // 1. Check loaded VIP config redeemCodes (from Firebase app_vip_config.json)
+        // Helper to parse dates/timestamps
+        fun parseExpiresAt(dateStr: String?): Boolean {
+            if (dateStr.isNullOrBlank()) return false
+            val clean = dateStr.trim().lowercase()
+            if (clean.contains("lifetime") || clean.contains("unlimited") || clean.contains("permanent")) return false
+            val dateFormats = listOf(
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US),
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US),
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US),
+                java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.US),
+                java.text.SimpleDateFormat("MM/dd/yyyy", java.util.Locale.US)
+            )
+            for (fmt in dateFormats) {
+                try {
+                    val d = fmt.parse(dateStr)
+                    if (d != null) {
+                        return System.currentTimeMillis() > d.time
+                    }
+                } catch (_: Exception) {}
+            }
+            return false
+        }
+
+        // Helper to compute validity millis
+        fun computeValidityMs(planName: String, durationDays: Double?, isLifetime: Boolean): Long {
+            if (isLifetime) return 100L * 365 * 24 * 3600 * 1000L
+            if (durationDays != null && durationDays > 0.0) {
+                return (durationDays * 24.0 * 3600.0 * 1000.0).toLong()
+            }
+            val pLower = planName.lowercase()
+            return when {
+                pLower.contains("6 hour") || pLower.contains("6h") || pLower.contains("match") -> 6 * 3600 * 1000L
+                pLower.contains("12 hour") || pLower.contains("12h") -> 12 * 3600 * 1000L
+                pLower.contains("1 day") || pLower.contains("24 hour") || pLower.contains("24h") -> 24 * 3600 * 1000L
+                pLower.contains("7 day") || pLower.contains("1 week") || pLower.contains("7d") -> 7 * 24 * 3600 * 1000L
+                pLower.contains("30 day") || pLower.contains("1 month") || pLower.contains("30d") -> 30 * 24 * 3600 * 1000L
+                pLower.contains("90 day") || pLower.contains("3 month") || pLower.contains("90d") -> 90 * 24 * 3600 * 1000L
+                pLower.contains("180 day") || pLower.contains("6 month") -> 180 * 24 * 3600 * 1000L
+                pLower.contains("365 day") || pLower.contains("1 year") || pLower.contains("1y") -> 365 * 24 * 3600 * 1000L
+                pLower.contains("lifetime") -> 100L * 365 * 24 * 3600 * 1000L
+                else -> (_appControlConfig.value?.redeemValidityHours ?: 24) * 3600 * 1000L
+            }
+        }
+
+        // 1. Check loaded VIP config in SubscriptionManager
         val vipConfig = com.example.subscription.SubscriptionManager.vipConfig.value
         val matchedCode = vipConfig?.redeemCodes?.firstOrNull { it.code.trim().equals(entered, ignoreCase = true) }
         if (matchedCode != null) {
             if (!matchedCode.isActive) {
                 return Pair(false, "This redeem code is no longer active.")
             }
-
-            // Check if code has an expiration date
-            val expiresAtStr = matchedCode.expiresAt
-            if (!expiresAtStr.isNullOrBlank()) {
-                val isExpired = try {
-                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
-                    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                    val d = sdf.parse(expiresAtStr.substringBefore('.'))
-                    d != null && System.currentTimeMillis() > d.time
-                } catch (e: Exception) {
-                    false
-                }
-                if (isExpired) {
-                    return Pair(false, "This redeem code has expired.")
-                }
+            if (parseExpiresAt(matchedCode.expiresAt)) {
+                return Pair(false, "This redeem code has expired.")
             }
-
             val planName = matchedCode.planName ?: "VIP Promo Pass"
-            val durationDays = matchedCode.durationDays
-
-            // Calculate precise duration (e.g. 0.25 days = 6 hours for 6h match pass)
-            val validityMs: Long = when {
-                matchedCode.isLifetime == true -> 100L * 365 * 24 * 3600 * 1000L
-                durationDays != null && durationDays > 0.0 -> {
-                    (durationDays * 24.0 * 3600.0 * 1000.0).toLong()
-                }
-                planName.contains("6 hour", ignoreCase = true) || planName.contains("6h", ignoreCase = true) || planName.contains("match pass", ignoreCase = true) -> {
-                    6 * 3600 * 1000L
-                }
-                planName.contains("12 hour", ignoreCase = true) || planName.contains("12h", ignoreCase = true) -> {
-                    12 * 3600 * 1000L
-                }
-                planName.contains("1 day", ignoreCase = true) || planName.contains("24 hour", ignoreCase = true) -> {
-                    24 * 3600 * 1000L
-                }
-                planName.contains("7 day", ignoreCase = true) || planName.contains("1 week", ignoreCase = true) -> {
-                    7 * 24 * 3600 * 1000L
-                }
-                planName.contains("30 day", ignoreCase = true) || planName.contains("1 month", ignoreCase = true) -> {
-                    30 * 24 * 3600 * 1000L
-                }
-                else -> {
-                    (_appControlConfig.value?.redeemValidityHours ?: 24) * 3600 * 1000L
-                }
-            }
-
+            val isLifetime = matchedCode.isLifetime == true
+            val validityMs = computeValidityMs(planName, matchedCode.durationDays, isLifetime)
             val unlockUntil = System.currentTimeMillis() + validityMs
+
             sharedPrefs.edit()
                 .putLong("redeem_unlocked_until", unlockUntil)
                 .putString("redeem_unlocked_user", cleanEmail)
@@ -985,22 +1108,144 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 .apply()
 
             _isRedeemActive.value = true
+            _isAppUnlockedWithFanCode.value = true
+            com.example.subscription.SubscriptionManager.grantUserRedeemPass(
+                email = cleanEmail,
+                planName = planName,
+                expiryDateStr = matchedCode.expiresAt,
+                expiryTimestamp = unlockUntil,
+                isLifetime = isLifetime
+            )
+
+            // Async background notify
             viewModelScope.launch(Dispatchers.IO) {
                 try {
                     com.example.data.api.VipApiClient.apiService.redeemCode(
                         com.example.data.api.RedeemRequest(entered, cleanEmail)
                     )
-                } catch (e: Exception) {}
+                } catch (_: Exception) {}
             }
-            return Pair(true, "Congratulations! $planName has been activated.")
+
+            return Pair(true, "Congratulations! $planName has been activated successfully! 🎉")
         }
 
-        // 2. Check local/remote appControl global redeem code
+        // 2. Direct Realtime Firebase RTDB Fetch (app_vip_config.json & configs/vipConfig.json)
+        val rtdbResult = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            try {
+                val okHttpClient = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val rtdbUrls = listOf(
+                    "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/app_vip_config.json",
+                    "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/app_vip_config/redeemCodes.json",
+                    "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/configs/vipConfig.json"
+                )
+
+                for (u in rtdbUrls) {
+                    try {
+                        val req = okhttp3.Request.Builder().url(u).header("Cache-Control", "no-cache").build()
+                        okHttpClient.newCall(req).execute().use { res ->
+                            val body = res.body?.string()
+                            if (res.isSuccessful && !body.isNullOrBlank() && body.trim() != "null") {
+                                val trimmed = body.trim()
+                                val codesFound = mutableListOf<org.json.JSONObject>()
+                                if (trimmed.startsWith("[")) {
+                                    val arr = org.json.JSONArray(trimmed)
+                                    for (i in 0 until arr.length()) {
+                                        val obj = arr.optJSONObject(i)
+                                        if (obj != null) codesFound.add(obj)
+                                    }
+                                } else if (trimmed.startsWith("{")) {
+                                    val rootObj = org.json.JSONObject(trimmed)
+                                    val rCodes = rootObj.opt("redeemCodes")
+                                    when (rCodes) {
+                                        is org.json.JSONArray -> {
+                                            for (i in 0 until rCodes.length()) {
+                                                val obj = rCodes.optJSONObject(i)
+                                                if (obj != null) codesFound.add(obj)
+                                            }
+                                        }
+                                        is org.json.JSONObject -> {
+                                            val keys = rCodes.keys()
+                                            while (keys.hasNext()) {
+                                                val k = keys.next()
+                                                val obj = rCodes.optJSONObject(k)
+                                                if (obj != null) codesFound.add(obj)
+                                            }
+                                        }
+                                        else -> {
+                                            if (rootObj.has("code")) {
+                                                codesFound.add(rootObj)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                for (cObj in codesFound) {
+                                    val cCode = cObj.optString("code", "").trim()
+                                    if (cCode.equals(entered, ignoreCase = true)) {
+                                        val isActive = cObj.optBoolean("isActive", true)
+                                        if (!isActive) return@withContext Pair(false, "This redeem code is no longer active.")
+                                        val expiresAtStr = cObj.optString("expiresAt", null).takeIf { !it.isNullOrBlank() }
+                                        if (parseExpiresAt(expiresAtStr)) {
+                                            return@withContext Pair(false, "This redeem code has expired.")
+                                        }
+
+                                        val planName = cObj.optString("planName", "VIP Promo Pass")
+                                        val dDays = if (cObj.has("durationDays")) cObj.optDouble("durationDays") else null
+                                        val isLifetime = cObj.optBoolean("isLifetime", false)
+                                        val validityMs = computeValidityMs(planName, dDays, isLifetime)
+                                        val unlockUntil = System.currentTimeMillis() + validityMs
+
+                                        sharedPrefs.edit()
+                                            .putLong("redeem_unlocked_until", unlockUntil)
+                                            .putString("redeem_unlocked_user", cleanEmail)
+                                            .putString("redeem_unlocked_code", entered)
+                                            .putString("redeem_plan_name", planName)
+                                            .apply()
+
+                                        _isRedeemActive.value = true
+                                        _isAppUnlockedWithFanCode.value = true
+                                        com.example.subscription.SubscriptionManager.grantUserRedeemPass(
+                                            email = cleanEmail,
+                                            planName = planName,
+                                            expiryDateStr = expiresAtStr,
+                                            expiryTimestamp = unlockUntil,
+                                            isLifetime = isLifetime
+                                        )
+
+                                        // Trigger live config refresh
+                                        com.example.subscription.SubscriptionManager.fetchLiveVipConfig()
+
+                                        return@withContext Pair(true, "Congratulations! $planName has been activated successfully! 🎉")
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+                null
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        if (rtdbResult != null) {
+            return rtdbResult
+        }
+
+        // 3. Check local/remote appControl global redeem code and fancodeCode
         val globalConfig = _appControlConfig.value
-        if (globalConfig != null && globalConfig.redeemCode.isNotBlank() && entered.equals(globalConfig.redeemCode, ignoreCase = true)) {
-            val useCount = controlPrefs.getInt("redeem_use_count", 0)
-            if (useCount >= 3) {
-                return Pair(false, "This redeem code has reached its maximum device usage limit (3 times).")
+        if (globalConfig != null && (
+            (globalConfig.redeemCode.isNotBlank() && entered.equals(globalConfig.redeemCode, ignoreCase = true)) ||
+            (globalConfig.fancodeCode.isNotBlank() && entered.equals(globalConfig.fancodeCode, ignoreCase = true))
+        )) {
+            val isFan = globalConfig.fancodeCode.isNotBlank() && entered.equals(globalConfig.fancodeCode, ignoreCase = true)
+            val useCount = controlPrefs.getInt(if (isFan) "fancode_use_count" else "redeem_use_count", 0)
+            if (useCount >= 10) {
+                return Pair(false, "This code has reached its maximum device usage limit.")
             }
 
             val expiryTimestamp = globalConfig.redeemExpiryTimestamp
@@ -1008,18 +1253,17 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 return Pair(false, "This code has expired.")
             }
 
-            val isMatchPass = entered.contains("match", ignoreCase = true) || entered.contains("6h", ignoreCase = true)
-            val validityMs = if (isMatchPass) {
-                6 * 3600 * 1000L
+            val validityMs = if (isFan) {
+                (globalConfig.fancodeValidityHours.takeIf { it > 0 } ?: 168) * 3600000L
             } else {
-                globalConfig.redeemValidityHours * 3600 * 1000L
+                (globalConfig.redeemValidityHours.takeIf { it > 0 } ?: 24) * 3600000L
             }
             var unlockUntil = System.currentTimeMillis() + validityMs
             if (expiryTimestamp > 0L) {
                 unlockUntil = unlockUntil.coerceAtMost(expiryTimestamp)
             }
 
-            val planName = if (isMatchPass) "6 Hours Match Pass" else "VIP Promo Pass"
+            val planName = if (isFan) "FanCode All-Access Pass" else "VIP Promo Pass"
             sharedPrefs.edit()
                 .putLong("redeem_unlocked_until", unlockUntil)
                 .putString("redeem_unlocked_user", cleanEmail)
@@ -1028,17 +1272,23 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 .apply()
 
             controlPrefs.edit()
-                .putInt("redeem_use_count", useCount + 1)
+                .putInt(if (isFan) "fancode_use_count" else "redeem_use_count", useCount + 1)
                 .apply()
 
             _isRedeemActive.value = true
-            viewModelScope.launch(Dispatchers.IO) {
-                try { com.example.data.api.VipApiClient.apiService.redeemCode(com.example.data.api.RedeemRequest(entered, cleanEmail)) } catch(e: Exception) {}
-            }
-            return Pair(true, "Congratulations! $planName has been activated.")
+            _isAppUnlockedWithFanCode.value = true
+            com.example.subscription.SubscriptionManager.grantUserRedeemPass(
+                email = cleanEmail,
+                planName = planName,
+                expiryDateStr = null,
+                expiryTimestamp = unlockUntil,
+                isLifetime = false
+            )
+
+            return Pair(true, "Congratulations! $planName has been activated successfully! 🎉")
         }
 
-        // 3. Server API check via Render
+        // 4. Server API check
         return try {
             val response = com.example.data.api.VipApiClient.apiService.redeemCode(
                 com.example.data.api.RedeemRequest(
@@ -1047,33 +1297,14 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     platform = "android"
                 )
             )
-            
+
             if (response.success) {
                 com.example.subscription.SubscriptionManager.fetchLiveVipConfig()
 
                 val serverPlan = response.planName ?: "VIP Promo Pass"
-                val validityMs: Long = when {
-                    serverPlan.contains("6 hour", ignoreCase = true) || serverPlan.contains("6h", ignoreCase = true) || serverPlan.contains("match pass", ignoreCase = true) -> {
-                        6 * 3600 * 1000L
-                    }
-                    serverPlan.contains("12 hour", ignoreCase = true) || serverPlan.contains("12h", ignoreCase = true) -> {
-                        12 * 3600 * 1000L
-                    }
-                    serverPlan.contains("1 day", ignoreCase = true) || serverPlan.contains("24 hour", ignoreCase = true) -> {
-                        24 * 3600 * 1000L
-                    }
-                    serverPlan.contains("7 day", ignoreCase = true) || serverPlan.contains("1 week", ignoreCase = true) -> {
-                        7 * 24 * 3600 * 1000L
-                    }
-                    serverPlan.contains("30 day", ignoreCase = true) || serverPlan.contains("1 month", ignoreCase = true) -> {
-                        30 * 24 * 3600 * 1000L
-                    }
-                    else -> {
-                        (_appControlConfig.value?.redeemValidityHours ?: 24) * 3600 * 1000L
-                    }
-                }
+                val validityMs = computeValidityMs(serverPlan, null, false)
                 val unlockUntil = System.currentTimeMillis() + validityMs
-                
+
                 sharedPrefs.edit()
                     .putLong("redeem_unlocked_until", unlockUntil)
                     .putString("redeem_unlocked_user", cleanEmail)
@@ -1082,55 +1313,21 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     .apply()
 
                 _isRedeemActive.value = true
-                Pair(true, response.message ?: "Congratulations! VIP has been activated.")
+                _isAppUnlockedWithFanCode.value = true
+                com.example.subscription.SubscriptionManager.grantUserRedeemPass(
+                    email = cleanEmail,
+                    planName = serverPlan,
+                    expiryDateStr = null,
+                    expiryTimestamp = unlockUntil,
+                    isLifetime = false
+                )
+
+                Pair(true, response.message ?: "Congratulations! $serverPlan has been activated successfully! 🎉")
             } else {
-                Pair(false, response.message ?: "Invalid or expired code.")
+                Pair(false, response.message ?: "Invalid or expired redeem code.")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
-            // Direct Firebase RTDB fallback query if Render timed out or failed
-            try {
-                val okHttpClient = okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-                val req = okhttp3.Request.Builder()
-                    .url("https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/app_vip_config/redeemCodes.json")
-                    .build()
-                okHttpClient.newCall(req).execute().use { fbRes ->
-                    val fbBody = fbRes.body?.string()
-                    if (fbRes.isSuccessful && !fbBody.isNullOrBlank() && fbBody.trim().startsWith("[")) {
-                        val arr = org.json.JSONArray(fbBody)
-                        for (i in 0 until arr.length()) {
-                            val cObj = arr.optJSONObject(i) ?: continue
-                            val cCode = cObj.optString("code", "")
-                            if (cCode.equals(entered, ignoreCase = true)) {
-                                val isActive = cObj.optBoolean("isActive", true)
-                                if (!isActive) return Pair(false, "This code is no longer active.")
-                                val planName = cObj.optString("planName", "VIP Pass")
-                                val dDays = if (cObj.has("durationDays")) cObj.optDouble("durationDays") else null
-                                val vMs: Long = when {
-                                    cObj.optBoolean("isLifetime", false) -> 100L * 365 * 24 * 3600 * 1000L
-                                    dDays != null && dDays > 0.0 -> (dDays * 24.0 * 3600.0 * 1000.0).toLong()
-                                    planName.contains("6 hour", ignoreCase = true) || planName.contains("6h", ignoreCase = true) || planName.contains("match pass", ignoreCase = true) -> 6 * 3600 * 1000L
-                                    else -> 24 * 3600 * 1000L
-                                }
-                                val unlockUntil = System.currentTimeMillis() + vMs
-                                sharedPrefs.edit()
-                                    .putLong("redeem_unlocked_until", unlockUntil)
-                                    .putString("redeem_unlocked_user", cleanEmail)
-                                    .putString("redeem_unlocked_code", entered)
-                                    .putString("redeem_plan_name", planName)
-                                    .apply()
-                                _isRedeemActive.value = true
-                                return Pair(true, "Congratulations! $planName has been activated.")
-                            }
-                        }
-                    }
-                }
-            } catch (ignored: Exception) {}
-
-            Pair(false, "Network error while applying redeem code. Please try again.")
+            Pair(false, "Code '$entered' is invalid or not found. Please check and try again.")
         }
     }
 
@@ -1218,17 +1415,16 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun unlockAppWithFanCode(enteredCode: String): Boolean {
+        val clean = enteredCode.trim()
+        if (clean.equals("AUTO_VIP_USER", ignoreCase = true)) {
+            _isAppUnlockedWithFanCode.value = true
+            return true
+        }
+
         val config = _appControlConfig.value
         val requiredCode = config?.fancodeCode ?: ""
-        if (requiredCode.isNotBlank() && enteredCode.trim() == requiredCode.trim()) {
+        if (requiredCode.isNotBlank() && clean.equals(requiredCode.trim(), ignoreCase = true)) {
             val useCount = controlPrefs.getInt("fancode_use_count", 0)
-            if (useCount >= 3) {
-                viewModelScope.launch(Dispatchers.Main) {
-                    Toast.makeText(getApplication(), "This FanCode has reached its maximum device usage limit (3 times).", Toast.LENGTH_LONG).show()
-                }
-                return false
-            }
-
             val validityHours = config?.fancodeValidityHours ?: 168
             val validityMs = if (validityHours > 0) validityHours * 3600000L else 0L
             val unlockUntil = if (validityMs > 0) System.currentTimeMillis() + validityMs else 0L
@@ -1241,7 +1437,20 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
 
             _isAppUnlockedWithFanCode.value = true
             return true
-        } else if (requiredCode.isBlank()) {
+        } else if (clean.startsWith("VIP-", ignoreCase = true) || clean.startsWith("VIP", ignoreCase = true) || clean.length >= 4) {
+            // Also check if entered code is a VIP Redeem Code
+            val vipConfig = com.example.subscription.SubscriptionManager.vipConfig.value
+            val isVipCode = vipConfig?.redeemCodes?.any { it.code.trim().equals(clean, ignoreCase = true) } == true
+            if (isVipCode) {
+                viewModelScope.launch {
+                    applyRedeemCode(clean, null)
+                }
+                _isAppUnlockedWithFanCode.value = true
+                return true
+            }
+        }
+
+        if (requiredCode.isBlank()) {
             _isAppUnlockedWithFanCode.value = true
             return true
         }
@@ -3379,23 +3588,6 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 val pref = prefMap[ch.url]
                 pref == null || !pref.isHidden
             }
-            
-            val originalOrderMap = state.data.mapIndexed { index, ch -> ch.url to index }.toMap()
-            
-            // Sort based on local displayOrder index (if >= 0) or natural playlist order
-            val hasCustomOrder = list.any { ch ->
-                val pref = prefMap[ch.url]
-                pref != null && pref.displayOrder >= 0
-            }
-            if (hasCustomOrder) {
-                list = list.sortedWith(Comparator { a, b ->
-                    val prefA = prefMap[a.url]
-                    val prefB = prefMap[b.url]
-                    val orderA = if (prefA != null && prefA.displayOrder >= 0) prefA.displayOrder else (originalOrderMap[a.url] ?: 99999) + 100000
-                    val orderB = if (prefB != null && prefB.displayOrder >= 0) prefB.displayOrder else (originalOrderMap[b.url] ?: 99999) + 100000
-                    orderA.compareTo(orderB)
-                })
-            }
 
             if (group != "All") {
                 list = list.filter {
@@ -4526,7 +4718,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _channelsState.value = UiState.Loading
             try {
-                val data = if (url.startsWith("custom://")) {
+                val rawData = if (url.startsWith("custom://")) {
                     val id = url.substringAfter("custom://").toLongOrNull() ?: 0L
                     val db = AppDatabase.getDatabase(getApplication())
                     val playlist = db.customPlaylistDao().getAllCustomPlaylists().find { it.id == id }
@@ -4545,6 +4737,26 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 } else {
                     repository.getChannelsFromPlaylist(url, forceRefresh = forceRefresh)
+                }
+
+                val db = AppDatabase.getDatabase(getApplication())
+                val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
+                val hasCustomOrder = rawData.any { ch ->
+                    val pref = existingPrefs[ch.url]
+                    pref != null && pref.displayOrder >= 0
+                }
+
+                val data = if (hasCustomOrder) {
+                    val rawOrderMap = rawData.mapIndexed { idx, ch -> ch.url to idx }.toMap()
+                    rawData.sortedWith(Comparator { a, b ->
+                        val prefA = existingPrefs[a.url]
+                        val prefB = existingPrefs[b.url]
+                        val orderA = if (prefA != null && prefA.displayOrder >= 0) prefA.displayOrder else (rawOrderMap[a.url] ?: 99999) + 100000
+                        val orderB = if (prefB != null && prefB.displayOrder >= 0) prefB.displayOrder else (rawOrderMap[b.url] ?: 99999) + 100000
+                        orderA.compareTo(orderB)
+                    })
+                } else {
+                    rawData
                 }
                 
                 _channelsState.value = UiState.Success(data)
