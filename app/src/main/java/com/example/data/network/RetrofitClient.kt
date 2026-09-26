@@ -1,10 +1,11 @@
 package com.example.data.network
 
-import retrofit2.Retrofit
-import retrofit2.converter.moshi.MoshiConverterFactory
+import com.example.network.SmartNetworkBoosterEngine
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
@@ -15,12 +16,19 @@ object RetrofitClient {
         .build()
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectionPool(SmartNetworkBoosterEngine.sharedConnectionPool)
+        .dispatcher(SmartNetworkBoosterEngine.sharedDispatcher)
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
         .addInterceptor { chain ->
             val original = chain.request()
             val request = original.newBuilder()
                 .header("X-App-Version", com.example.BuildConfig.VERSION_CODE.toString())
+                .header("Accept-Encoding", "gzip, deflate, br")
                 .build()
             chain.proceed(request)
         }

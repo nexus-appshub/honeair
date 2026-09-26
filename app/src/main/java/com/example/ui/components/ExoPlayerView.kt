@@ -331,9 +331,7 @@ fun ExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> Unit 
             }
         }
 
-        val bandwidthMeter = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(context)
-            .setInitialBitrateEstimate(300_000L) // Crucial for low-latency areas: starts with 300kbps estimate to avoid HD buffer stalling on start
-            .build()
+        val bandwidthMeter = SmartNetworkBoosterEngine.createUltraBandwidthMeter(context)
 
         val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)

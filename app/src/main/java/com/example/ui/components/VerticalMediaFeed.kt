@@ -324,8 +324,13 @@ fun VerticalMediaFeedCard(
                         )
                         val mediaSourceFactory = SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, httpDataSourceFactory)
 
+                        val loadControl = SmartNetworkBoosterEngine.createDynamicLoadControl(0, isLiveStream = false)
+                        val bandwidthMeter = SmartNetworkBoosterEngine.createUltraBandwidthMeter(context)
+
                         ExoPlayer.Builder(context)
                             .setMediaSourceFactory(mediaSourceFactory)
+                            .setBandwidthMeter(bandwidthMeter)
+                            .setLoadControl(loadControl)
                             .build().apply {
                                 val mediaItemBuilder = Media3Item.Builder().setUri(resolvedPreviewUrl)
                                 val urlLower = resolvedPreviewUrl.lowercase()

@@ -107,6 +107,7 @@ fun VideoPlayerScreen(
     val exoPlayer = remember {
         ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(SmartNetworkBoosterEngine.createOptimizedMediaSourceFactory(context, dataSourceFactory))
+            .setBandwidthMeter(SmartNetworkBoosterEngine.createUltraBandwidthMeter(context))
             .setLoadControl(loadControl)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)

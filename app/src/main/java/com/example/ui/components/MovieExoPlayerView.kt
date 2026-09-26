@@ -245,8 +245,11 @@ fun MovieExoPlayerView(isMiniPlayer: Boolean = false, onMiniPlayerToggle: () -> 
             .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
             .build()
 
+        val bandwidthMeter = SmartNetworkBoosterEngine.createUltraBandwidthMeter(context)
+
         val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setBandwidthMeter(bandwidthMeter)
             .setLoadControl(loadControl)
             .setTrackSelector(trackSelector)
             .setAudioAttributes(audioAttributes, true)

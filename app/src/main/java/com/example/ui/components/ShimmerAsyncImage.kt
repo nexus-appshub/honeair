@@ -12,7 +12,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
 import coil.request.ImageRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun rememberShimmerBrush(
@@ -37,7 +40,7 @@ fun rememberShimmerBrush(
         initialValue = 0f,
         targetValue = 1000f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            animation = tween(durationMillis = 1000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "shimmer_offset"
@@ -61,6 +64,19 @@ fun ShimmerAsyncImage(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
     val shimmerBrush = rememberShimmerBrush(isDark = isDark)
+    val context = LocalContext.current
+
+    val imageRequest = remember(model) {
+        ImageRequest.Builder(context)
+            .data(model)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
+            .crossfade(true)
+            .crossfade(150)
+            .allowHardware(true)
+            .build()
+    }
 
     Box(modifier = modifier) {
         if (isLoading || isError) {
@@ -73,11 +89,7 @@ fun ShimmerAsyncImage(
 
         if (model != null) {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(model)
-                    .crossfade(true)
-                    .crossfade(300)
-                    .build(),
+                model = imageRequest,
                 contentDescription = contentDescription,
                 contentScale = contentScale,
                 modifier = Modifier.fillMaxSize(),
@@ -99,7 +111,7 @@ fun ShimmerAsyncImage(
 }
 
 /**
- * Enterprise-level Preloader that pre-fetches and enqueues high-resolution movie posters
+ * Enterprise-level Preloader that pre-fetches and enqueues movie posters
  * into the device's Memory and Disk caches completely off the Main UI Thread.
  */
 @Composable
@@ -107,15 +119,15 @@ fun PreloadImages(urls: List<String>) {
     val context = LocalContext.current
     LaunchedEffect(urls) {
         if (urls.isNotEmpty()) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
                 val imageLoader = coil.Coil.imageLoader(context)
-                // Preload up to the first 8 items in the list to prepare for quick scroll
-                urls.take(8).forEach { url ->
+                urls.take(20).forEach { url ->
                     if (!url.isNullOrBlank()) {
                         val request = ImageRequest.Builder(context)
                             .data(url)
-                            .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
-                            .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                            .memoryCachePolicy(CachePolicy.ENABLED)
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .networkCachePolicy(CachePolicy.ENABLED)
                             .build()
                         imageLoader.enqueue(request)
                     }

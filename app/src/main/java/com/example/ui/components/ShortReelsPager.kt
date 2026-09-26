@@ -214,8 +214,13 @@ private fun SingleReelPlayerItem(
             mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_MPD)
         }
 
+        val loadControl = com.example.network.SmartNetworkBoosterEngine.createDynamicLoadControl(0, isLiveStream = false)
+        val bandwidthMeter = com.example.network.SmartNetworkBoosterEngine.createUltraBandwidthMeter(context)
+
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setBandwidthMeter(bandwidthMeter)
+            .setLoadControl(loadControl)
             .build().apply {
                 setMediaItem(mediaItemBuilder.build())
                 repeatMode = Player.REPEAT_MODE_ONE

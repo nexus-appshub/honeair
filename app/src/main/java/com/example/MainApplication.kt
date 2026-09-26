@@ -7,12 +7,15 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
+import com.example.network.SmartNetworkBoosterEngine
 import com.example.notifications.LocalNotificationManager
 import com.example.update.AppUpdateWorker
 import com.google.firebase.FirebaseApp
 import com.google.firebase.analytics.FirebaseAnalytics
+import okhttp3.OkHttpClient
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.*
 
 class MainApplication : Application(), ImageLoaderFactory {
@@ -23,7 +26,7 @@ class MainApplication : Application(), ImageLoaderFactory {
         
         try {
             // Start network booster engine immediately at application level for ultra-fast response
-            com.example.network.SmartNetworkBoosterEngine.startEngine(this)
+            SmartNetworkBoosterEngine.startEngine(this)
         } catch (e: Throwable) {
             e.printStackTrace()
         }
@@ -103,7 +106,6 @@ class MainApplication : Application(), ImageLoaderFactory {
         super.onTrimMemory(level)
         try {
             if (level >= TRIM_MEMORY_BACKGROUND || level >= TRIM_MEMORY_MODERATE) {
-                // Instantly reclaim memory from the image cache when backgrounded or low on RAM
                 coil.Coil.imageLoader(this).memoryCache?.clear()
             }
         } catch (e: Throwable) {
@@ -112,64 +114,70 @@ class MainApplication : Application(), ImageLoaderFactory {
     }
 
     override fun newImageLoader(): ImageLoader {
-        return ImageLoader.Builder(this)
-            // Inject custom OkHttpClient with dynamic User-Agent and Referer headers for all image sources.
-            // Handles anime CDN hosts (cdn.anipixcdn.co, anikoto.cz, myanimelist, tmdb, etc.) to prevent 403 Forbidden errors.
-            .okHttpClient {
-                okhttp3.OkHttpClient.Builder()
-                    .addInterceptor { chain ->
-                        val original = chain.request()
-                        val urlStr = original.url.toString()
-                        val host = original.url.host.lowercase()
+        val ultraOkHttpClient = OkHttpClient.Builder()
+            .connectionPool(SmartNetworkBoosterEngine.sharedConnectionPool)
+            .dispatcher(SmartNetworkBoosterEngine.sharedDispatcher)
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(6, TimeUnit.SECONDS)
+            .writeTimeout(6, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .addInterceptor { chain ->
+                val original = chain.request()
+                val host = original.url.host.lowercase()
 
-                        val reqBuilder = original.newBuilder()
-                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                            .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                val reqBuilder = original.newBuilder()
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                    .header("Cache-Control", "public, max-age=604800, max-stale=2592000") // 7 days fresh, 30 days stale cache
 
-                        when {
-                            host.contains("anikoto") || host.contains("anipixcdn") -> {
-                                reqBuilder.header("Referer", "https://anikoto.cz/")
-                            }
-                            host.contains("anilist") || host.contains("s4.anilist.co") -> {
-                                reqBuilder.header("Referer", "https://anilist.co/")
-                            }
-                            host.contains("myanimelist") || host.contains("jikan") -> {
-                                reqBuilder.header("Referer", "https://myanimelist.net/")
-                            }
-                            host.contains("tmdb.org") || host.contains("themoviedb.org") -> {
-                                reqBuilder.header("Referer", "https://www.themoviedb.org/")
-                            }
-                            else -> {
-                                // Default permissive referer or retain original
-                                reqBuilder.header("Referer", "https://www.google.com/")
-                            }
-                        }
-
-                        chain.proceed(reqBuilder.build())
+                when {
+                    host.contains("anikoto") || host.contains("anipixcdn") -> {
+                        reqBuilder.header("Referer", "https://anikoto.cz/")
                     }
-                    .build()
+                    host.contains("anilist") || host.contains("s4.anilist.co") -> {
+                        reqBuilder.header("Referer", "https://anilist.co/")
+                    }
+                    host.contains("myanimelist") || host.contains("jikan") -> {
+                        reqBuilder.header("Referer", "https://myanimelist.net/")
+                    }
+                    host.contains("tmdb.org") || host.contains("themoviedb.org") -> {
+                        reqBuilder.header("Referer", "https://www.themoviedb.org/")
+                    }
+                    else -> {
+                        reqBuilder.header("Referer", "https://www.google.com/")
+                    }
+                }
+
+                chain.proceed(reqBuilder.build())
             }
-            // Premium 25% memory cache with explicit strong and weak reference tracking for flawless OOM protection
+            .build()
+
+        return ImageLoader.Builder(this)
+            .okHttpClient(ultraOkHttpClient)
+            // Memory cache (30% of app memory for ultra-fast instant scrolling)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
+                    .maxSizePercent(0.30)
                     .strongReferencesEnabled(true)
                     .weakReferencesEnabled(true)
                     .build()
             }
-            // Enterprise-grade 200MB dedicated image disk cache to avoid redundant network overhead on scrolling
+            // Dedicated 300MB disk cache
             .diskCache {
                 DiskCache.Builder()
                     .directory(this.cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(200L * 1024 * 1024) // 200 MegaBytes
+                    .maxSizeBytes(300L * 1024 * 1024)
                     .build()
             }
-            // RGB_565 config is used to reduce image memory usage by 50% and keep GC pauses near zero
-            .bitmapConfig(Bitmap.Config.RGB_565)
+            .bitmapConfig(Bitmap.Config.RGB_565) // 50% RAM savings with zero visual quality loss for posters
             .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCachePolicy(CachePolicy.ENABLED)
+            .networkCachePolicy(CachePolicy.ENABLED)
             .allowHardware(true)
             .crossfade(true)
+            .crossfade(150) // Ultra fast 150ms crossfade for snappy responsive UI
             .build()
     }
 }

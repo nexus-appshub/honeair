@@ -224,6 +224,7 @@ private fun DraggableFloatingPlayerWindow(
         val loadControl = com.example.network.SmartNetworkBoosterEngine.createDynamicLoadControl(userBufferIndex, isLiveStream = true)
 
         ExoPlayer.Builder(context, renderersFactory)
+            .setBandwidthMeter(com.example.network.SmartNetworkBoosterEngine.createUltraBandwidthMeter(context))
             .setLoadControl(loadControl)
             .build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
