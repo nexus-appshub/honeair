@@ -47,8 +47,51 @@ import kotlinx.coroutines.launch
 data class SportCategoryItem(
     val id: String,
     val name: String,
-    val emoji: String
+    val emoji: String,
+    val count: Int = 0
 )
+
+fun getSportCanonicalId(sport: String): String {
+    val lower = sport.lowercase().trim()
+    return when {
+        lower.contains("cricket") -> "cricket"
+        lower.contains("football") || lower.contains("soccer") -> "football"
+        lower.contains("racing") || lower.contains("motor") || lower.contains("f1") || lower.contains("formula") || lower.contains("moto") -> "racing"
+        lower.contains("combat") || lower.contains("wrestling") || lower.contains("wwe") || lower.contains("boxing") || lower.contains("ufc") || lower.contains("mma") -> "combat"
+        lower.contains("basketball") || lower.contains("nba") -> "basketball"
+        lower.contains("tennis") -> "tennis"
+        lower.contains("badminton") -> "badminton"
+        lower.contains("baseball") || lower.contains("mlb") -> "baseball"
+        lower.contains("hockey") || lower.contains("nhl") -> "hockey"
+        lower.contains("volleyball") -> "volleyball"
+        lower.contains("rugby") || lower.contains("nfl") || lower.contains("american football") -> "rugby"
+        lower.contains("kabaddi") -> "kabaddi"
+        lower.contains("table tennis") || lower.contains("ping pong") -> "table_tennis"
+        lower.contains("golf") -> "golf"
+        lower.isNotBlank() -> lower.replace(" ", "_")
+        else -> "other"
+    }
+}
+
+fun getSportEmojiAndDisplayName(canonicalId: String, rawSport: String): Pair<String, String> {
+    return when (canonicalId) {
+        "cricket" -> "🏏" to "Cricket"
+        "football" -> "⚽" to "Football"
+        "racing" -> "🏎️" to "MotorSports"
+        "combat" -> "🥊" to "Wrestling"
+        "basketball" -> "🏀" to "Basketball"
+        "tennis" -> "🎾" to "Tennis"
+        "badminton" -> "🏸" to "Badminton"
+        "baseball" -> "⚾" to "Baseball"
+        "hockey" -> "🏑" to "Hockey"
+        "volleyball" -> "🏐" to "Volleyball"
+        "rugby" -> "🏉" to "Rugby"
+        "kabaddi" -> "🤼" to "Kabaddi"
+        "table_tennis" -> "🏓" to "Table Tennis"
+        "golf" -> "⛳" to "Golf"
+        else -> "🏅" to (rawSport.trim().ifBlank { "Other" }.replaceFirstChar { it.uppercase() })
+    }
+}
 
 @Composable
 fun SportsHubScreen(
@@ -328,16 +371,6 @@ fun LiveEventsTab(
     var selectedCategory by remember { mutableStateOf("all") }
     var selectedStatus by remember { mutableStateOf("all") }
 
-    val categories = remember {
-        listOf(
-            SportCategoryItem("all", "All", "🏆"),
-            SportCategoryItem("cricket", "Cricket", "🏏"),
-            SportCategoryItem("football", "Football", "⚽"),
-            SportCategoryItem("racing", "MotorSports", "🏎️"),
-            SportCategoryItem("combat", "Wrestling", "🥊")
-        )
-    }
-
     when (state) {
         is UiState.Loading -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -377,17 +410,51 @@ fun LiveEventsTab(
         is UiState.Success -> {
             val allMatches = state.data
 
+            // Dynamic categories - Only show categories that have available events (count > 0)
+            val availableCategories = remember(allMatches) {
+                val result = mutableListOf<SportCategoryItem>()
+                if (allMatches.isNotEmpty()) {
+                    result.add(SportCategoryItem(id = "all", name = "All", emoji = "🏆", count = allMatches.size))
+                }
+
+                val grouped = allMatches.groupBy { getSportCanonicalId(it.sportCategory) }
+                val standardOrder = listOf(
+                    "cricket", "football", "racing", "combat", "basketball",
+                    "tennis", "badminton", "baseball", "hockey", "volleyball",
+                    "rugby", "kabaddi", "table_tennis", "golf"
+                )
+
+                for (sportId in standardOrder) {
+                    val matches = grouped[sportId]
+                    if (!matches.isNullOrEmpty()) {
+                        val (emoji, name) = getSportEmojiAndDisplayName(sportId, matches.first().sportCategory)
+                        result.add(SportCategoryItem(id = sportId, name = name, emoji = emoji, count = matches.size))
+                    }
+                }
+
+                for ((sportId, matches) in grouped) {
+                    if (sportId !in standardOrder && matches.isNotEmpty()) {
+                        val (emoji, name) = getSportEmojiAndDisplayName(sportId, matches.first().sportCategory)
+                        result.add(SportCategoryItem(id = sportId, name = name, emoji = emoji, count = matches.size))
+                    }
+                }
+
+                result
+            }
+
+            // Auto-reset category to "all" if selected category is no longer present
+            LaunchedEffect(availableCategories) {
+                if (availableCategories.isNotEmpty() && availableCategories.none { it.id == selectedCategory }) {
+                    selectedCategory = "all"
+                }
+            }
+
             // Filter logic for category and status
             val filteredMatches = remember(allMatches, selectedCategory, selectedStatus) {
                 allMatches.filter { match ->
                     val matchesCat = if (selectedCategory == "all") true else {
-                        when (selectedCategory) {
-                            "cricket" -> match.sportCategory.contains("cricket", ignoreCase = true)
-                            "football" -> match.sportCategory.contains("football", ignoreCase = true) || match.sportCategory.contains("soccer", ignoreCase = true)
-                            "racing" -> match.sportCategory.contains("racing", ignoreCase = true) || match.sportCategory.contains("motor", ignoreCase = true) || match.sportCategory.contains("f1", ignoreCase = true)
-                            "combat" -> match.sportCategory.contains("combat", ignoreCase = true) || match.sportCategory.contains("wrestling", ignoreCase = true) || match.sportCategory.contains("boxing", ignoreCase = true) || match.sportCategory.contains("ufc", ignoreCase = true)
-                            else -> match.sportCategory.contains(selectedCategory, ignoreCase = true)
-                        }
+                        val canonicalId = getSportCanonicalId(match.sportCategory)
+                        canonicalId == selectedCategory || match.sportCategory.contains(selectedCategory, ignoreCase = true)
                     }
                     val matchesStatus = if (selectedStatus == "all") true else {
                         match.status.equals(selectedStatus, ignoreCase = true)
@@ -397,73 +464,63 @@ fun LiveEventsTab(
             }
 
             Column(modifier = Modifier.fillMaxSize()) {
-                // 1. CIRCULAR CATEGORY SELECTOR WITH RED BADGE COUNTERS
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(vertical = 10.dp)
-                ) {
-                    items(categories) { cat ->
-                        val isSelected = selectedCategory == cat.id
-                        val count = if (cat.id == "all") {
-                            allMatches.size
-                        } else {
-                            allMatches.count { match ->
-                                when (cat.id) {
-                                    "cricket" -> match.sportCategory.contains("cricket", ignoreCase = true)
-                                    "football" -> match.sportCategory.contains("football", ignoreCase = true) || match.sportCategory.contains("soccer", ignoreCase = true)
-                                    "racing" -> match.sportCategory.contains("racing", ignoreCase = true) || match.sportCategory.contains("motor", ignoreCase = true) || match.sportCategory.contains("f1", ignoreCase = true)
-                                    "combat" -> match.sportCategory.contains("combat", ignoreCase = true) || match.sportCategory.contains("wrestling", ignoreCase = true) || match.sportCategory.contains("boxing", ignoreCase = true)
-                                    else -> match.sportCategory.contains(cat.id, ignoreCase = true)
+                // 1. CIRCULAR CATEGORY SELECTOR WITH RED BADGE COUNTERS (Only categories with active events)
+                if (availableCategories.isNotEmpty()) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.padding(vertical = 10.dp)
+                    ) {
+                        items(availableCategories, key = { it.id }) { cat ->
+                            val isSelected = selectedCategory == cat.id
+                            val count = cat.count
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.clickable { selectedCategory = cat.id }
+                            ) {
+                                Box(modifier = Modifier.size(54.dp)) {
+                                    // Category Circle Ring
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF131D2D))
+                                            .border(
+                                                width = if (isSelected) 2.dp else 1.dp,
+                                                color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B),
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = cat.emoji, fontSize = 22.sp)
+                                    }
+
+                                    // Top-Right Red Counter Badge
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(18.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFDC2626)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = count.toString(),
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
                                 }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = cat.name,
+                                    color = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
                             }
-                        }
-
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.clickable { selectedCategory = cat.id }
-                        ) {
-                            Box(modifier = Modifier.size(54.dp)) {
-                                // Category Circle Ring
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF131D2D))
-                                        .border(
-                                            width = if (isSelected) 2.dp else 1.dp,
-                                            color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B),
-                                            shape = CircleShape
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(text = cat.emoji, fontSize = 22.sp)
-                                }
-
-                                // Top-Right Red Counter Badge
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .size(18.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFDC2626)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = count.toString(),
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = cat.name,
-                                color = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
                         }
                     }
                 }
