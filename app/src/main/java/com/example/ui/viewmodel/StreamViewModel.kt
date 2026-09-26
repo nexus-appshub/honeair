@@ -693,61 +693,87 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun moveChannelToTop(channel: IptvChannel, activeList: List<IptvChannel>) {
+        viewModelScope.launch {
+            val index = activeList.indexOfFirst { it.url == channel.url }
+            if (index <= 0) return@launch
+            val reorderedList = activeList.toMutableList()
+            val item = reorderedList.removeAt(index)
+            reorderedList.add(0, item)
+            persistChannelOrder(reorderedList)
+        }
+    }
+
+    fun moveChannelToBottom(channel: IptvChannel, activeList: List<IptvChannel>) {
+        viewModelScope.launch {
+            val index = activeList.indexOfFirst { it.url == channel.url }
+            if (index == -1 || index >= activeList.size - 1) return@launch
+            val reorderedList = activeList.toMutableList()
+            val item = reorderedList.removeAt(index)
+            reorderedList.add(item)
+            persistChannelOrder(reorderedList)
+        }
+    }
+
     fun moveChannel(channel: IptvChannel, up: Boolean, activeList: List<IptvChannel>) {
-        moveChannelByDelta(channel, if (up) -1 else 1, activeList)
+        viewModelScope.launch {
+            val index = activeList.indexOfFirst { it.url == channel.url }
+            if (index == -1) return@launch
+            val targetIndex = if (up) index - 1 else index + 1
+            if (targetIndex < 0 || targetIndex >= activeList.size) return@launch
+            val reorderedList = activeList.toMutableList()
+            val item = reorderedList.removeAt(index)
+            reorderedList.add(targetIndex, item)
+            persistChannelOrder(reorderedList)
+        }
+    }
+
+    fun reorderChannels(fromIndex: Int, toIndex: Int, activeList: List<IptvChannel>) {
+        if (fromIndex == toIndex || fromIndex < 0 || fromIndex >= activeList.size || toIndex < 0 || toIndex >= activeList.size) return
+        viewModelScope.launch {
+            val reorderedList = activeList.toMutableList()
+            val item = reorderedList.removeAt(fromIndex)
+            reorderedList.add(toIndex, item)
+            persistChannelOrder(reorderedList)
+        }
+    }
+
+    private suspend fun persistChannelOrder(orderedList: List<IptvChannel>) {
+        val db = AppDatabase.getDatabase(getApplication())
+        val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
+        val updatedEntities = orderedList.mapIndexed { idx, ch ->
+            val pref = existingPrefs[ch.url]
+            com.example.data.database.ChannelPreferenceEntity(
+                url = ch.url,
+                name = ch.name,
+                isHidden = pref?.isHidden ?: false,
+                displayOrder = idx,
+                customGroup = pref?.customGroup ?: ch.group
+            )
+        }
+        db.channelPreferenceDao().insertPreferences(updatedEntities)
+    }
+
+    fun resetChannelOrder(activeList: List<IptvChannel>) {
+        viewModelScope.launch {
+            val db = AppDatabase.getDatabase(getApplication())
+            val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
+            val updatedEntities = activeList.map { ch ->
+                val pref = existingPrefs[ch.url]
+                com.example.data.database.ChannelPreferenceEntity(
+                    url = ch.url,
+                    name = ch.name,
+                    isHidden = pref?.isHidden ?: false,
+                    displayOrder = -1,
+                    customGroup = pref?.customGroup ?: ch.group
+                )
+            }
+            db.channelPreferenceDao().insertPreferences(updatedEntities)
+        }
     }
 
     fun moveChannelByDelta(channel: IptvChannel, delta: Int, activeList: List<IptvChannel>) {
-        viewModelScope.launch {
-            val currentState = _channelsState.value
-            if (currentState !is UiState.Success) return@launch
-            val fullList = currentState.data
-            
-            val index = activeList.indexOfFirst { it.url == channel.url }
-            if (index == -1) return@launch
-            val swapWithIndex = index + delta
-            if (swapWithIndex < 0 || swapWithIndex >= activeList.size) return@launch
-
-            val itemA = activeList[index]
-            val itemB = activeList[swapWithIndex]
-
-            val db = AppDatabase.getDatabase(getApplication())
-            val existingPrefs = db.channelPreferenceDao().getAllPreferences().associateBy { it.url }
-
-            val originalOrderMap = fullList.mapIndexed { i, ch -> ch.url to i }.toMap()
-
-            val orderA = existingPrefs[itemA.url]?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[itemA.url] ?: 0) * 10)
-            val orderB = existingPrefs[itemB.url]?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[itemB.url] ?: 0) * 10)
-
-            val finalOrderA = if (orderA == orderB) orderB + 5 else orderB
-            val finalOrderB = orderA
-
-            val prefA = existingPrefs[itemA.url]
-            val prefB = existingPrefs[itemB.url]
-
-            val updatedEntities = mutableListOf<com.example.data.database.ChannelPreferenceEntity>()
-
-            updatedEntities.add(
-                com.example.data.database.ChannelPreferenceEntity(
-                    url = itemA.url,
-                    name = itemA.name,
-                    isHidden = prefA?.isHidden ?: false,
-                    displayOrder = finalOrderA,
-                    customGroup = prefA?.customGroup ?: itemA.group
-                )
-            )
-            updatedEntities.add(
-                com.example.data.database.ChannelPreferenceEntity(
-                    url = itemB.url,
-                    name = itemB.name,
-                    isHidden = prefB?.isHidden ?: false,
-                    displayOrder = finalOrderB,
-                    customGroup = prefB?.customGroup ?: itemB.group
-                )
-            )
-
-            db.channelPreferenceDao().insertPreferences(updatedEntities)
-        }
+        moveChannel(channel, up = delta < 0, activeList = activeList)
     }
 
     fun createCustomCategory(channels: List<IptvChannel>, categoryName: String) {
@@ -3356,14 +3382,20 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             
             val originalOrderMap = state.data.mapIndexed { index, ch -> ch.url to index }.toMap()
             
-            // Sort based on local displayOrder index
-            list = list.sortedWith(Comparator { a, b ->
-                val prefA = prefMap[a.url]
-                val prefB = prefMap[b.url]
-                val orderA = prefA?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[a.url] ?: 0) * 10)
-                val orderB = prefB?.displayOrder?.takeIf { it >= 0 } ?: ((originalOrderMap[b.url] ?: 0) * 10)
-                orderA.compareTo(orderB)
-            })
+            // Sort based on local displayOrder index (if >= 0) or natural playlist order
+            val hasCustomOrder = list.any { ch ->
+                val pref = prefMap[ch.url]
+                pref != null && pref.displayOrder >= 0
+            }
+            if (hasCustomOrder) {
+                list = list.sortedWith(Comparator { a, b ->
+                    val prefA = prefMap[a.url]
+                    val prefB = prefMap[b.url]
+                    val orderA = if (prefA != null && prefA.displayOrder >= 0) prefA.displayOrder else (originalOrderMap[a.url] ?: 99999) + 100000
+                    val orderB = if (prefB != null && prefB.displayOrder >= 0) prefB.displayOrder else (originalOrderMap[b.url] ?: 99999) + 100000
+                    orderA.compareTo(orderB)
+                })
+            }
 
             if (group != "All") {
                 list = list.filter {
@@ -4482,7 +4514,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _channelSearchQuery.value = ""
         _selectedChannelGroup.value = "All"
         _isFullScreen.value = false
-        loadChannels(playlist.url)
+        loadChannels(playlist.url, forceRefresh = true)
     }
 
     fun clearSelectedPlaylist() {
@@ -4490,11 +4522,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         _selectedChannelGroup.value = "All"
     }
 
-    private fun loadChannels(url: String) {
+    private fun loadChannels(url: String, forceRefresh: Boolean = true) {
         viewModelScope.launch {
             _channelsState.value = UiState.Loading
             try {
-                var data = if (url.startsWith("custom://")) {
+                val data = if (url.startsWith("custom://")) {
                     val id = url.substringAfter("custom://").toLongOrNull() ?: 0L
                     val db = AppDatabase.getDatabase(getApplication())
                     val playlist = db.customPlaylistDao().getAllCustomPlaylists().find { it.id == id }
@@ -4512,76 +4544,7 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         emptyList()
                     }
                 } else {
-                    repository.getChannelsFromPlaylist(url)
-                }
-                
-                val currentPlaylist = _selectedPlaylist.value
-                val playlistName = currentPlaylist?.name?.lowercase() ?: ""
-                
-                if (playlistName.contains("sport tv")) {
-                    // Filter T Sports channels case-insensitively
-                    var tsportsChannels = data.filter { 
-                        it.name.contains("T Sports", ignoreCase = true) || 
-                        it.name.contains("TSports", ignoreCase = true) 
-                    }
-                    
-                    // If not found in sports.m3u, search in backupChannels (abidverse)
-                    if (tsportsChannels.isEmpty()) {
-                        if (backupChannels.isEmpty()) {
-                            try {
-                                val abidUrl = "https://raw.githubusercontent.com/nexus-appshub/homeairtv.xyz/main/hmairtv.m3u8"
-                                backupChannels = repository.getChannelsFromPlaylist(abidUrl)
-                            } catch (e: Exception) {
-                                Log.e("IptvParser", "Error fetching playlist", e)
-                            }
-                        }
-                        tsportsChannels = backupChannels.filter { 
-                            it.name.contains("T Sports", ignoreCase = true) || 
-                            it.name.contains("TSports", ignoreCase = true) 
-                        }
-                    }
-                    
-                    // Fallback local stream link if not found in either
-                    if (tsportsChannels.isEmpty()) {
-                        tsportsChannels = listOf(
-                            IptvChannel(
-                                name = "T Sports (1080)",
-                                url = "http://103.204.145.242:8000/tsports/index.m3u8",
-                                logo = "https://img.icons8.com/color/96/sport.png",
-                                group = "Sports"
-                            )
-                        )
-                    } else {
-                        // Ensure name is exactly T Sports (1080)
-                        tsportsChannels = tsportsChannels.map { 
-                            it.copy(name = "T Sports (1080)")
-                        }
-                    }
-                    data = tsportsChannels
-                } else if (playlistName.contains("bangladesh") || playlistName.contains("india")) {
-                    if (backupChannels.isEmpty()) {
-                        try {
-                            val abidUrl = "https://raw.githubusercontent.com/nexus-appshub/homeairtv.xyz/main/hmairtv.m3u8"
-                            backupChannels = repository.getChannelsFromPlaylist(abidUrl)
-                        } catch (e: Exception) {
-                            Log.e("IptvParser", "Error fetching playlist", e)
-                        }
-                    }
-                    if (playlistName.contains("bangladesh")) {
-                        val bdKeywords = listOf("bangla", "bd", "btv", "somoy", "ekattor", "independent", "jamuna", "ntv", "rtv", "deepto", "nagorik", "gtv", "sports", "aamar", "maasranga", "mohona", "sa tv", "dbc", "channel 24", "desh", "my tv", "asian", "boishakhi", "bijoy", "global")
-                        val updateBdChannels = backupChannels.filter { channel ->
-                            val text = (channel.name + " " + channel.group).lowercase()
-                            bdKeywords.any { text.contains(it) }
-                        }
-                        data = (updateBdChannels + data).distinctBy { it.name.trim().lowercase() }
-                    } else if (playlistName.contains("india")) {
-                        val inKeywords = listOf("india", "in", "hindi", "tamil", "telugu", "zee", "star", "sony", "colors", "aaj tak", "ndtv", "republic", "sun tv", "asianet", "vijay", "goldmines", "abp", "news18", "times now", "dd", "kolkata", "jalsa")
-                        val updateInChannels = backupChannels.filter { channel ->
-                            val text = (channel.name + " " + channel.group).lowercase()
-                            inKeywords.any { text.contains(it) }
-                        }
-                        data = (updateInChannels + data).distinctBy { it.name.trim().lowercase() }
-                    }
+                    repository.getChannelsFromPlaylist(url, forceRefresh = forceRefresh)
                 }
                 
                 _channelsState.value = UiState.Success(data)
@@ -4590,40 +4553,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     _isFullScreen.value = false
                 }
             } catch (e: Exception) {
-                val currentPlaylist = _selectedPlaylist.value
-                val playlistName = currentPlaylist?.name?.lowercase() ?: ""
-                if (playlistName.contains("sport tv")) {
-                    val fallback = listOf(
-                        IptvChannel(
-                            name = "T Sports (1080)",
-                            url = "http://103.204.145.242:8000/tsports/index.m3u8",
-                            logo = "https://img.icons8.com/color/96/sport.png",
-                            group = "Sports"
-                        )
-                    )
-                    _channelsState.value = UiState.Success(fallback)
-                } else if ((playlistName.contains("bangladesh") || playlistName.contains("india")) && backupChannels.isNotEmpty()) {
-                    val filtered = if (playlistName.contains("bangladesh")) {
-                        val bdKeywords = listOf("bangla", "bd", "btv", "somoy", "ekattor", "independent", "jamuna", "ntv", "rtv", "deepto", "nagorik", "gtv", "sports", "aamar", "maasranga", "mohona", "sa tv", "dbc", "channel 24", "desh", "my tv", "asian", "boishakhi", "bijoy", "global")
-                        backupChannels.filter { channel ->
-                            val text = (channel.name + " " + channel.group).lowercase()
-                            bdKeywords.any { text.contains(it) }
-                        }
-                    } else {
-                        val inKeywords = listOf("india", "in", "hindi", "tamil", "telugu", "zee", "star", "sony", "colors", "aaj tak", "ndtv", "republic", "sun tv", "asianet", "vijay", "goldmines", "abp", "news18", "times now", "dd", "kolkata", "jalsa")
-                        backupChannels.filter { channel ->
-                            val text = (channel.name + " " + channel.group).lowercase()
-                            inKeywords.any { text.contains(it) }
-                        }
-                    }
-                    if (filtered.isNotEmpty()) {
-                        _channelsState.value = UiState.Success(filtered)
-                    } else {
-                        _channelsState.value = UiState.Error(e.localizedMessage ?: "Unknown Error loading channels")
-                    }
-                } else {
-                    _channelsState.value = UiState.Error(e.localizedMessage ?: "Unknown Error loading channels")
-                }
+                Log.e("StreamViewModel", "Error loading channels from $url", e)
+                _channelsState.value = UiState.Error(e.localizedMessage ?: "Error loading channels")
             }
         }
     }
@@ -4674,11 +4605,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             _selectedChannelGroup.value = "All"
             
             try {
-                var channels = repository.getChannelsFromPlaylist(playlistUrl)
+                var channels = repository.getChannelsFromPlaylist(playlistUrl, forceRefresh = true)
                 if (channels.isEmpty()) {
                     // Try fallback hmairtv.m3u8 if empty
                     val fallbackUrl = "https://raw.githubusercontent.com/nexus-appshub/homeairtv.xyz/main/hmairtv.m3u8"
-                    channels = repository.getChannelsFromPlaylist(fallbackUrl)
+                    channels = repository.getChannelsFromPlaylist(fallbackUrl, forceRefresh = true)
                 }
                 
                 if (channels.isNotEmpty()) {

@@ -945,6 +945,7 @@ fun HomeScreen(
     var isSportsViewMode by remember { mutableStateOf(false) }
     var showLiveTvBottomSheet by remember { mutableStateOf(false) }
     var isIptvSearchActive by remember { mutableStateOf(false) }
+    var selectedChannelForActions by remember { mutableStateOf<IptvChannel?>(null) }
     LaunchedEffect(Unit) {
         viewModel.tabReselectEvent.collect { tabIndex ->
             if (tabIndex == 0) {
@@ -3053,13 +3054,17 @@ fun HomeScreen(
                                         onClick = {
                                             viewModel.setActiveChannel(channel)
                                         },
+                                        onLongClick = { selectedChannelForActions = channel },
                                         onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
                                         isSelected = isSelected,
                                         hasError = hasError,
                                         isPremium = viewModel.isChannelPremium(channel),
                                         onHideClick = { viewModel.toggleHideChannel(channel, true) },
+                                        onMoveToTopClick = { viewModel.moveChannelToTop(channel, filteredChannels) },
+                                        onMoveToBottomClick = { viewModel.moveChannelToBottom(channel, filteredChannels) },
                                         onMoveUpClick = { viewModel.moveChannel(channel, up = true, activeList = filteredChannels) },
-                                        onMoveDownClick = { viewModel.moveChannel(channel, up = false, activeList = filteredChannels) }
+                                        onMoveDownClick = { viewModel.moveChannel(channel, up = false, activeList = filteredChannels) },
+                                        onResetOrderClick = { viewModel.resetChannelOrder(filteredChannels) }
                                     )
                                 }
                                 item {
@@ -3411,6 +3416,26 @@ fun HomeScreen(
             }
         }
     }
+
+    selectedChannelForActions?.let { channel ->
+        val channelIndex = filteredChannels.indexOfFirst { it.url == channel.url }
+        val isFav by viewModel.isFavoriteStream(channel.url).collectAsState(false)
+        ChannelQuickActionSheet(
+            channel = channel,
+            channelIndex = if (channelIndex != -1) channelIndex else 0,
+            totalChannels = filteredChannels.size,
+            isFavorite = isFav,
+            onFavoriteToggle = { viewModel.toggleFavorite(channel, isFav) },
+            onMoveToTop = { viewModel.moveChannelToTop(channel, filteredChannels) },
+            onMoveToBottom = { viewModel.moveChannelToBottom(channel, filteredChannels) },
+            onMoveUp = { viewModel.moveChannel(channel, up = true, activeList = filteredChannels) },
+            onMoveDown = { viewModel.moveChannel(channel, up = false, activeList = filteredChannels) },
+            onResetOrder = { viewModel.resetChannelOrder(filteredChannels) },
+            onFloatClick = { viewModel.addFloatingPlayer(channel = channel) },
+            onHideClick = { viewModel.toggleHideChannel(channel, true) },
+            onDismiss = { selectedChannelForActions = null }
+        )
+    }
 }
 
 @Composable
@@ -3618,13 +3643,17 @@ fun ChannelListRow(
     isFavorite: Boolean,
     onFavoriteToggle: () -> Unit,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     onFloatClick: (() -> Unit)? = null,
     isSelected: Boolean = false,
     hasError: Boolean = false,
     isPremium: Boolean = false,
     onHideClick: (() -> Unit)? = null,
+    onMoveToTopClick: (() -> Unit)? = null,
+    onMoveToBottomClick: (() -> Unit)? = null,
     onMoveUpClick: (() -> Unit)? = null,
-    onMoveDownClick: (() -> Unit)? = null
+    onMoveDownClick: (() -> Unit)? = null,
+    onResetOrderClick: (() -> Unit)? = null
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -3637,7 +3666,6 @@ fun ChannelListRow(
     )
 
     val context = LocalContext.current
-
 
     val imageRequest = remember(channel.logo) {
         ImageRequest.Builder(context)
@@ -3658,10 +3686,12 @@ fun ChannelListRow(
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale)
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() },
+                indication = null,
+                onClick = { onClick() },
+                onLongClick = { onLongClick?.invoke() }
+            ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (highlightColor != null) highlightColor.copy(alpha = 0.12f) else DeepSlate
@@ -3763,7 +3793,7 @@ fun ChannelListRow(
                     )
                 }
 
-                if (onHideClick != null || onMoveUpClick != null || onMoveDownClick != null) {
+                if (onHideClick != null || onMoveUpClick != null || onMoveDownClick != null || onMoveToTopClick != null || onMoveToBottomClick != null) {
                     Box {
                         IconButton(onClick = { showMenu = true }) {
                             Icon(
@@ -3777,9 +3807,29 @@ fun ChannelListRow(
                             onDismissRequest = { showMenu = false },
                             modifier = Modifier.background(DeepSlate)
                         ) {
+                            if (onMoveToTopClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Send to Top 🚀", color = NeonCyan, fontWeight = FontWeight.Bold) },
+                                    leadingIcon = { Icon(Icons.Default.VerticalAlignTop, contentDescription = null, tint = NeonCyan) },
+                                    onClick = {
+                                        showMenu = false
+                                        onMoveToTopClick()
+                                    }
+                                )
+                            }
+                            if (onMoveToBottomClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Send to Bottom 🔻", color = NeonPurple, fontWeight = FontWeight.Bold) },
+                                    leadingIcon = { Icon(Icons.Default.VerticalAlignBottom, contentDescription = null, tint = NeonPurple) },
+                                    onClick = {
+                                        showMenu = false
+                                        onMoveToBottomClick()
+                                    }
+                                )
+                            }
                             if (onMoveUpClick != null) {
                                 DropdownMenuItem(
-                                    text = { Text("Move Up", color = TextPrimary) },
+                                    text = { Text("Move Up ⬆️", color = TextPrimary) },
                                     leadingIcon = { Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = NeonCyan) },
                                     onClick = {
                                         showMenu = false
@@ -3789,7 +3839,7 @@ fun ChannelListRow(
                             }
                             if (onMoveDownClick != null) {
                                 DropdownMenuItem(
-                                    text = { Text("Move Down", color = TextPrimary) },
+                                    text = { Text("Move Down ⬇️", color = TextPrimary) },
                                     leadingIcon = { Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = NeonCyan) },
                                     onClick = {
                                         showMenu = false
@@ -3797,9 +3847,19 @@ fun ChannelListRow(
                                     }
                                 )
                             }
+                            if (onResetOrderClick != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Reset Order 🔄", color = Color(0xFFFF9800)) },
+                                    leadingIcon = { Icon(Icons.Default.RestartAlt, contentDescription = null, tint = Color(0xFFFF9800)) },
+                                    onClick = {
+                                        showMenu = false
+                                        onResetOrderClick()
+                                    }
+                                )
+                            }
                             if (onHideClick != null) {
                                 DropdownMenuItem(
-                                    text = { Text("Hide / Disable", color = Color.Red) },
+                                    text = { Text("Hide / Disable 🚫", color = Color.Red) },
                                     leadingIcon = { Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Color.Red) },
                                     onClick = {
                                         showMenu = false
@@ -3818,6 +3878,276 @@ fun ChannelListRow(
                     modifier = Modifier.padding(end = 4.dp)
                 )
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChannelQuickActionSheet(
+    channel: IptvChannel,
+    channelIndex: Int,
+    totalChannels: Int,
+    isFavorite: Boolean,
+    onFavoriteToggle: () -> Unit,
+    onMoveToTop: () -> Unit,
+    onMoveToBottom: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onResetOrder: () -> Unit,
+    onFloatClick: () -> Unit,
+    onHideClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = DeepSlate,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Header Row: Channel Info
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(LightAccent.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                    .border(1.dp, BorderColor, RoundedCornerShape(16.dp))
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.5f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (channel.logo.isNotBlank()) {
+                        AsyncImage(
+                            model = channel.logo,
+                            contentDescription = channel.name,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize().padding(4.dp)
+                        )
+                    } else {
+                        Icon(Icons.Default.Tv, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(28.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = channel.name,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = channel.group.ifBlank { "Live TV" },
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .background(NeonCyan.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Position: #${channelIndex + 1} / $totalChannels",
+                                color = NeonCyan,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Text(
+                text = "FAST POSITIONING & REORDER",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                color = NeonCyan,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            )
+
+            // Primary Fast-Move Row (Top & Bottom)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = {
+                        onMoveToTop()
+                        Toast.makeText(context, "Moved '${channel.name}' to the top 🚀", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                ) {
+                    Icon(Icons.Default.VerticalAlignTop, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Send to Top", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Button(
+                    onClick = {
+                        onMoveToBottom()
+                        Toast.makeText(context, "Moved '${channel.name}' to the bottom 🔻", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonPurple)
+                ) {
+                    Icon(Icons.Default.VerticalAlignBottom, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Send to Bottom", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Step by Step Move Row (Up & Down)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        onMoveUp()
+                        Toast.makeText(context, "Moved '${channel.name}' up ⬆️", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, BorderColor)
+                ) {
+                    Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Move Up", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        onMoveDown()
+                        Toast.makeText(context, "Moved '${channel.name}' down ⬇️", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, BorderColor)
+                ) {
+                    Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Move Down", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider(color = BorderColor.copy(alpha = 0.5f))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "CHANNEL ACTIONS & OPTIONS",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                color = TextSecondary,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+            )
+
+            // Action Items
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        onFavoriteToggle()
+                        onDismiss()
+                    }
+                    .padding(vertical = 10.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = null,
+                    tint = if (isFavorite) NeonMagenta else TextSecondary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Text(
+                    text = if (isFavorite) "Remove from Favorites" else "Add to Favorites",
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        onFloatClick()
+                        onDismiss()
+                    }
+                    .padding(vertical = 10.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.OpenInNew, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(22.dp))
+                Spacer(modifier = Modifier.width(14.dp))
+                Text("Open in Floating PIP Player", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        onResetOrder()
+                        Toast.makeText(context, "Reset to playlist default order 🔄", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    }
+                    .padding(vertical = 10.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.RestartAlt, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(22.dp))
+                Spacer(modifier = Modifier.width(14.dp))
+                Text("Reset to Playlist Default Order", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        onHideClick()
+                        Toast.makeText(context, "Channel hidden from view", Toast.LENGTH_SHORT).show()
+                        onDismiss()
+                    }
+                    .padding(vertical = 10.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Color.Red, modifier = Modifier.size(22.dp))
+                Spacer(modifier = Modifier.width(14.dp))
+                Text("Hide / Disable Channel", color = Color.Red, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

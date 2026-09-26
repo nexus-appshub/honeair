@@ -10,17 +10,18 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.StringReader
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 object IptvParser {
-    private val client = okhttp3.OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder()
         .dispatcher(okhttp3.Dispatcher().apply {
             maxRequests = 128
             maxRequestsPerHost = 32
         })
         .connectionPool(okhttp3.ConnectionPool(30, 5, TimeUnit.MINUTES))
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .writeTimeout(8, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .retryOnConnectionFailure(true)
@@ -33,40 +34,76 @@ object IptvParser {
         }
         .build()
 
+    private val attributePattern = Pattern.compile("([a-zA-Z0-9_\\-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s,]+))")
+
     suspend fun fetchRawContent(url: String): String = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url).build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Failed to download IPTV list: ${response.code} ${response.message}")
-            response.body?.string() ?: ""
+        var targetUrl = url.trim()
+        val requestBuilder = Request.Builder()
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+            .header("Accept", "*/*")
+            .header("Cache-Control", "no-cache, no-store, must-revalidate")
+            .header("Pragma", "no-cache")
+            .header("Expires", "0")
+
+        // For HTTP/HTTPS links (including GitHub raw links), append timestamp query to bypass CDN caching
+        if (targetUrl.startsWith("http://", ignoreCase = true) || targetUrl.startsWith("https://", ignoreCase = true)) {
+            val cacheBuster = "_ts=${System.currentTimeMillis()}"
+            val separator = if (targetUrl.contains("?")) "&" else "?"
+            val uncachedUrl = "$targetUrl$separator$cacheBuster"
+            requestBuilder.url(uncachedUrl)
+        } else {
+            requestBuilder.url(targetUrl)
         }
+
+        client.newCall(requestBuilder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                // If query param caused issue, retry with exact original URL
+                if (response.code == 404 || response.code == 400) {
+                    val fallbackReq = Request.Builder()
+                        .url(targetUrl)
+                        .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        .build()
+                    client.newCall(fallbackReq).execute().use { fbResponse ->
+                        if (!fbResponse.isSuccessful) throw Exception("Failed to download IPTV list: ${fbResponse.code} ${fbResponse.message}")
+                        val content = fbResponse.body?.string() ?: ""
+                        return@withContext cleanRawM3u(content)
+                    }
+                }
+                throw Exception("Failed to download IPTV list: ${response.code} ${response.message}")
+            }
+            val content = response.body?.string() ?: ""
+            cleanRawM3u(content)
+        }
+    }
+
+    private fun cleanRawM3u(raw: String): String {
+        var cleaned = raw
+        if (cleaned.startsWith("\uFEFF")) {
+            cleaned = cleaned.substring(1)
+        }
+        return cleaned
     }
 
     fun parseIndex(rawM3u: String): List<IptvPlaylist> {
         val playlists = mutableListOf<IptvPlaylist>()
-        val reader = BufferedReader(StringReader(rawM3u))
+        val reader = BufferedReader(StringReader(cleanRawM3u(rawM3u)))
         var currentName = ""
         var currentLogo = ""
         var currentGroup = "All"
 
         reader.forEachLine { line ->
             val trimmed = line.trim()
-            if (trimmed.startsWith("#EXTINF:")) {
-                currentName = parseAttribute(trimmed, "tvg-name")
-                if (currentName.isEmpty()) {
-                    currentName = parseAttribute(trimmed, "tvg-id")
-                }
-                currentLogo = parseAttribute(trimmed, "tvg-logo")
-                currentGroup = parseAttribute(trimmed, "group-title")
+            if (trimmed.isEmpty()) return@forEachLine
 
-                val commaIndex = trimmed.lastIndexOf(',')
-                if (commaIndex != -1 && commaIndex < trimmed.length - 1) {
-                    val displayName = trimmed.substring(commaIndex + 1).trim()
-                    if (currentName.isEmpty()) {
-                        currentName = displayName
-                    }
-                }
-            } else if (trimmed.startsWith("http")) {
-                val name = currentName.ifEmpty { trimmed.substringAfterLast("/") }
+            if (trimmed.startsWith("#EXTINF", ignoreCase = true)) {
+                val parsedMeta = parseExtinfLine(trimmed)
+                currentName = parsedMeta.displayName.ifBlank { parsedMeta.tvgName }.ifBlank { parsedMeta.tvgId }
+                currentLogo = parsedMeta.tvgLogo
+                currentGroup = parsedMeta.groupTitle.ifBlank { "All" }
+            } else if (trimmed.startsWith("#EXTGRP:", ignoreCase = true)) {
+                currentGroup = trimmed.substringAfter(":").trim().ifBlank { currentGroup }
+            } else if (!trimmed.startsWith("#")) {
+                val name = currentName.ifEmpty { trimmed.substringAfterLast("/").substringBefore("?") }.ifEmpty { "Playlist ${playlists.size + 1}" }
                 playlists.add(
                     IptvPlaylist(
                         name = name,
@@ -83,9 +120,17 @@ object IptvParser {
         return playlists
     }
 
+    data class ExtinfMetadata(
+        val displayName: String = "",
+        val tvgName: String = "",
+        val tvgLogo: String = "",
+        val groupTitle: String = "",
+        val tvgId: String = ""
+    )
+
     fun parseChannels(rawM3u: String): List<IptvChannel> {
         val channels = mutableListOf<IptvChannel>()
-        val reader = BufferedReader(StringReader(rawM3u))
+        val reader = BufferedReader(StringReader(cleanRawM3u(rawM3u)))
         var currentName = ""
         var currentLogo = ""
         var currentGroup = ""
@@ -94,19 +139,17 @@ object IptvParser {
 
         reader.forEachLine { line ->
             val trimmed = line.trim()
-            if (trimmed.startsWith("#EXTINF:")) {
-                currentName = parseAttribute(trimmed, "tvg-name")
-                currentLogo = parseAttribute(trimmed, "tvg-logo")
-                currentGroup = parseAttribute(trimmed, "group-title")
-                currentTvgId = parseAttribute(trimmed, "tvg-id")
+            if (trimmed.isEmpty()) return@forEachLine
 
-                val commaIndex = trimmed.lastIndexOf(',')
-                if (commaIndex != -1 && commaIndex < trimmed.length - 1) {
-                    val displayName = trimmed.substring(commaIndex + 1).trim()
-                    if (currentName.isEmpty()) {
-                        currentName = displayName
-                    }
-                }
+            if (trimmed.startsWith("#EXTINF", ignoreCase = true)) {
+                val meta = parseExtinfLine(trimmed)
+                // Use display name if available, otherwise tvg-name, otherwise tvg-id
+                currentName = meta.displayName.ifBlank { meta.tvgName }.ifBlank { meta.tvgId }
+                currentLogo = meta.tvgLogo
+                currentGroup = meta.groupTitle
+                currentTvgId = meta.tvgId
+            } else if (trimmed.startsWith("#EXTGRP:", ignoreCase = true)) {
+                currentGroup = trimmed.substringAfter(":").trim()
             } else if (trimmed.startsWith("#EXTVLCOPT:http-user-agent=", ignoreCase = true)) {
                 currentHeaders["User-Agent"] = trimmed.substringAfter("=", "").trim()
             } else if (trimmed.startsWith("#EXTVLCOPT:http-referrer=", ignoreCase = true) || trimmed.startsWith("#EXTVLCOPT:http-referer=", ignoreCase = true)) {
@@ -135,7 +178,7 @@ object IptvParser {
                         currentHeaders[parts[0].trim()] = parts[1].trim()
                     }
                 }
-            } else if (trimmed.startsWith("http")) {
+            } else if (!trimmed.startsWith("#")) {
                 var streamUrl = trimmed
                 val channelHeaders = mutableMapOf<String, String>()
                 channelHeaders.putAll(currentHeaders)
@@ -154,17 +197,22 @@ object IptvParser {
                     }
                 }
 
-                val name = currentName.ifEmpty { streamUrl.substringAfterLast("/") }
+                val finalName = currentName.ifEmpty {
+                    streamUrl.substringAfterLast("/").substringBefore("?").ifEmpty { "Channel ${channels.size + 1}" }
+                }
+
                 channels.add(
                     IptvChannel(
-                        name = name,
+                        name = finalName,
                         url = streamUrl,
                         logo = currentLogo,
-                        group = currentGroup.ifEmpty { "Channels" },
+                        group = currentGroup.ifEmpty { "Live TV" },
                         tvgId = currentTvgId,
                         headers = channelHeaders
                     )
                 )
+
+                // Reset per-channel metadata
                 currentName = ""
                 currentLogo = ""
                 currentGroup = ""
@@ -175,13 +223,56 @@ object IptvParser {
         return channels
     }
 
-    private fun parseAttribute(line: String, key: String): String {
-        val search = "$key=\""
-        val startIndex = line.indexOf(search)
-        if (startIndex == -1) return ""
-        val valueStart = startIndex + search.length
-        val endIndex = line.indexOf('"', valueStart)
-        if (endIndex == -1) return ""
-        return line.substring(valueStart, endIndex)
+    private fun parseExtinfLine(line: String): ExtinfMetadata {
+        // Separate attributes from display title by finding comma outside of quotes
+        var inDoubleQuotes = false
+        var inSingleQuotes = false
+        var commaIndex = -1
+
+        for (i in line.indices) {
+            val char = line[i]
+            if (char == '"' && !inSingleQuotes) {
+                inDoubleQuotes = !inDoubleQuotes
+            } else if (char == '\'' && !inDoubleQuotes) {
+                inSingleQuotes = !inSingleQuotes
+            } else if (char == ',' && !inDoubleQuotes && !inSingleQuotes) {
+                commaIndex = i
+                break
+            }
+        }
+
+        val attributesPart = if (commaIndex != -1) line.substring(0, commaIndex) else line
+        val displayName = if (commaIndex != -1 && commaIndex < line.length - 1) {
+            line.substring(commaIndex + 1).trim()
+        } else {
+            ""
+        }
+
+        var tvgName = ""
+        var tvgLogo = ""
+        var groupTitle = ""
+        var tvgId = ""
+
+        val matcher = attributePattern.matcher(attributesPart)
+        while (matcher.find()) {
+            val key = matcher.group(1)?.lowercase() ?: continue
+            val value = (matcher.group(2) ?: matcher.group(3) ?: matcher.group(4) ?: "").trim()
+            if (value.isBlank()) continue
+
+            when (key) {
+                "tvg-name" -> tvgName = value
+                "tvg-logo" -> tvgLogo = value
+                "group-title", "group" -> groupTitle = value
+                "tvg-id" -> tvgId = value
+            }
+        }
+
+        return ExtinfMetadata(
+            displayName = displayName,
+            tvgName = tvgName,
+            tvgLogo = tvgLogo,
+            groupTitle = groupTitle,
+            tvgId = tvgId
+        )
     }
 }

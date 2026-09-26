@@ -224,46 +224,22 @@ class StreamRepository(
             addLog("SYSTEM", "Fetching Channels", "Requesting channels from sub-playlist: $playlistUrl")
             val raw = IptvParser.fetchRawContent(playlistUrl)
             val parsed = IptvParser.parseChannels(raw)
-
-            val isBdPlaylist = playlistUrl.contains("bd.m3u", ignoreCase = true)
-            val isInPlaylist = playlistUrl.contains("in.m3u", ignoreCase = true)
-
-            val finalResult = if (isBdPlaylist || isInPlaylist) {
-                try {
-                    val updateChannels = updateChannelsCache ?: run {
-                        val updateUrl = "https://raw.githubusercontent.com/nexus-appshub/homeairtv.xyz/main/hmairtv.m3u8"
-                        val updateRaw = IptvParser.fetchRawContent(updateUrl)
-                        val parsedUpdate = IptvParser.parseChannels(updateRaw)
-                        updateChannelsCache = parsedUpdate
-                        parsedUpdate
-                    }
-                    
-                    val keywords = if (isBdPlaylist) {
-                        listOf("bangla", "bangladesh", "bd", "btv", "somoy", "ekattor", "jamuna", "independent", "ntv", "atn", "rtv", "gtv", "t sports", "dbc", "channel 24", "news24", "deepto", "nagorik", "boishakhi", "maasranga", "my tv", "asian tv", "bijoy", "duronto", "sa tv", "mohona", "nexus", "global tv", "gazi", "channel i")
-                    } else {
-                        listOf("india", "hindi", "star", "zee", "colors", "sony", "aaj tak", "ndtv", "abp", "sun", "vijay", "tamil", "telugu", "malayalam", "kannada", "marathi", "punjabi", "sports 18", "jio", "asianet", "sab", "goldmines", "b4u", "dangal")
-                    }
-                    
-                    val filteredFromUpdate = updateChannels.filter { ch ->
-                        val lowerName = ch.name.lowercase()
-                        val lowerGroup = ch.group.lowercase()
-                        keywords.any { kw -> lowerName.contains(kw) || lowerGroup.contains(kw) }
-                    }
-                    
-                    (filteredFromUpdate + parsed).distinctBy { if (it.url.isNotBlank()) it.url else it.name }
-                } catch (e: Exception) {
-                    parsed
-                }
-            } else {
-                parsed
-            }
-
-            channelCache[playlistUrl] = finalResult
-            addLog("SYSTEM", "Channels Load Success", "Parsed ${finalResult.size} stream channels successfully.")
-            finalResult
+            channelCache[playlistUrl] = parsed
+            addLog("SYSTEM", "Channels Load Success", "Parsed ${parsed.size} stream channels successfully.")
+            parsed
         } catch (e: Exception) {
             addLog("ERROR", "Channels Fetch Failed", "Error loading channels: ${e.localizedMessage}")
             throw e
+        }
+    }
+
+    fun clearChannelCache(url: String? = null) {
+        if (url != null) {
+            channelCache.remove(url)
+        } else {
+            channelCache.clear()
+            updateChannelsCache = null
+            playlistCache = emptyList()
         }
     }
 
