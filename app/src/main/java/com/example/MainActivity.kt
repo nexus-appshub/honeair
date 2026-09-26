@@ -696,10 +696,11 @@ fun MainAppPortal(viewModel: StreamViewModel, isInPipMode: Boolean = false) {
                             )
                         }
 
-                        val isUserVip = viewModel.isUserPremium(userProfile?.email)
+                        val isPremiumState by com.example.subscription.SubscriptionManager.isPremium.collectAsState()
+                        val isUserVip = isPremiumState || viewModel.isUserPremium(userProfile?.email)
                         if (appControlConfig?.isAdsEnabled == true && !isUserVip) {
                             NonPremiumAdBanner(
-                                title = appControlConfig?.adTitle ?: "Sponsored: Upgrade to VIP to Remove Ads",
+                                title = appControlConfig?.adTitle ?: "Special Discount Pass",
                                 clickUrl = appControlConfig?.adClickUrl ?: "",
                                 onRemoveAdsClick = { viewModel.triggerPremiumPaywall(true) }
                             )

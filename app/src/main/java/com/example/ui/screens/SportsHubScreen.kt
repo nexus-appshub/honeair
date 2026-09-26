@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -504,10 +505,10 @@ fun LiveEventsTab(
             }
 
             Column(modifier = Modifier.fillMaxSize()) {
-                // 2. CIRCULAR CATEGORY SELECTOR WITH RED BADGE COUNTERS
+                // 1. CIRCULAR CATEGORY SELECTOR WITH RED BADGE COUNTERS
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(bottom = 12.dp)
+                    modifier = Modifier.padding(vertical = 10.dp)
                 ) {
                     items(categories) { cat ->
                         val isSelected = selectedCategory == cat.id
@@ -529,7 +530,7 @@ fun LiveEventsTab(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.clickable { selectedCategory = cat.id }
                         ) {
-                            Box(modifier = Modifier.size(56.dp)) {
+                            Box(modifier = Modifier.size(54.dp)) {
                                 // Category Circle Ring
                                 Box(
                                     modifier = Modifier
@@ -538,7 +539,7 @@ fun LiveEventsTab(
                                         .background(Color(0xFF131D2D))
                                         .border(
                                             width = if (isSelected) 2.dp else 1.dp,
-                                            color = if (isSelected) Color(0xFFFF6B00) else Color(0xFF1E293B),
+                                            color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B),
                                             shape = CircleShape
                                         ),
                                     contentAlignment = Alignment.Center
@@ -567,7 +568,7 @@ fun LiveEventsTab(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = cat.name,
-                                color = if (isSelected) Color(0xFFFF6B00) else Color.Gray,
+                                color = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
                                 fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )
@@ -575,7 +576,7 @@ fun LiveEventsTab(
                     }
                 }
 
-                // 3. STATUS FILTER PILLS (All, Live, Upcoming, Recent)
+                // 2. STATUS FILTER PILLS (All, Live, Upcoming, Recent)
                 val statusList = listOf(
                     "all" to "All (${allMatches.size})",
                     "live" to "Live (${allMatches.count { it.status.equals("live", ignoreCase = true) }})",
@@ -591,10 +592,10 @@ fun LiveEventsTab(
                         val isSelected = selectedStatus == statusId
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF131D2D),
+                            color = if (isSelected) Color(0xFF132238) else Color(0xFF131D2D),
                             border = BorderStroke(
-                                width = 1.dp,
-                                color = if (isSelected) Color(0xFFFF6B00) else Color(0xFF1E293B)
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B)
                             ),
                             modifier = Modifier.clickable { selectedStatus = statusId }
                         ) {
@@ -606,14 +607,14 @@ fun LiveEventsTab(
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = null,
-                                        tint = Color(0xFFFF6B00),
+                                        tint = Color(0xFF00E5FF),
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                 }
                                 Text(
                                     text = label,
-                                    color = if (isSelected) Color(0xFFFF6B00) else Color.Gray,
+                                    color = if (isSelected) Color(0xFF00E5FF) else Color.Gray,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -622,7 +623,7 @@ fun LiveEventsTab(
                     }
                 }
 
-                // 4. MATCH EVENTS LIST
+                // 3. MATCH EVENTS LIST
                 if (filteredMatches.isEmpty()) {
                     Column(
                         modifier = Modifier
@@ -685,19 +686,28 @@ fun SportzfyEventCard(
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     val arrowRotation by animateFloatAsState(targetValue = if (isExpanded) 180f else 0f)
+    val isLive = match.status.equals("live", ignoreCase = true)
 
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF131D2D)),
-        border = BorderStroke(1.dp, Color(0xFF1E293B)),
-        modifier = Modifier.fillMaxWidth()
+        border = BorderStroke(1.dp, if (isLive) Color(0xFF00E5FF).copy(alpha = 0.5f) else Color(0xFF1E293B)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                val servers = match.servers
+                if (servers.isNullOrEmpty() || servers.size <= 1) {
+                    val server = servers?.firstOrNull() ?: StreamServer(id = "srv-1", name = "Server 1", url = "")
+                    onPlayServer(server)
+                } else {
+                    isExpanded = !isExpanded
+                }
+            }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // Header Row: Category || Tournament & Time
+            // 1. Header Row: Category || Tournament/Title (Left) & Time/Date (Right)
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -705,53 +715,75 @@ fun SportzfyEventCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
-                    val emoji = when (match.sportCategory.lowercase()) {
-                        "cricket" -> "🏏"
-                        "football", "soccer" -> "⚽"
-                        "combat", "wrestling" -> "🥊"
-                        else -> "🏎️"
+                    val (symbol, tintColor) = when (match.sportCategory.lowercase()) {
+                        "cricket" -> "🏏" to Color(0xFF00E5FF)
+                        "football", "soccer" -> "⚡" to Color(0xFFFF4D4D)
+                        "racing", "motorsports" -> "🏎️" to Color(0xFFFF9500)
+                        "combat", "wrestling" -> "🥊" to Color(0xFFFF2D55)
+                        else -> "🏆" to Color(0xFF00E5FF)
                     }
-                    Text(text = emoji, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = symbol, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "${match.sportCategory.replaceFirstChar { it.uppercase() }} || ${match.tournament ?: match.title}",
-                        color = Color.LightGray,
-                        fontSize = 11.sp,
+                        color = Color.White,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Text(
-                    text = match.startTime ?: "11:00 pm",
-                    color = Color(0xFFFF6B00), // Orange Time Text
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                )
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Cyan / Bright Time & Date on Right
+                if (isLive) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFFDC2626)
+                    ) {
+                        Text(
+                            text = "🔴 LIVE",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = match.startTime ?: "Live Now",
+                        color = Color(0xFF00E5FF),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
             }
 
-            HorizontalDivider(color = Color(0xFF1E293B), thickness = 0.5.dp)
+            HorizontalDivider(
+                color = Color(0xFF1E293B),
+                thickness = 0.6.dp,
+                modifier = Modifier.padding(vertical = 10.dp)
+            )
 
-            // Main Teams Scoreboard Row
+            // 2. Main Teams Scoreboard Row: [Logo A + Name A]  VS  [Name B + Logo B]
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Team A
+                // Team A (Left)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF1E293B)),
+                            .background(Color(0xFF1E293B))
+                            .border(1.dp, Color(0xFF2E3D56), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!match.teamA.logo.isNullOrBlank()) {
@@ -766,50 +798,70 @@ fun SportzfyEventCard(
                                 imageVector = Icons.Default.Shield,
                                 contentDescription = match.teamA.name,
                                 tint = Color(0xFFFF6B00),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = match.teamA.name,
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    if (!match.teamA.score.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "(${match.teamA.score})",
+                            color = Color(0xFFFF6B00),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
-                // VS / Score Center
+                // VS Center
                 Text(
-                    text = if (!match.teamA.score.isNullOrBlank()) "${match.teamA.score} - ${match.teamB.score ?: ""}" else "VS",
-                    color = Color(0xFFFF6B00),
-                    fontSize = 12.sp,
+                    text = "VS",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
 
-                // Team B
+                // Team B (Right)
                 Row(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
+                    if (!match.teamB.score.isNullOrBlank()) {
+                        Text(
+                            text = "(${match.teamB.score}) ",
+                            color = Color(0xFFFF6B00),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
                     Text(
                         text = match.teamB.name,
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF1E293B)),
+                            .background(Color(0xFF1E293B))
+                            .border(1.dp, Color(0xFF2E3D56), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!match.teamB.logo.isNullOrBlank()) {
@@ -824,117 +876,122 @@ fun SportzfyEventCard(
                                 imageVector = Icons.Default.Shield,
                                 contentDescription = match.teamB.name,
                                 tint = Color(0xFFFF6B00),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
                 }
             }
 
-            HorizontalDivider(color = Color(0xFF1E293B), thickness = 0.5.dp)
-
-            // Collapsible Streaming Servers Accordion Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { isExpanded = !isExpanded }
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = Color(0xFFFF6B00),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Streaming Servers",
-                        color = Color(0xFFFF6B00),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0x33FF6B00)
-                    ) {
-                        Text(
-                            text = "${match.servers?.size ?: 1} ONLINE",
-                            color = Color(0xFFFF6B00),
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = Color(0xFFFF6B00),
-                    modifier = Modifier.rotate(arrowRotation)
+            // 3. Streaming Servers Dropdown (When Available)
+            val servers = match.servers ?: emptyList()
+            if (servers.size > 1) {
+                HorizontalDivider(
+                    color = Color(0xFF1E293B),
+                    thickness = 0.5.dp,
+                    modifier = Modifier.padding(top = 10.dp)
                 )
-            }
 
-            // Expanded Server Buttons
-            AnimatedVisibility(visible = isExpanded) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable { isExpanded = !isExpanded }
                         .padding(top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val servers = match.servers ?: listOf(StreamServer("Main FHD Stream", "", "FHD"))
-                    servers.forEachIndexed { index, server ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Streaming Servers",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF0B1322),
-                            border = BorderStroke(1.dp, Color(0xFF1E293B)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPlayServer(server) }
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0x3300E5FF)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Text(
+                                text = "${servers.size} ONLINE",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.rotate(arrowRotation)
+                    )
+                }
+
+                AnimatedVisibility(visible = isExpanded) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        servers.forEachIndexed { index, server ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF0B1322),
+                                border = BorderStroke(1.dp, Color(0xFF1E293B)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPlayServer(server) }
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0x3300E5FF)
+                                        ) {
+                                            Text(
+                                                text = "S${index + 1}",
+                                                color = Color(0xFF00E5FF),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = server.name,
+                                            color = Color.LightGray,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        color = Color(0x33FF6B00)
+                                        color = Color(0xFF1E293B)
                                     ) {
                                         Text(
-                                            text = "S${index + 1}",
-                                            color = Color(0xFFFF6B00),
+                                            text = server.quality ?: "FHD",
+                                            color = Color.Gray,
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = server.name,
-                                        color = Color.LightGray,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = Color(0xFF1E293B)
-                                ) {
-                                    Text(
-                                        text = server.quality ?: "FHD",
-                                        color = Color.Gray,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
                                 }
                             }
                         }

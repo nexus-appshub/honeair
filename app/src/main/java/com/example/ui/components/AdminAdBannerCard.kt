@@ -60,13 +60,21 @@ fun AdminAdBannerCard(
     modifier: Modifier = Modifier
 ) {
     if (config == null) return
-    val isEnabled = config.isAdsEnabled || config.adBannerUrl.isNotBlank()
-    val mediaUrl = config.adBannerUrl.ifBlank { null } ?: return
-    val clickUrl = config.adClickUrl.ifBlank { null }
-    val title = config.adTitle.ifBlank { "Sponsored Announcement" }
+
+    // 1. Never show sponsor ad banner if user has VIP / Premium subscription
+    val isPremium by com.example.subscription.SubscriptionManager.isPremium.collectAsState()
+    if (isPremium) return
+
+    // 2. Never show sponsor ad banner if sponsor ads are turned off in Admin Panel / Remote Config
+    if (!config.isAdsEnabled) return
+
+    // 3. Must have a valid media URL
+    val mediaUrl = config.adBannerUrl.trim().ifBlank { null } ?: return
+    val clickUrl = config.adClickUrl.trim().ifBlank { null }
+    val title = config.adTitle.ifBlank { "Special Discount Pass" }
 
     var isDismissed by remember { mutableStateOf(false) }
-    if (!isEnabled || isDismissed) return
+    if (isDismissed) return
 
     val context = LocalContext.current
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()

@@ -118,7 +118,8 @@ data class RedeemResponse(
 )
 
 object VipApiClient {
-    private const val BASE_URL = "https://homeairtv-server.onrender.com/"
+    val BASE_URL: String
+        get() = com.example.network.AppConfigManager.DEFAULT_BACKEND_URL + "/"
 
     private val okHttpClient = OkHttpClient.Builder()
         .dispatcher(okhttp3.Dispatcher().apply {
@@ -126,7 +127,7 @@ object VipApiClient {
             maxRequestsPerHost = 16
         })
         .connectionPool(okhttp3.ConnectionPool(15, 5, TimeUnit.MINUTES))
-        .connectTimeout(15, TimeUnit.SECONDS) // Max wait for Render spin-up
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
@@ -134,7 +135,7 @@ object VipApiClient {
 
     val apiService: VipApiService by lazy {
         Retrofit.Builder()
-            .baseUrl(BASE_URL)
+            .baseUrl(com.example.network.AppConfigManager.DEFAULT_BACKEND_URL + "/")
             .client(okHttpClient)
             .addConverterFactory(MoshiConverterFactory.create())
             .build()

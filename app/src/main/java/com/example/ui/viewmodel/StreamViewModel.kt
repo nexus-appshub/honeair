@@ -1498,10 +1498,33 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                             val premiumPaywallButtonText = json.optString("premiumPaywallButtonText", "Buy Subscription Now")
                             val premiumPaywallButtonUrl = json.optString("premiumPaywallButtonUrl", "")
 
-                            val isAdsEnabled = json.optBoolean("isAdsEnabled", false)
-                            val adBannerUrl = json.optString("adBannerUrl", "")
-                            val adClickUrl = json.optString("adClickUrl", "")
-                            val adTitle = json.optString("adTitle", "Sponsored: Upgrade to VIP to Remove Ads")
+                            // Sync Dynamic Backend API URL from remote config
+                            val remoteBackendUrl = json.optString("backendApiUrl", "").ifBlank {
+                                json.optString("backend_api_url", "").ifBlank {
+                                    json.optString("apiUrl", "").ifBlank {
+                                        json.optString("serverUrl", "")
+                                    }
+                                }
+                            }.trim()
+                            if (remoteBackendUrl.isNotBlank() && remoteBackendUrl.startsWith("http") && !remoteBackendUrl.contains("onrender.com")) {
+                                com.example.network.AppConfigManager.setBackendUrl(getApplication(), remoteBackendUrl)
+                            }
+
+                            // Strict Sponsor Ads Enabled check (Default: false)
+                            val isAdsEnabled = when {
+                                json.has("isAdsEnabled") -> json.optBoolean("isAdsEnabled", false)
+                                json.has("isSponsorAdsEnabled") -> json.optBoolean("isSponsorAdsEnabled", false)
+                                json.has("sponsorAds") -> json.optBoolean("sponsorAds", false)
+                                json.has("sponsorAdsEnabled") -> json.optBoolean("sponsorAdsEnabled", false)
+                                json.has("bannerAdsEnabled") -> json.optBoolean("bannerAdsEnabled", false)
+                                json.has("isBannerAdsEnabled") -> json.optBoolean("isBannerAdsEnabled", false)
+                                json.has("is_sponsor_ads_enabled") -> json.optBoolean("is_sponsor_ads_enabled", false)
+                                json.has("is_ads_enabled") -> json.optBoolean("is_ads_enabled", false)
+                                else -> json.optBoolean("isAdsEnabled", false)
+                            }
+                            val adBannerUrl = json.optString("adBannerUrl", "").trim()
+                            val adClickUrl = json.optString("adClickUrl", "").trim()
+                            val adTitle = json.optString("adTitle", "Special Discount Pass")
 
                             val isPreSplashAdEnabled = json.optBoolean("isPreSplashAdEnabled", false) ||
                                 json.optBoolean("preSplashAdEnabled", false) ||
@@ -2002,6 +2025,174 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
     private val _sportsChannelsState = MutableStateFlow<UiState<List<com.example.data.model.SportChannel>>>(UiState.Loading)
     val sportsChannelsState: StateFlow<UiState<List<com.example.data.model.SportChannel>>> = _sportsChannelsState.asStateFlow()
 
+    private fun parseSportsEventsFromBody(body: String?): List<com.example.data.model.LiveMatch> {
+        if (body.isNullOrBlank()) return emptyList()
+        val clean = body.trim()
+        if (clean == "null" || clean == "{}" || clean == "[]") return emptyList()
+
+        val list = mutableListOf<com.example.data.model.LiveMatch>()
+
+        fun parseSingleMatchObj(obj: org.json.JSONObject, defaultId: String): com.example.data.model.LiveMatch? {
+            if (!obj.optBoolean("isActive", true)) return null
+
+            val id = obj.optString("id", defaultId).ifBlank { defaultId }
+            val title = obj.optString("title", "").ifBlank {
+                val tA = obj.optJSONObject("teamA")?.optString("name", "") ?: ""
+                val tB = obj.optJSONObject("teamB")?.optString("name", "") ?: ""
+                if (tA.isNotBlank() && tB.isNotBlank()) "$tA vs $tB" else "Live Match"
+            }
+            val sportCategory = obj.optString("sportCategory", "Football").ifBlank { "Football" }
+            val tournament = obj.optString("tournament", "").ifBlank { null }
+            val bannerUrl = obj.optString("bannerUrl", "").ifBlank { null }
+            val status = obj.optString("status", "live").ifBlank { "live" }
+            val startTime = obj.optString("startTime", "").ifBlank { null }
+            val badgeText = obj.optString("badgeText", "").ifBlank { null }
+            val description = obj.optString("description", "").ifBlank { null }
+            val isPinned = obj.optBoolean("isPinned", false)
+            val isActive = obj.optBoolean("isActive", true)
+            val viewersCount = obj.optLong("viewersCount", 0L)
+            val importanceScore = obj.optDouble("importanceScore", 0.0)
+
+            // Parse Team A
+            val teamAObj = obj.optJSONObject("teamA")
+            val teamA = if (teamAObj != null) {
+                com.example.data.model.Team(
+                    name = teamAObj.optString("name", "Team A").ifBlank { "Team A" },
+                    logo = teamAObj.optString("logo", "").ifBlank { null },
+                    score = teamAObj.optString("score", "").ifBlank { null }
+                )
+            } else {
+                val nameA = obj.optString("teamA_name", obj.optString("team1", "Team A"))
+                val logoA = obj.optString("teamA_logo", obj.optString("team1_logo", "")).ifBlank { null }
+                val scoreA = obj.optString("teamA_score", obj.optString("team1_score", "")).ifBlank { null }
+                com.example.data.model.Team(nameA, logoA, scoreA)
+            }
+
+            // Parse Team B
+            val teamBObj = obj.optJSONObject("teamB")
+            val teamB = if (teamBObj != null) {
+                com.example.data.model.Team(
+                    name = teamBObj.optString("name", "Team B").ifBlank { "Team B" },
+                    logo = teamBObj.optString("logo", "").ifBlank { null },
+                    score = teamBObj.optString("score", "").ifBlank { null }
+                )
+            } else {
+                val nameB = obj.optString("teamB_name", obj.optString("team2", "Team B"))
+                val logoB = obj.optString("teamB_logo", obj.optString("team2_logo", "")).ifBlank { null }
+                val scoreB = obj.optString("teamB_score", obj.optString("team2_score", "")).ifBlank { null }
+                com.example.data.model.Team(nameB, logoB, scoreB)
+            }
+
+            // Parse Game State
+            val gameObj = obj.optJSONObject("gameState")
+            val gameState = if (gameObj != null) {
+                com.example.data.model.GameStateInfo(
+                    minute = gameObj.optString("minute", "").ifBlank { null },
+                    period = gameObj.optString("period", "").ifBlank { null },
+                    overs = gameObj.optString("overs", "").ifBlank { null },
+                    inning = gameObj.optString("inning", "").ifBlank { null },
+                    statusText = gameObj.optString("statusText", "").ifBlank { null }
+                )
+            } else null
+
+            // Parse Servers
+            val serversArr = obj.optJSONArray("servers")
+            val servers = mutableListOf<com.example.data.model.StreamServer>()
+            if (serversArr != null) {
+                for (j in 0 until serversArr.length()) {
+                    val sObj = serversArr.optJSONObject(j) ?: continue
+                    val sUrl = sObj.optString("url", "").trim()
+                    if (sUrl.isNotBlank()) {
+                        servers.add(
+                            com.example.data.model.StreamServer(
+                                id = sObj.optString("id", "srv-$j"),
+                                name = sObj.optString("name", "Server ${j + 1}"),
+                                url = sUrl,
+                                quality = sObj.optString("quality", "1080p"),
+                                type = sObj.optString("type", "hls"),
+                                isDirect = sObj.optBoolean("isDirect", false),
+                                referer = sObj.optString("referer", "").ifBlank { null }
+                            )
+                        )
+                    }
+                }
+            } else {
+                val singleUrl = obj.optString("url", obj.optString("streamUrl", "")).trim()
+                if (singleUrl.isNotBlank()) {
+                    servers.add(
+                        com.example.data.model.StreamServer(
+                            id = "srv-1",
+                            name = "Server 1 - HD Stream",
+                            url = singleUrl,
+                            quality = "1080p",
+                            type = "hls"
+                        )
+                    )
+                }
+            }
+
+            return com.example.data.model.LiveMatch(
+                id = id,
+                title = title,
+                sportCategory = sportCategory,
+                tournament = tournament,
+                teamA = teamA,
+                teamB = teamB,
+                bannerUrl = bannerUrl,
+                status = status,
+                startTime = startTime,
+                badgeText = badgeText,
+                description = description,
+                isPinned = isPinned,
+                isActive = isActive,
+                viewersCount = viewersCount,
+                gameState = gameState,
+                importanceScore = importanceScore,
+                servers = servers
+            )
+        }
+
+        try {
+            if (clean.startsWith("[")) {
+                val arr = org.json.JSONArray(clean)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val match = parseSingleMatchObj(obj, i.toString())
+                    if (match != null) list.add(match)
+                }
+            } else if (clean.startsWith("{")) {
+                val root = org.json.JSONObject(clean)
+                val wrapperArray = root.optJSONArray("data")
+                    ?: root.optJSONArray("events")
+                    ?: root.optJSONArray("sports")
+                    ?: root.optJSONArray("matches")
+                    ?: root.optJSONArray("sportsEvents")
+
+                if (wrapperArray != null) {
+                    for (i in 0 until wrapperArray.length()) {
+                        val obj = wrapperArray.optJSONObject(i) ?: continue
+                        val match = parseSingleMatchObj(obj, i.toString())
+                        if (match != null) list.add(match)
+                    }
+                } else {
+                    val dataObj = root.optJSONObject("data") ?: root.optJSONObject("events") ?: root
+                    val keys = dataObj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        if (key == "ok" || key == "count" || key == "status" || key == "timestamp" || key == "message") continue
+                        val obj = dataObj.optJSONObject(key) ?: continue
+                        val match = parseSingleMatchObj(obj, key)
+                        if (match != null) list.add(match)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("StreamViewModel", "Error parsing sports events JSON: ${e.message}", e)
+        }
+
+        return list
+    }
+
     fun fetchSportsData() {
         // Sync app remote control first
         fetchAppControlConfig()
@@ -2011,201 +2202,142 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
             _sportsChannelsState.value = UiState.Loading
             
             val client = okhttp3.OkHttpClient.Builder()
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
                 .build()
 
-            // 1. Fetch Sports Events (using Firebase Realtime Database)
-            try {
-                val req = okhttp3.Request.Builder()
-                    .url("https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/sportsEvents.json")
-                    .header("Accept", "application/json")
-                    .build()
-                client.newCall(req).execute().use { response ->
+            // 1. Fetch Sports Events (Priority 1: Direct Firebase RTDB REST API, Priority 2: Railway REST API)
+            val dynamicBackendUrl = com.example.network.AppConfigManager.getBackendUrl(getApplication())
+            val eventEndpoints = listOf(
+                // Method 2 (Highest Priority): Direct Firebase RTDB REST API
+                com.example.network.AppConfigManager.RTDB_SPORTS_EVENTS_URL,
+                com.example.network.AppConfigManager.RTDB_SPORTS_CONFIG_URL,
+                // Method 1: Railway Backend Universal Endpoints
+                "${dynamicBackendUrl}api/sports-events/raw",
+                "${dynamicBackendUrl}api/sports/raw",
+                "${dynamicBackendUrl}api/sports-events",
+                "${dynamicBackendUrl}api/sports",
+                "${com.example.network.AppConfigManager.DEFAULT_BACKEND_URL}/api/sports-events/raw",
+                "${com.example.network.AppConfigManager.BACKUP_BACKEND_URL}/api/sports-events/raw"
+            )
+
+            var parsedEvents: List<com.example.data.model.LiveMatch> = emptyList()
+
+            for (endpoint in eventEndpoints) {
+                try {
+                    val req = okhttp3.Request.Builder()
+                        .url(endpoint)
+                        .header("Accept", "application/json")
+                        .build()
+                    val response = client.newCall(req).execute()
                     val body = response.body?.string()
-                    if (response.isSuccessful && body != null) {
-                        val list = mutableListOf<com.example.data.model.LiveMatch>()
-                        if (body.trim().startsWith("[")) {
-                            val arr = org.json.JSONArray(body)
-                            for (i in 0 until arr.length()) {
-                                val obj = arr.optJSONObject(i) ?: continue
-                                if (!obj.optBoolean("isActive", true)) continue
-                                
-                                val id = obj.optString("id", i.toString())
-                                val title = obj.optString("title")
-                                val sportCategory = obj.optString("sportCategory")
-                                val tournament = obj.optString("tournament", null)
-                                val bannerUrl = obj.optString("bannerUrl", null)
-                                val status = obj.optString("status")
-                                val startTime = obj.optString("startTime", null)
-                                val badgeText = obj.optString("badgeText", null)
+                    response.close()
 
-                                val teamAObj = obj.optJSONObject("teamA")
-                                val teamA = if (teamAObj != null) {
-                                    com.example.data.model.Team(
-                                        name = teamAObj.optString("name"),
-                                        logo = teamAObj.optString("logo", null),
-                                        score = teamAObj.optString("score", null)
-                                    )
-                                } else {
-                                    com.example.data.model.Team("Team A", null, null)
-                                }
-
-                                val teamBObj = obj.optJSONObject("teamB")
-                                val teamB = if (teamBObj != null) {
-                                    com.example.data.model.Team(
-                                        name = teamBObj.optString("name"),
-                                        logo = teamBObj.optString("logo", null),
-                                        score = teamBObj.optString("score", null)
-                                    )
-                                } else {
-                                    com.example.data.model.Team("Team B", null, null)
-                                }
-
-                                val serversArr = obj.optJSONArray("servers")
-                                val servers = mutableListOf<com.example.data.model.StreamServer>()
-                                if (serversArr != null) {
-                                    for (j in 0 until serversArr.length()) {
-                                        val sObj = serversArr.optJSONObject(j) ?: continue
-                                        servers.add(
-                                            com.example.data.model.StreamServer(
-                                                name = sObj.optString("name"),
-                                                url = sObj.optString("url")
-                                            )
-                                        )
-                                    }
-                                }
-
-                                list.add(
-                                    com.example.data.model.LiveMatch(
-                                        id = id,
-                                        title = title,
-                                        sportCategory = sportCategory,
-                                        tournament = tournament,
-                                        teamA = teamA,
-                                        teamB = teamB,
-                                        bannerUrl = bannerUrl,
-                                        status = status,
-                                        startTime = startTime,
-                                        badgeText = badgeText,
-                                        servers = servers
-                                    )
-                                )
-                            }
-                        } else {
-                            val json = org.json.JSONObject(body)
-                            val keys = json.keys()
-                            while (keys.hasNext()) {
-                                val key = keys.next()
-                                val obj = json.optJSONObject(key) ?: continue
-                                if (!obj.optBoolean("isActive", true)) continue
-
-                                val id = obj.optString("id", key)
-                                val title = obj.optString("title")
-                                val sportCategory = obj.optString("sportCategory")
-                                val tournament = obj.optString("tournament", null)
-                                val bannerUrl = obj.optString("bannerUrl", null)
-                                val status = obj.optString("status")
-                                val startTime = obj.optString("startTime", null)
-                                val badgeText = obj.optString("badgeText", null)
-
-                                val teamAObj = obj.optJSONObject("teamA")
-                                val teamA = if (teamAObj != null) {
-                                    com.example.data.model.Team(
-                                        name = teamAObj.optString("name"),
-                                        logo = teamAObj.optString("logo", null),
-                                        score = teamAObj.optString("score", null)
-                                    )
-                                } else {
-                                    com.example.data.model.Team("Team A", null, null)
-                                }
-
-                                val teamBObj = obj.optJSONObject("teamB")
-                                val teamB = if (teamBObj != null) {
-                                    com.example.data.model.Team(
-                                        name = teamBObj.optString("name"),
-                                        logo = teamBObj.optString("logo", null),
-                                        score = teamBObj.optString("score", null)
-                                    )
-                                } else {
-                                    com.example.data.model.Team("Team B", null, null)
-                                }
-
-                                val serversArr = obj.optJSONArray("servers")
-                                val servers = mutableListOf<com.example.data.model.StreamServer>()
-                                if (serversArr != null) {
-                                    for (j in 0 until serversArr.length()) {
-                                        val sObj = serversArr.optJSONObject(j) ?: continue
-                                        servers.add(
-                                            com.example.data.model.StreamServer(
-                                                name = sObj.optString("name"),
-                                                url = sObj.optString("url")
-                                            )
-                                        )
-                                    }
-                                }
-
-                                list.add(
-                                    com.example.data.model.LiveMatch(
-                                        id = id,
-                                        title = title,
-                                        sportCategory = sportCategory,
-                                        tournament = tournament,
-                                        teamA = teamA,
-                                        teamB = teamB,
-                                        bannerUrl = bannerUrl,
-                                        status = status,
-                                        startTime = startTime,
-                                        badgeText = badgeText,
-                                        servers = servers
-                                    )
-                                )
-                            }
+                    if (response.isSuccessful && !body.isNullOrBlank() && body.trim() != "null") {
+                        val events = parseSportsEventsFromBody(body)
+                        if (events.isNotEmpty()) {
+                            parsedEvents = events
+                            Log.d("StreamViewModel", "Successfully fetched ${events.size} sports events from $endpoint")
+                            break
                         }
-                        _sportsEventsState.value = UiState.Success(list)
-                    } else {
-                        _sportsEventsState.value = UiState.Error("Failed to fetch sports events: code ${response.code}")
                     }
+                } catch (e: Exception) {
+                    Log.w("StreamViewModel", "Endpoint $endpoint failed: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("StreamViewModel", "Error fetching sports events", e)
-                _sportsEventsState.value = UiState.Error(e.localizedMessage ?: "Unknown network error")
             }
+
+            _sportsEventsState.value = UiState.Success(parsedEvents)
 
             // 2. Fetch Sports Channels
-            try {
-                val req = okhttp3.Request.Builder()
-                    .url("https://homeairtv-server.onrender.com/api/channels?category=sports")
-                    .header("Accept", "application/json")
-                    .build()
-                client.newCall(req).execute().use { response ->
+            val channelEndpoints = listOf(
+                "${dynamicBackendUrl}api/channels?category=sports",
+                "${com.example.network.AppConfigManager.DEFAULT_BACKEND_URL}/api/channels?category=sports",
+                "${com.example.network.AppConfigManager.BACKUP_BACKEND_URL}/api/channels?category=sports",
+                "https://home-air-tv-xwdc-default-rtdb.asia-southeast1.firebasedatabase.app/sportsChannels.json"
+            )
+
+            var parsedChannels: List<com.example.data.model.SportChannel> = emptyList()
+
+            for (endpoint in channelEndpoints) {
+                try {
+                    val req = okhttp3.Request.Builder()
+                        .url(endpoint)
+                        .header("Accept", "application/json")
+                        .build()
+                    val response = client.newCall(req).execute()
                     val body = response.body?.string()
-                    if (response.isSuccessful && body != null) {
-                        val json = org.json.JSONObject(body)
-                        val arr = json.optJSONArray("channels") ?: org.json.JSONArray()
+                    response.close()
+
+                    if (response.isSuccessful && !body.isNullOrBlank() && body.trim() != "null") {
+                        val clean = body.trim()
                         val list = mutableListOf<com.example.data.model.SportChannel>()
-                        for (i in 0 until arr.length()) {
-                            val obj = arr.optJSONObject(i) ?: continue
-                            list.add(
-                                com.example.data.model.SportChannel(
-                                    id = obj.optString("id"),
-                                    name = obj.optString("name"),
-                                    url = obj.optString("url"),
-                                    logo = obj.optString("logo", null),
-                                    group = obj.optString("group", null),
-                                    isPremium = obj.optBoolean("isPremium", false)
+
+                        if (clean.startsWith("[")) {
+                            val arr = org.json.JSONArray(clean)
+                            for (i in 0 until arr.length()) {
+                                val obj = arr.optJSONObject(i) ?: continue
+                                list.add(
+                                    com.example.data.model.SportChannel(
+                                        id = obj.optString("id", i.toString()),
+                                        name = obj.optString("name", "Sports Channel"),
+                                        url = obj.optString("url", ""),
+                                        logo = obj.optString("logo", "").ifBlank { null },
+                                        group = obj.optString("group", "Sports Live").ifBlank { null },
+                                        isPremium = obj.optBoolean("isPremium", false)
+                                    )
                                 )
-                            )
+                            }
+                        } else if (clean.startsWith("{")) {
+                            val json = org.json.JSONObject(clean)
+                            val arr = json.optJSONArray("channels") ?: json.optJSONArray("data")
+                            if (arr != null) {
+                                for (i in 0 until arr.length()) {
+                                    val obj = arr.optJSONObject(i) ?: continue
+                                    list.add(
+                                        com.example.data.model.SportChannel(
+                                            id = obj.optString("id", i.toString()),
+                                            name = obj.optString("name", "Sports Channel"),
+                                            url = obj.optString("url", ""),
+                                            logo = obj.optString("logo", "").ifBlank { null },
+                                            group = obj.optString("group", "Sports Live").ifBlank { null },
+                                            isPremium = obj.optBoolean("isPremium", false)
+                                        )
+                                    )
+                                }
+                            } else {
+                                val keys = json.keys()
+                                while (keys.hasNext()) {
+                                    val key = keys.next()
+                                    if (key == "ok" || key == "count" || key == "status") continue
+                                    val obj = json.optJSONObject(key) ?: continue
+                                    list.add(
+                                        com.example.data.model.SportChannel(
+                                            id = obj.optString("id", key),
+                                            name = obj.optString("name", "Sports Channel"),
+                                            url = obj.optString("url", ""),
+                                            logo = obj.optString("logo", "").ifBlank { null },
+                                            group = obj.optString("group", "Sports Live").ifBlank { null },
+                                            isPremium = obj.optBoolean("isPremium", false)
+                                        )
+                                    )
+                                }
+                            }
                         }
-                        _sportsChannelsState.value = UiState.Success(list)
-                    } else {
-                        _sportsChannelsState.value = UiState.Error("Failed to fetch sports channels: code ${response.code}")
+
+                        if (list.isNotEmpty()) {
+                            parsedChannels = list
+                            Log.d("StreamViewModel", "Successfully fetched ${list.size} sports channels from $endpoint")
+                            break
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.w("StreamViewModel", "Channel Endpoint $endpoint failed: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("StreamViewModel", "Error fetching sports channels", e)
-                _sportsChannelsState.value = UiState.Error(e.localizedMessage ?: "Unknown network error")
             }
+
+            _sportsChannelsState.value = UiState.Success(parsedChannels)
         }
     }
 
