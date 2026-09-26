@@ -4171,13 +4171,24 @@ fun RelatedMediaCard(
     var posterToLoad by remember(item.imageUrl) { mutableStateOf(item.imageUrl) }
     var isLoadFailed by remember(posterToLoad) { mutableStateOf(false) }
 
-    LaunchedEffect(item.title, isAnime) {
-        if (posterToLoad.isBlank() && isAnime) {
-            val enriched = withContext(Dispatchers.IO) {
-                com.example.scraper.AnimePosterEngine.getAnimePosterAndBanner(item.title)
-            }
-            if (enriched != null && enriched.posterUrl.isNotBlank()) {
-                posterToLoad = enriched.posterUrl
+    LaunchedEffect(item.id, item.title, isAnime) {
+        if (posterToLoad.isBlank() || posterToLoad.contains("unsplash")) {
+            if (isAnime) {
+                val enriched = withContext(Dispatchers.IO) {
+                    com.example.scraper.AnimePosterEngine.getAnimePosterAndBanner(item.title)
+                }
+                if (enriched != null && enriched.posterUrl.isNotBlank()) {
+                    posterToLoad = enriched.posterUrl
+                    isLoadFailed = false
+                }
+            } else {
+                val moviePoster = withContext(Dispatchers.IO) {
+                    com.example.scraper.MovieSeriesPosterEngine.resolvePoster(item.title, item.type, item.year, item.imdbId ?: item.id)
+                }
+                if (!moviePoster.isNullOrBlank()) {
+                    posterToLoad = moviePoster
+                    isLoadFailed = false
+                }
             }
         }
     }

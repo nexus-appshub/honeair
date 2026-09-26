@@ -12489,6 +12489,27 @@ fun CompactMediaCard(
     ) {
         Column {
             var isImageLoadError by remember(item.imageUrl) { mutableStateOf(false) }
+            var resolvedPoster by remember(item.imageUrl) { mutableStateOf(item.imageUrl) }
+
+            LaunchedEffect(item.id, item.title, item.imageUrl) {
+                if (resolvedPoster.isBlank() || isImageLoadError || resolvedPoster.contains("unsplash")) {
+                    val isAnime = com.example.scraper.AnimePosterEngine.isAnime(title = item.title, category = item.category, type = item.type, id = item.id)
+                    if (isAnime) {
+                        val animeMeta = com.example.scraper.AnimePosterEngine.getAnimePosterAndBanner(item.title)
+                        if (animeMeta != null && animeMeta.posterUrl.isNotBlank()) {
+                            resolvedPoster = animeMeta.posterUrl
+                            isImageLoadError = false
+                        }
+                    } else {
+                        val moviePoster = com.example.scraper.MovieSeriesPosterEngine.resolvePoster(item.title, item.type, item.year, item.imdbId ?: item.id)
+                        if (!moviePoster.isNullOrBlank()) {
+                            resolvedPoster = moviePoster
+                            isImageLoadError = false
+                        }
+                    }
+                }
+            }
+
             val fallbackPoster = remember(item.title, item.type, item.category) {
                 val isAnime = item.category.contains("Anime", ignoreCase = true) || item.type.equals("anime", ignoreCase = true)
                 val isMovie = item.type.equals("movie", ignoreCase = true) || item.category.contains("Movie", ignoreCase = true)
@@ -12516,17 +12537,17 @@ fun CompactMediaCard(
                         )
                     )
             ) {
-                if (item.imageUrl.isNotBlank() && !isImageLoadError) {
+                val posterUrlToLoad = if (resolvedPoster.isNotBlank()) resolvedPoster else item.imageUrl
+                if (posterUrlToLoad.isNotBlank() && !isImageLoadError) {
                     val context = LocalContext.current
 
-
-                    val imageRequest = remember(item.imageUrl) {
+                    val imageRequest = remember(posterUrlToLoad) {
                         ImageRequest.Builder(context)
-                            .data(item.imageUrl)
+                            .data(posterUrlToLoad)
                             .crossfade(true)
                             .error(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
-                            .diskCacheKey(item.imageUrl)
-                            .memoryCacheKey(item.imageUrl)
+                            .diskCacheKey(posterUrlToLoad)
+                            .memoryCacheKey(posterUrlToLoad)
                             .build()
                     }
                     AsyncImage(
@@ -12541,7 +12562,6 @@ fun CompactMediaCard(
                 } else {
                     // Fallback poster image or styled placeholder
                     val context = LocalContext.current
-
 
                     AsyncImage(
                         model = ImageRequest.Builder(context)
@@ -12706,6 +12726,27 @@ fun MediaCard(
     ) {
         Column {
             var isImageLoadError by remember(item.imageUrl) { mutableStateOf(false) }
+            var resolvedPoster by remember(item.imageUrl) { mutableStateOf(item.imageUrl) }
+
+            LaunchedEffect(item.id, item.title, item.imageUrl) {
+                if (resolvedPoster.isBlank() || isImageLoadError || resolvedPoster.contains("unsplash")) {
+                    val isAnime = com.example.scraper.AnimePosterEngine.isAnime(title = item.title, category = item.category, type = item.type, id = item.id)
+                    if (isAnime) {
+                        val animeMeta = com.example.scraper.AnimePosterEngine.getAnimePosterAndBanner(item.title)
+                        if (animeMeta != null && animeMeta.posterUrl.isNotBlank()) {
+                            resolvedPoster = animeMeta.posterUrl
+                            isImageLoadError = false
+                        }
+                    } else {
+                        val moviePoster = com.example.scraper.MovieSeriesPosterEngine.resolvePoster(item.title, item.type, item.year, item.imdbId ?: item.id)
+                        if (!moviePoster.isNullOrBlank()) {
+                            resolvedPoster = moviePoster
+                            isImageLoadError = false
+                        }
+                    }
+                }
+            }
+
             val fallbackPoster = remember(item.title, item.type, item.category) {
                 val isAnime = item.category.contains("Anime", ignoreCase = true) || item.type.equals("anime", ignoreCase = true)
                 val isMovie = item.type.equals("movie", ignoreCase = true) || item.category.contains("Movie", ignoreCase = true)
@@ -12733,17 +12774,17 @@ fun MediaCard(
                         )
                     )
             ) {
-                if (item.imageUrl.isNotBlank() && !isImageLoadError) {
+                val posterUrlToLoad = if (resolvedPoster.isNotBlank()) resolvedPoster else item.imageUrl
+                if (posterUrlToLoad.isNotBlank() && !isImageLoadError) {
                     val context = LocalContext.current
 
-
-                    val imageRequest = remember(item.imageUrl) {
+                    val imageRequest = remember(posterUrlToLoad) {
                         ImageRequest.Builder(context)
-                            .data(item.imageUrl)
+                            .data(posterUrlToLoad)
                             .crossfade(true)
                             .error(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
-                            .diskCacheKey(item.imageUrl)
-                            .memoryCacheKey(item.imageUrl)
+                            .diskCacheKey(posterUrlToLoad)
+                            .memoryCacheKey(posterUrlToLoad)
                             .build()
                     }
                     AsyncImage(
@@ -12755,7 +12796,6 @@ fun MediaCard(
                     )
                 } else {
                     val context = LocalContext.current
-
 
                     AsyncImage(
                         model = ImageRequest.Builder(context)

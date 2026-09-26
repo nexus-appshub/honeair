@@ -187,15 +187,33 @@ fun MediaDetailSheet(
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
             // Hero / Banner Image / Trailer Player (Branding-free clean trailer player)
-            val imageUrl = remember(item, anikotoDetails, isAnime) {
-                if (isAnime && anikotoDetails != null && !anikotoDetails!!.posterUrl.isNullOrBlank()) {
-                    anikotoDetails!!.posterUrl
-                } else if (item.imageUrl.isNotBlank()) {
-                    item.imageUrl
+            var resolvedDetailPoster by remember(item.id, item.imageUrl) { mutableStateOf(item.imageUrl) }
+
+            LaunchedEffect(item.id, item.title, mediaDetails, anikotoDetails) {
+                if (isAnime) {
+                    if (anikotoDetails != null && !anikotoDetails!!.posterUrl.isNullOrBlank()) {
+                        resolvedDetailPoster = anikotoDetails!!.posterUrl
+                    } else if (resolvedDetailPoster.isBlank() || resolvedDetailPoster.contains("unsplash")) {
+                        val animeMeta = com.example.scraper.AnimePosterEngine.getAnimePosterAndBanner(item.title)
+                        if (animeMeta != null && animeMeta.posterUrl.isNotBlank()) {
+                            resolvedDetailPoster = animeMeta.posterUrl
+                        }
+                    }
                 } else {
-                    ""
+                    if (mediaDetails?.poster_path?.isNotBlank() == true) {
+                        resolvedDetailPoster = "https://image.tmdb.org/t/p/w500${mediaDetails?.poster_path}"
+                    } else if (mediaDetails?.backdrop_path?.isNotBlank() == true) {
+                        resolvedDetailPoster = "https://image.tmdb.org/t/p/w780${mediaDetails?.backdrop_path}"
+                    } else if (resolvedDetailPoster.isBlank() || resolvedDetailPoster.contains("unsplash")) {
+                        val moviePoster = com.example.scraper.MovieSeriesPosterEngine.resolvePoster(item.title, item.type, item.year, item.imdbId ?: item.id)
+                        if (!moviePoster.isNullOrBlank()) {
+                            resolvedDetailPoster = moviePoster
+                        }
+                    }
                 }
             }
+
+            val imageUrl = if (resolvedDetailPoster.isNotBlank()) resolvedDetailPoster else item.imageUrl
             if (imageUrl.isNotBlank() || isPlayingTrailer || isAnime) {
                 Box(
                     modifier = Modifier

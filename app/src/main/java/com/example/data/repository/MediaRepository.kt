@@ -247,8 +247,9 @@ class MediaRepository {
         addJob("Latest", "movie") { tmdbApi.getTrendingToday(page = it) }
 
         val results = jobs.awaitAll().flatten().filter { it.imageUrl.isNotEmpty() }.distinctBy { it.id }
-        val enhanced = com.example.scraper.AnimePosterEngine.enhanceMediaItems(results)
-        enhanced.sortedWith(
+        val animeEnhanced = com.example.scraper.AnimePosterEngine.enhanceMediaItems(results)
+        val fullyEnhanced = com.example.scraper.MovieSeriesPosterEngine.enhanceMediaItems(animeEnhanced)
+        fullyEnhanced.sortedWith(
             compareByDescending<MediaItem> { it.year.toIntOrNull() ?: 0 }
                 .thenByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
         )
@@ -473,7 +474,8 @@ class MediaRepository {
             fetchedList.addAll(curatedBanglaItems)
             fetchedList.retainAll { it.imageUrl.isNotEmpty() }
             val distinct = fetchedList.distinctBy { it.id }
-            com.example.scraper.AnimePosterEngine.enhanceMediaItems(distinct)
+            val animeEnhanced = com.example.scraper.AnimePosterEngine.enhanceMediaItems(distinct)
+            com.example.scraper.MovieSeriesPosterEngine.enhanceMediaItems(animeEnhanced)
         }
 
     suspend fun fetchCastMembers(id: String, type: String): List<com.example.ui.components.CastMember> = withContext(Dispatchers.IO) {
@@ -667,11 +669,8 @@ class MediaRepository {
             }
         }
         val allItems = jobs.awaitAll().flatten().filter { it.imageUrl.isNotEmpty() }.distinctBy { it.id }
-        if (catLower.contains("anime")) {
-            com.example.scraper.AnimePosterEngine.enhanceMediaItems(allItems)
-        } else {
-            allItems
-        }
+        val animeEnhanced = com.example.scraper.AnimePosterEngine.enhanceMediaItems(allItems)
+        com.example.scraper.MovieSeriesPosterEngine.enhanceMediaItems(animeEnhanced)
     }
 
     suspend fun fetchMoreMediaItems(page: Int, category: String = "All"): List<MediaItem> = coroutineScope {
@@ -764,7 +763,8 @@ class MediaRepository {
         })
  
         val fetchedList = jobs.awaitAll().flatten().filter { it.imageUrl.isNotEmpty() }.distinctBy { it.id }
-        fetchedList
+        val animeEnhanced = com.example.scraper.AnimePosterEngine.enhanceMediaItems(fetchedList)
+        com.example.scraper.MovieSeriesPosterEngine.enhanceMediaItems(animeEnhanced)
     }
 
     suspend fun searchMedia(query: String, type: String = "all"): List<MediaItem> = withContext(Dispatchers.IO) {
@@ -972,7 +972,9 @@ class MediaRepository {
                 val tmdbResults = tmdbDeferred.await()
 
                 // Combine all sources: Anikoto (Anime prioritized) + Cinemeta + TMDB
-                (anikotoResults + cinemetaResults + tmdbResults).distinctBy { it.id }
+                val combined = (anikotoResults + cinemetaResults + tmdbResults).distinctBy { it.id }
+                val animeEnhanced = com.example.scraper.AnimePosterEngine.enhanceMediaItems(combined)
+                com.example.scraper.MovieSeriesPosterEngine.enhanceMediaItems(animeEnhanced)
             }
         } catch (e: Exception) {
             e.printStackTrace()
