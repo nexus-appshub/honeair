@@ -2033,58 +2033,123 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
         val list = mutableListOf<com.example.data.model.LiveMatch>()
 
         fun parseSingleMatchObj(obj: org.json.JSONObject, defaultId: String): com.example.data.model.LiveMatch? {
-            if (!obj.optBoolean("isActive", true)) return null
-
             val id = obj.optString("id", defaultId).ifBlank { defaultId }
-            val title = obj.optString("title", "").ifBlank {
-                val tA = obj.optJSONObject("teamA")?.optString("name", "") ?: ""
-                val tB = obj.optJSONObject("teamB")?.optString("name", "") ?: ""
-                if (tA.isNotBlank() && tB.isNotBlank()) "$tA vs $tB" else "Live Match"
-            }
-            val sportCategory = obj.optString("sportCategory", "Football").ifBlank { "Football" }
-            val tournament = obj.optString("tournament", "").ifBlank { null }
-            val bannerUrl = obj.optString("bannerUrl", "").ifBlank { null }
-            val status = obj.optString("status", "live").ifBlank { "live" }
-            val startTime = obj.optString("startTime", "").ifBlank { null }
-            val badgeText = obj.optString("badgeText", "").ifBlank { null }
-            val description = obj.optString("description", "").ifBlank { null }
-            val isPinned = obj.optBoolean("isPinned", false)
-            val isActive = obj.optBoolean("isActive", true)
-            val viewersCount = obj.optLong("viewersCount", 0L)
-            val importanceScore = obj.optDouble("importanceScore", 0.0)
-
+            
             // Parse Team A
-            val teamAObj = obj.optJSONObject("teamA")
+            val teamAObj = obj.optJSONObject("teamA") ?: obj.optJSONObject("team1") ?: obj.optJSONObject("homeTeam") ?: obj.optJSONObject("home")
             val teamA = if (teamAObj != null) {
-                com.example.data.model.Team(
-                    name = teamAObj.optString("name", "Team A").ifBlank { "Team A" },
-                    logo = teamAObj.optString("logo", "").ifBlank { null },
-                    score = teamAObj.optString("score", "").ifBlank { null }
-                )
+                val name = teamAObj.optString("name", "").ifBlank {
+                    teamAObj.optString("teamName", "Team A")
+                }
+                val logo = teamAObj.optString("logo", "").ifBlank {
+                    teamAObj.optString("teamLogo", "").ifBlank {
+                        teamAObj.optString("image", "").ifBlank {
+                            teamAObj.optString("icon", "")
+                        }
+                    }
+                }.ifBlank { null }
+                val score = teamAObj.optString("score", "").ifBlank {
+                    teamAObj.optString("runs", "").ifBlank {
+                        teamAObj.optString("currentScore", "")
+                    }
+                }.ifBlank { null }
+                com.example.data.model.Team(name, logo, score)
             } else {
-                val nameA = obj.optString("teamA_name", obj.optString("team1", "Team A"))
-                val logoA = obj.optString("teamA_logo", obj.optString("team1_logo", "")).ifBlank { null }
-                val scoreA = obj.optString("teamA_score", obj.optString("team1_score", "")).ifBlank { null }
+                val nameA = obj.optString("teamA_name", obj.optString("team1_name", obj.optString("home_name", obj.optString("homeTeamName", obj.optString("teamA", obj.optString("team1", "Team A"))))))
+                val logoA = obj.optString("teamA_logo", obj.optString("team1_logo", obj.optString("home_logo", obj.optString("homeTeamLogo", obj.optString("teamA_image", ""))))).ifBlank { null }
+                val scoreA = obj.optString("teamA_score", obj.optString("team1_score", obj.optString("home_score", obj.optString("homeTeamScore", obj.optString("scoreA", ""))))).ifBlank { null }
                 com.example.data.model.Team(nameA, logoA, scoreA)
             }
 
             // Parse Team B
-            val teamBObj = obj.optJSONObject("teamB")
+            val teamBObj = obj.optJSONObject("teamB") ?: obj.optJSONObject("team2") ?: obj.optJSONObject("awayTeam") ?: obj.optJSONObject("away")
             val teamB = if (teamBObj != null) {
-                com.example.data.model.Team(
-                    name = teamBObj.optString("name", "Team B").ifBlank { "Team B" },
-                    logo = teamBObj.optString("logo", "").ifBlank { null },
-                    score = teamBObj.optString("score", "").ifBlank { null }
-                )
+                val name = teamBObj.optString("name", "").ifBlank {
+                    teamBObj.optString("teamName", "Team B")
+                }
+                val logo = teamBObj.optString("logo", "").ifBlank {
+                    teamBObj.optString("teamLogo", "").ifBlank {
+                        teamBObj.optString("image", "").ifBlank {
+                            teamBObj.optString("icon", "")
+                        }
+                    }
+                }.ifBlank { null }
+                val score = teamBObj.optString("score", "").ifBlank {
+                    teamBObj.optString("runs", "").ifBlank {
+                        teamBObj.optString("currentScore", "")
+                    }
+                }.ifBlank { null }
+                com.example.data.model.Team(name, logo, score)
             } else {
-                val nameB = obj.optString("teamB_name", obj.optString("team2", "Team B"))
-                val logoB = obj.optString("teamB_logo", obj.optString("team2_logo", "")).ifBlank { null }
-                val scoreB = obj.optString("teamB_score", obj.optString("team2_score", "")).ifBlank { null }
+                val nameB = obj.optString("teamB_name", obj.optString("team2_name", obj.optString("away_name", obj.optString("awayTeamName", obj.optString("teamB", obj.optString("team2", "Team B"))))))
+                val logoB = obj.optString("teamB_logo", obj.optString("team2_logo", obj.optString("away_logo", obj.optString("awayTeamLogo", obj.optString("teamB_image", ""))))).ifBlank { null }
+                val scoreB = obj.optString("teamB_score", obj.optString("team2_score", obj.optString("away_score", obj.optString("awayTeamScore", obj.optString("scoreB", ""))))).ifBlank { null }
                 com.example.data.model.Team(nameB, logoB, scoreB)
             }
 
+            val title = obj.optString("title", "").ifBlank {
+                obj.optString("matchTitle", "").ifBlank {
+                    obj.optString("name", "").ifBlank {
+                        obj.optString("eventName", "").ifBlank {
+                            if (teamA.name.isNotBlank() && teamB.name.isNotBlank()) "${teamA.name} vs ${teamB.name}" else "Live Match"
+                        }
+                    }
+                }
+            }
+
+            val sportCategory = obj.optString("sportCategory", "").ifBlank {
+                obj.optString("category", "").ifBlank {
+                    obj.optString("sport", "").ifBlank {
+                        obj.optString("sportType", "Football")
+                    }
+                }
+            }.ifBlank { "Football" }
+
+            val tournament = obj.optString("tournament", "").ifBlank {
+                obj.optString("league", "").ifBlank {
+                    obj.optString("series", "").ifBlank {
+                        obj.optString("competition", "")
+                    }
+                }
+            }.ifBlank { null }
+
+            val bannerUrl = obj.optString("bannerUrl", "").ifBlank {
+                obj.optString("banner", "").ifBlank {
+                    obj.optString("poster", "").ifBlank {
+                        obj.optString("image", "")
+                    }
+                }
+            }.ifBlank { null }
+
+            val status = obj.optString("status", "").ifBlank {
+                obj.optString("matchStatus", "").ifBlank {
+                    obj.optString("state", "live")
+                }
+            }.ifBlank { "live" }
+
+            val startTime = obj.optString("startTime", "").ifBlank {
+                obj.optString("time", "").ifBlank {
+                    obj.optString("date", "").ifBlank {
+                        obj.optString("matchTime", "")
+                    }
+                }
+            }.ifBlank { null }
+
+            val badgeText = obj.optString("badgeText", "").ifBlank {
+                obj.optString("badge", "")
+            }.ifBlank { null }
+
+            val description = obj.optString("description", "").ifBlank {
+                obj.optString("summary", "")
+            }.ifBlank { null }
+
+            val isPinned = obj.optBoolean("isPinned", false)
+            val isActive = obj.optBoolean("isActive", true)
+            val viewersCount = obj.optLong("viewersCount", obj.optLong("viewers", 0L))
+            val importanceScore = obj.optDouble("importanceScore", 0.0)
+
             // Parse Game State
-            val gameObj = obj.optJSONObject("gameState")
+            val gameObj = obj.optJSONObject("gameState") ?: obj.optJSONObject("gameStateInfo") ?: obj.optJSONObject("matchState")
             val gameState = if (gameObj != null) {
                 com.example.data.model.GameStateInfo(
                     minute = gameObj.optString("minute", "").ifBlank { null },
@@ -2093,31 +2158,67 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     inning = gameObj.optString("inning", "").ifBlank { null },
                     statusText = gameObj.optString("statusText", "").ifBlank { null }
                 )
-            } else null
+            } else {
+                val overs = obj.optString("overs", "").ifBlank { obj.optString("currentOver", "") }.ifBlank { null }
+                val minute = obj.optString("minute", "").ifBlank { null }
+                val period = obj.optString("period", "").ifBlank { null }
+                val inning = obj.optString("inning", "").ifBlank { null }
+                val statusText = obj.optString("statusText", "").ifBlank { obj.optString("gameStatus", "") }.ifBlank { null }
+                if (overs != null || minute != null || period != null || inning != null || statusText != null) {
+                    com.example.data.model.GameStateInfo(minute, period, overs, inning, statusText)
+                } else null
+            }
 
             // Parse Servers
             val serversArr = obj.optJSONArray("servers")
+                ?: obj.optJSONArray("streams")
+                ?: obj.optJSONArray("sources")
+                ?: obj.optJSONArray("links")
+                ?: obj.optJSONArray("channels")
+                ?: obj.optJSONArray("streamList")
+
             val servers = mutableListOf<com.example.data.model.StreamServer>()
             if (serversArr != null) {
                 for (j in 0 until serversArr.length()) {
-                    val sObj = serversArr.optJSONObject(j) ?: continue
-                    val sUrl = sObj.optString("url", "").trim()
-                    if (sUrl.isNotBlank()) {
-                        servers.add(
-                            com.example.data.model.StreamServer(
-                                id = sObj.optString("id", "srv-$j"),
-                                name = sObj.optString("name", "Server ${j + 1}"),
-                                url = sUrl,
-                                quality = sObj.optString("quality", "1080p"),
-                                type = sObj.optString("type", "hls"),
-                                isDirect = sObj.optBoolean("isDirect", false),
-                                referer = sObj.optString("referer", "").ifBlank { null }
+                    val sObj = serversArr.optJSONObject(j)
+                    if (sObj != null) {
+                        val sUrl = sObj.optString("url", "").ifBlank {
+                            sObj.optString("streamUrl", "").ifBlank {
+                                sObj.optString("link", "").ifBlank {
+                                    sObj.optString("src", "")
+                                }
+                            }
+                        }.trim()
+                        if (sUrl.isNotBlank()) {
+                            servers.add(
+                                com.example.data.model.StreamServer(
+                                    id = sObj.optString("id", "srv-$j"),
+                                    name = sObj.optString("name", "Server ${j + 1}"),
+                                    url = sUrl,
+                                    quality = sObj.optString("quality", "1080p"),
+                                    type = sObj.optString("type", "hls"),
+                                    isDirect = sObj.optBoolean("isDirect", false),
+                                    referer = sObj.optString("referer", "").ifBlank { null }
+                                )
                             )
-                        )
+                        }
+                    } else {
+                        val rawStr = serversArr.optString(j, "").trim()
+                        if (rawStr.isNotBlank() && rawStr.startsWith("http")) {
+                            servers.add(
+                                com.example.data.model.StreamServer(
+                                    id = "srv-$j",
+                                    name = "Server ${j + 1}",
+                                    url = rawStr,
+                                    quality = "1080p",
+                                    type = "hls"
+                                )
+                            )
+                        }
                     }
                 }
             } else {
-                val singleUrl = obj.optString("url", obj.optString("streamUrl", "")).trim()
+                val singleUrl = obj.optString("url", obj.optString("streamUrl", obj.optString("link", obj.optString("stream_url", "")))).trim()
                 if (singleUrl.isNotBlank()) {
                     servers.add(
                         com.example.data.model.StreamServer(
@@ -2167,6 +2268,8 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                     ?: root.optJSONArray("sports")
                     ?: root.optJSONArray("matches")
                     ?: root.optJSONArray("sportsEvents")
+                    ?: root.optJSONArray("result")
+                    ?: root.optJSONArray("items")
 
                 if (wrapperArray != null) {
                     for (i in 0 until wrapperArray.length()) {
@@ -2175,11 +2278,11 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         if (match != null) list.add(match)
                     }
                 } else {
-                    val dataObj = root.optJSONObject("data") ?: root.optJSONObject("events") ?: root
+                    val dataObj = root.optJSONObject("data") ?: root.optJSONObject("events") ?: root.optJSONObject("sports") ?: root
                     val keys = dataObj.keys()
                     while (keys.hasNext()) {
                         val key = keys.next()
-                        if (key == "ok" || key == "count" || key == "status" || key == "timestamp" || key == "message") continue
+                        if (key == "ok" || key == "count" || key == "status" || key == "timestamp" || key == "message" || key == "success") continue
                         val obj = dataObj.optJSONObject(key) ?: continue
                         val match = parseSingleMatchObj(obj, key)
                         if (match != null) list.add(match)
@@ -2208,22 +2311,24 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 .followSslRedirects(true)
                 .build()
 
-            // 1. Fetch Sports Events (Priority 1: Direct Firebase RTDB REST API, Priority 2: Railway REST API)
+            // 1. Fetch Sports Events (Priority 1: Railway Backend Universal Endpoints, Priority 2: Direct Firebase RTDB REST API)
             val dynamicBackendUrl = com.example.network.AppConfigManager.getBackendUrl(getApplication())
             val eventEndpoints = listOf(
-                // Method 2 (Highest Priority): Direct Firebase RTDB REST API
-                com.example.network.AppConfigManager.RTDB_SPORTS_EVENTS_URL,
-                com.example.network.AppConfigManager.RTDB_SPORTS_CONFIG_URL,
-                // Method 1: Railway Backend Universal Endpoints
-                "${dynamicBackendUrl}api/sports-events/raw",
-                "${dynamicBackendUrl}api/sports/raw",
+                // Method 1 (Primary - Website Active Source): Railway Backend Universal Endpoints
                 "${dynamicBackendUrl}api/sports-events",
+                "${dynamicBackendUrl}api/sports-events/raw",
                 "${dynamicBackendUrl}api/sports",
+                "${dynamicBackendUrl}api/sports/raw",
+                "${dynamicBackendUrl}api/events",
+                "${com.example.network.AppConfigManager.DEFAULT_BACKEND_URL}/api/sports-events",
                 "${com.example.network.AppConfigManager.DEFAULT_BACKEND_URL}/api/sports-events/raw",
-                "${com.example.network.AppConfigManager.BACKUP_BACKEND_URL}/api/sports-events/raw"
+                "${com.example.network.AppConfigManager.BACKUP_BACKEND_URL}/api/sports-events",
+                // Method 2: Direct Firebase RTDB REST API
+                com.example.network.AppConfigManager.RTDB_SPORTS_EVENTS_URL,
+                com.example.network.AppConfigManager.RTDB_SPORTS_CONFIG_URL
             )
 
-            var parsedEvents: List<com.example.data.model.LiveMatch> = emptyList()
+            val aggregatedEvents = mutableListOf<com.example.data.model.LiveMatch>()
 
             for (endpoint in eventEndpoints) {
                 try {
@@ -2233,14 +2338,18 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         .build()
                     val response = client.newCall(req).execute()
                     val body = response.body?.string()
+                    val isSuccess = response.isSuccessful
                     response.close()
 
-                    if (response.isSuccessful && !body.isNullOrBlank() && body.trim() != "null") {
+                    if (isSuccess && !body.isNullOrBlank() && body.trim() != "null") {
                         val events = parseSportsEventsFromBody(body)
                         if (events.isNotEmpty()) {
-                            parsedEvents = events
-                            Log.d("StreamViewModel", "Successfully fetched ${events.size} sports events from $endpoint")
-                            break
+                            Log.d("StreamViewModel", "Fetched ${events.size} sports events from $endpoint")
+                            aggregatedEvents.addAll(events)
+                            // If we already obtained a rich set of 5+ events from a primary endpoint, we have full data
+                            if (aggregatedEvents.distinctBy { it.id.ifBlank { "${it.teamA.name}_${it.teamB.name}" } }.size >= 5) {
+                                break
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -2248,7 +2357,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            _sportsEventsState.value = UiState.Success(parsedEvents)
+            val finalDistinctEvents = aggregatedEvents
+                .distinctBy { it.id.ifBlank { "${it.teamA.name}_${it.teamB.name}_${it.title}" } }
+
+            _sportsEventsState.value = UiState.Success(finalDistinctEvents)
 
             // 2. Fetch Sports Channels
             val channelEndpoints = listOf(
@@ -2268,9 +2380,10 @@ class StreamViewModel(application: Application) : AndroidViewModel(application) 
                         .build()
                     val response = client.newCall(req).execute()
                     val body = response.body?.string()
+                    val isSuccess = response.isSuccessful
                     response.close()
 
-                    if (response.isSuccessful && !body.isNullOrBlank() && body.trim() != "null") {
+                    if (isSuccess && !body.isNullOrBlank() && body.trim() != "null") {
                         val clean = body.trim()
                         val list = mutableListOf<com.example.data.model.SportChannel>()
 

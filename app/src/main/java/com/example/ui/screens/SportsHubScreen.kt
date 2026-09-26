@@ -85,103 +85,6 @@ fun SportsHubScreen(
             .fillMaxSize()
             .background(bgColor)
     ) {
-        // --- Remote Control Header & Circular Status Pill ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.SportsBasketball,
-                    contentDescription = "Sports",
-                    tint = Color(0xFFFF6B00),
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Sports Hub",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
-                    color = textColor
-                )
-            }
-
-            // Remote controllable Circular Status Button
-            val statusText = appControlConfig?.sportsTabStatusText ?: "Live"
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isLocked) Color(0xFFFF3B30).copy(alpha = 0.15f) else Color(0xFFFF6B00).copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, if (isLocked) Color(0xFFFF3B30) else Color(0xFFFF6B00)),
-                    modifier = Modifier
-                        .clickable(enabled = isLocked) { showUnlockDialog = true }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(if (isLocked) Color(0xFFFF3B30) else Color(0xFF34C759), CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isLocked) "LOCKED" else statusText.uppercase(),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = if (isLocked) Color(0xFFFF3B30) else Color(0xFFFF6B00)
-                        )
-                        if (isLocked) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Lock",
-                                tint = Color(0xFFFF3B30),
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- Custom Modern M3 Tabs ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .background(cardBgColor, RoundedCornerShape(12.dp))
-                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            val tabTitles = listOf("Live Matches", "Sports Channels")
-            tabTitles.forEachIndexed { index, title ->
-                val isSelected = selectedTab == index
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isSelected) Color(0xFFFF6B00) else Color.Transparent)
-                        .clickable { selectedTab = index }
-                        .wrapContentSize(Alignment.Center)
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        ),
-                        color = if (isSelected) Color.White else subTextColor
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         // --- Locked Sports Overlay vs Active Content ---
         if (isLocked) {
             Box(
@@ -280,26 +183,15 @@ fun SportsHubScreen(
                     .weight(1f)
                     .padding(horizontal = 12.dp)
             ) {
-                when (selectedTab) {
-                    0 -> LiveEventsTab(
-                        state = sportsEventsState,
-                        viewModel = viewModel,
-                        onNavigateToPlayer = onNavigateToPlayer,
-                        cardBgColor = cardBgColor,
-                        textColor = textColor,
-                        subTextColor = subTextColor,
-                        borderColor = borderColor
-                    )
-                    1 -> SportsChannelsTab(
-                        state = sportsChannelsState,
-                        viewModel = viewModel,
-                        onNavigateToPlayer = onNavigateToPlayer,
-                        cardBgColor = cardBgColor,
-                        textColor = textColor,
-                        subTextColor = subTextColor,
-                        borderColor = borderColor
-                    )
-                }
+                LiveEventsTab(
+                    state = sportsEventsState,
+                    viewModel = viewModel,
+                    onNavigateToPlayer = onNavigateToPlayer,
+                    cardBgColor = cardBgColor,
+                    textColor = textColor,
+                    subTextColor = subTextColor,
+                    borderColor = borderColor
+                )
             }
         }
     }
@@ -767,7 +659,7 @@ fun SportzfyEventCard(
                 modifier = Modifier.padding(vertical = 10.dp)
             )
 
-            // 2. Main Teams Scoreboard Row: [Logo A + Name A]  VS  [Name B + Logo B]
+            // 2. Main Teams Scoreboard Row: [Logo A + Name A & Score A]  VS (Game State)  [Name B & Score B + Logo B]
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -780,7 +672,7 @@ fun SportzfyEventCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF1E293B))
                             .border(1.dp, Color(0xFF2E3D56), CircleShape),
@@ -798,38 +690,70 @@ fun SportzfyEventCard(
                                 imageVector = Icons.Default.Shield,
                                 contentDescription = match.teamA.name,
                                 tint = Color(0xFFFF6B00),
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = match.teamA.name,
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (!match.teamA.score.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Text(
-                            text = "(${match.teamA.score})",
-                            color = Color(0xFFFF6B00),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            text = match.teamA.name,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (!match.teamA.score.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = match.teamA.score,
+                                color = Color(0xFFFF6B00),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
 
-                // VS Center
-                Text(
-                    text = "VS",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
+                // VS Center & Game State
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                ) {
+                    Text(
+                        text = "VS",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    val gameDetail = match.gameState?.overs?.let { "$it ov" }
+                        ?: match.gameState?.minute?.let { "${it}'" }
+                        ?: match.gameState?.period
+                        ?: match.gameState?.statusText
+                    if (!gameDetail.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFF00E5FF).copy(alpha = 0.12f),
+                            border = BorderStroke(0.5.dp, Color(0xFF00E5FF).copy(alpha = 0.3f)),
+                            modifier = Modifier.padding(top = 2.dp)
+                        ) {
+                            Text(
+                                text = gameDetail,
+                                color = Color(0xFF00E5FF),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
 
                 // Team B (Right)
                 Row(
@@ -837,28 +761,37 @@ fun SportzfyEventCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
-                    if (!match.teamB.score.isNullOrBlank()) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Text(
-                            text = "(${match.teamB.score}) ",
-                            color = Color(0xFFFF6B00),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            text = match.teamB.name,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.End
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        if (!match.teamB.score.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = match.teamB.score,
+                                color = Color(0xFFFF6B00),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.End
+                            )
+                        }
                     }
-                    Text(
-                        text = match.teamB.name,
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF1E293B))
                             .border(1.dp, Color(0xFF2E3D56), CircleShape),
@@ -876,7 +809,7 @@ fun SportzfyEventCard(
                                 imageVector = Icons.Default.Shield,
                                 contentDescription = match.teamB.name,
                                 tint = Color(0xFFFF6B00),
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
